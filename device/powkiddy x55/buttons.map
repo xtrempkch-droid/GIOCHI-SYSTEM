@@ -1,0 +1,84 @@
+# Mapa de botões — Powkiddy X55
+#
+# ## Dois DTBs possíveis, e eles NÃO são equivalentes
+#
+# | Variante | Quem registra os botões | Analógicos |
+# | --- | --- | --- |
+# | DTS **mainline** (`rk3566-powkiddy-x55.dts`) | `gpio-keys` | `adc-joystick`, faixa 15..1023 |
+# | DTS do **projeto** (ROCKNIX) | **`rocknix-joypad`** (fora da árvore) | SARADC, deadzone 216, escala 2 |
+#
+# Este arquivo serve para os **dois**, porque os códigos evdev dos 17 botões são
+# idênticos — mas só o DTS do projeto tem o botão `F` (MODE). No mainline puro ele
+# não existe.
+#
+# ## O que o build do projeto usa
+#
+# `rocknix-joypad`, nome `retrogame_joypad`, `axes: 4, hats: 0, buttons: 17`.
+# Consequência: **`rocknix-joypad.c` precisa vir junto** (fora da árvore) e o nó
+# tem de ser **filho direto da raiz** do device tree — aninhado, o
+# `platform_driver` não registra e não existe controle nenhum.
+#
+# O `rocknix-joypad` usa a API `input-polldev`, removida no Linux 6.12. Precisa do
+# shim `input-polldev.h`.
+#
+# Formato: <nome_lógico> = <CÓDIGO_EVDEV>
+
+# ── direcional ───────────────────────────────────────────────
+up      = BTN_DPAD_UP        # gpio4 PA0
+down    = BTN_DPAD_DOWN      # gpio4 PA1
+left    = BTN_DPAD_LEFT      # gpio3 PD6
+right   = BTN_DPAD_RIGHT     # gpio3 PD7
+
+# ── face ─────────────────────────────────────────────────────
+# A = EAST (confirmar), B = SOUTH (voltar). Rótulos no plástico: EAST/SOUTH.
+a       = BTN_EAST           # gpio3 PD3
+b       = BTN_SOUTH          # gpio3 PD2
+x       = BTN_NORTH          # gpio3 PD5
+y       = BTN_WEST           # gpio3 PD4
+
+# ── ombro ────────────────────────────────────────────────────
+l       = BTN_TL             # gpio3 PD0
+r       = BTN_TR             # gpio3 PC6
+l2      = BTN_TL2            # gpio3 PD1
+r2      = BTN_TR2            # gpio3 PC7
+
+# ── sistema ──────────────────────────────────────────────────
+start   = BTN_START          # gpio4 PA2
+select  = BTN_SELECT         # gpio4 PA4
+# Botão F. Só existe no DTS do projeto (mainline não tem), em gpio3 PB7.
+home    = BTN_MODE
+
+# ── clique dos analógicos ────────────────────────────────────
+thumbl  = BTN_THUMBL         # gpio4 PA7
+thumbr  = BTN_THUMBR         # gpio4 PB0
+
+# ── volume: gpio-keys mainline, separado do joypad ───────────
+volup   = KEY_VOLUMEUP       # gpio4 PA5
+voldown = KEY_VOLUMEDOWN     # gpio4 PA3
+
+# ── analógico ────────────────────────────────────────────────
+#
+# **Depende do driver**, e isto é a parte que mais confunde:
+#
+# COM `rocknix-joypad` (o DTS do projeto):
+#   io-channels = <&saradc 2>, <&saradc 3>, <&saradc 0>, <&saradc 1>
+#   nomes  key-RY, key-RX, key-LY, key-LX
+#   escala 2 · deadzone 216 · fuzz/flat 54 · tuning ±180 · poll 10 ms
+#   → a normalização é feita pelo próprio driver; não há `abs-range` para ler.
+#
+# COM `adc-joystick` (mainline puro):
+#   ABS_X 15..1023 · ABS_Y 1023..15 (invertido) · ABS_RX · ABS_RY idem
+#   abs-flat 30 · abs-fuzz 20 · poll 60 ms · centro ≈ 519
+#   → normalizar é (valor-519)/504, com inversão nos eixos Y e RY.
+#
+# Os valores abaixo são do **mainline**. Com o driver do projeto eles não se
+# aplicam — o driver entrega o eixo já escalado.
+axis_x_min = 15
+axis_x_max = 1023
+axis_y_min = 1023
+axis_y_max = 15
+axis_rx_min = 15
+axis_rx_max = 1023
+axis_ry_min = 1023
+axis_ry_max = 15
+axis_y_deadzone = 30

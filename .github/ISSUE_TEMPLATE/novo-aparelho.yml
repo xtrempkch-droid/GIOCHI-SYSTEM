@@ -1,0 +1,128 @@
+name: Novo aparelho
+description: Pedido/registro de suporte a uma placa RK3326/RK3566
+labels: [device]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Antes de abrir: leia [docs/adding-a-device.md](../../docs/adding-a-device.md) e
+        [docs/button-maps.md](../../docs/button-maps.md).
+
+        Um aparelho só entra no repositório com **DTS identificado** e **origem
+        declarada**. Sem isso o máximo que se escreve é `draft` com fragmento vazio —
+        e um aparelho que não liga é pior que um aparelho ausente, porque parece suporte.
+
+  - type: input
+    id: model
+    attributes:
+      label: Modelo
+      placeholder: Powkiddy X55, Anbernic RG353V, R35S, placa custom...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: soc
+    attributes:
+      label: SoC
+      description: Define a linha de build. RK3326 e RK3566 **não** compartilham pipeline.
+      options: [RK3566, RK3326, outro]
+    validations:
+      required: true
+
+  - type: input
+    id: dts
+    attributes:
+      label: DTS/DTB de origem
+      description: >-
+        Caminho no kernel mainline, ou repositório de terceiros **com licença**.
+        DTS de terceiro sem licença compatível não entra.
+      placeholder: rockchip/rk3566-powkiddy-x55 · ou URL do DTS
+    validations:
+      required: true
+
+  - type: dropdown
+    id: dts_origin
+    attributes:
+      label: Origem do DTS
+      options:
+        - mainline (já está no Linux)
+        - ROCKNIX / REG Linux
+        - fornecedor (BSP, decompilado do DTB)
+        - outro projeto
+        - não sei ainda
+    validations:
+      required: true
+
+  - type: dropdown
+    id: button_driver
+    attributes:
+      label: Como os botões chegam
+      description: >-
+        Isto decide se o mapa é extraível do DTS ou se depende de driver externo.
+        `rocknix-singleadc-joypad` exige driver fora da árvore — sem ele **nenhum**
+        botão funciona.
+      options:
+        - "gpio-keys (um nó por botão, linux,code em cada)"
+        - "adc-joystick (eixos por ADC, abs-range no DTS)"
+        - "rocknix-singleadc-joypad (multiplexador de ADC)"
+        - "outro"
+        - "não sei"
+    validations:
+      required: true
+
+  - type: textarea
+    id: hardware
+    attributes:
+      label: Hardware conhecido
+      render: text
+      placeholder: |
+        painel:     720x1280, driver hx8394, rotação 270
+        variantes:  existe mais de um lote de painel? quantos?
+        áudio:      RK817 em i2s1_8ch — falante por HP ou SPKO?
+        wi-fi:      RTL8821CS via SDIO
+        bluetooth:  RTL8821CS via uart1
+        usb:        gadget funciona? ou só host?
+        bateria:    capacidade, gauge
+        RAM:        1 GB / 2 GB / 4 GB
+        NPU:        tem / não tem
+        botões:     algum remapeado? (ex.: BTN_EAST é o A impresso?)
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: out_of_tree
+    attributes:
+      label: Dependência fora da árvore (mainline não basta)
+      description: Marque o que este aparelho exige além do kernel mainline.
+      options:
+        - label: Painel (driver próprio)
+        - label: Botões (driver próprio)
+        - label: Wi-Fi / Bluetooth (driver de fornecedor)
+        - label: Loader / DDR (blob de fornecedor)
+        - label: Nenhuma — mainline puro
+
+  - type: checkboxes
+    id: ready
+    attributes:
+      label: Checklist
+      options:
+        - label: Tenho o aparelho em mãos para testar
+        - label: Sei qual DTB é o correto (tela preta costuma ser DTB errado, não kernel)
+        - label: Posso rodar `evtest` e enviar a saída — é a única prova de que o mapa confere
+        - label: Aceito enviar `dmesg` completo e foto da tela
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+
+        ## Por que estas perguntas
+
+        | Pergunta | O que ela evita |
+        | --- | --- |
+        | SoC | RK3326 muda BL31, blob de DDR, defconfig de U-Boot e DTB. É um segundo pipeline, não um ajuste |
+        | Origem do DTS | DTS decompilado de fornecedor usa bindings do BSP que o mainline não conhece |
+        | Driver dos botões | Mapa herdado de outro aparelho dá botão trocado — sintoma confuso, causa invisível |
+        | Variantes de painel | O mesmo aparelho sai com telas diferentes; não há detecção automática |
+        | Falante por HP ou SPKO | Muda o roteamento do RK817; copiar de outro aparelho deixa mudo |
+        | `evtest` | O DTS diz o que o kernel registra; só o `evtest` diz o que chega |

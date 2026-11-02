@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "powkiddy-x35s",
+  "name": "Powkiddy X35S",
+  "description": "Console portátil Rockchip RK3566, tela 640x480. Device tree vindo do padrão ROCKNIX, que funciona em hardware real.",
+  "arch": "arm64",
+  "hostname": "giochi-system-x35s",
+  "buildrootDefconfig": "",
+  "buildrootFragment": "buildroot.fragment",
+  "rootfsOverlays": [
+    "rootfs-overlay"
+  ],
+  "artifacts": [
+    "sdcard.img"
+  ],
+  "runner": "ubuntu-24.04",
+  "timeoutMinutes": 300,
+  "status": "draft",
+  "bootNotes": "DTS e DTB vêm do padrão ROCKNIX (decisão de 02/11/2026). O build ainda não foi feito: falta defconfig, U-Boot, genimage e validação em hardware.",
+  "docs": "README.md"
+}

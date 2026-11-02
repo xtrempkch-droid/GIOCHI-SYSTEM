@@ -1,0 +1,38 @@
+name: Validate device tree
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    paths:
+      - "buildroot.version"
+      - "config/**"
+      - "device/**"
+      - "scripts/**"
+      - "tests/**"
+      - "docs/**"
+      - ".github/workflows/validate.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Validate devices
+        run: node scripts/validate-devices.mjs
+
+      - name: Run tests
+        run: node tests/run-all.mjs
+
+      - name: Show build matrix
+        run: node scripts/list-devices.mjs --github-matrix

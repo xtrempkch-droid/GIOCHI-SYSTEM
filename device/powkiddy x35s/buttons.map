@@ -1,0 +1,49 @@
+# Mapa de botões — Powkiddy X35S
+#
+# ATENÇÃO: mapa **herdado do antecessor** (seção `[x35s]` de `assets/buttons.map`).
+# **Não foi conferido contra o DTS do ROCKNIX** — que é a fonte decidida em
+# 02/11/2026. Tratar como provável, não como confirmado.
+#
+# O que confirma este mapa:
+#   - o antecessor rodou em hardware real com ele;
+#   - a seção `[x35s]` existe lá justamente porque este aparelho remapeia A/B/X/Y
+#     no DTS em relação ao padrão.
+#
+# O que falta:
+#   - conferir com `evtest` no aparelho;
+#   - conferir a faixa do analógico (no X55 é ADC 15..1023; aqui pode ser outra);
+#   - confirmar se existe botão HOME (o antecessor declara `BTN_MODE`).
+
+# ── direcional ───────────────────────────────────────────────
+up      = BTN_DPAD_UP
+down    = BTN_DPAD_DOWN
+left    = BTN_DPAD_LEFT
+right   = BTN_DPAD_RIGHT
+
+# ── face ─────────────────────────────────────────────────────
+# A e B invertidos em relação à X55 de propósito: o DTS deste aparelho troca os
+# códigos para manter a semântica de console (A = confirmar).
+a       = BTN_SOUTH
+b       = BTN_EAST
+x       = BTN_NORTH
+y       = BTN_WEST
+
+# ── ombro ────────────────────────────────────────────────────
+l       = BTN_TL
+r       = BTN_TR
+
+# ── sistema ──────────────────────────────────────────────────
+start   = BTN_START
+select  = BTN_SELECT
+home    = BTN_MODE
+
+# ── volume ───────────────────────────────────────────────────
+# Presente no antecessor como tecla; não confirmado neste aparelho.
+# volup   = KEY_VOLUMEUP
+# voldown = KEY_VOLUMEDOWN
+
+# ── analógico ────────────────────────────────────────────────
+# Faixa desconhecida. Não preencher por palpite: sem a faixa, normalizar erra o
+# centro e o stick fica deslocado. Ler com `evtest` ou do DTS.
+# axis_x_min =
+# axis_x_max =

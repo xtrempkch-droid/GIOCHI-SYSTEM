@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "qemu-aarch64",
+  "name": "QEMU AArch64 Virt",
+  "description": "Alvo virtual ARM64 usado como referência de CI e para validar o pipeline de build sem hardware físico.",
+  "arch": "arm64",
+  "hostname": "giochi-system-qemu",
+  "buildrootDefconfig": "qemu_aarch64_virt_defconfig",
+  "buildrootFragment": "buildroot.fragment",
+  "rootfsOverlays": [
+    "rootfs-overlay"
+  ],
+  "artifacts": [
+    "Image",
+    "rootfs.ext*"
+  ],
+  "runner": "ubuntu-24.04",
+  "timeoutMinutes": 360,
+  "status": "ready",
+  "bootNotes": "Image + rootfs ext4 para QEMU virt. Veja docs/flashing.md para o comando de inicialização.",
+  "docs": "README.md"
+}

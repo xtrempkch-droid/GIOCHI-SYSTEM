@@ -1,0 +1,11 @@
+Giochi System
+=============
+
+Esta é uma imagem de referência. O hardware real deve ser
+configurado em device/<device>/buildroot.fragment e no
+rootfs-overlay do dispositivo.
+
+Arquivos úteis:
+  /etc/giochi-system-release
+  /etc/giochi-system/device-id
+  /etc/motd

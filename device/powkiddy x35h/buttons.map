@@ -1,0 +1,28 @@
+# Mapa de botões — Powkiddy X35H
+#
+# Igual ao do X35S. O antecessor tratava as duas variantes com o mesmo mapa
+# (seção `[x35s]`), e a diferença entre elas nunca foi levantada.
+#
+# ATENÇÃO: herdado do antecessor, **não conferido no DTS do ROCKNIX**. Se o
+# hardware divergir, corrigir aqui — não no X35S, para não quebrar o outro.
+#
+# Ver o cabeçalho de `../powkiddy x35s/buttons.map` para o que falta confirmar.
+
+up      = BTN_DPAD_UP
+down    = BTN_DPAD_DOWN
+left    = BTN_DPAD_LEFT
+right   = BTN_DPAD_RIGHT
+
+a       = BTN_SOUTH
+b       = BTN_EAST
+x       = BTN_NORTH
+y       = BTN_WEST
+
+l       = BTN_TL
+r       = BTN_TR
+
+start   = BTN_START
+select  = BTN_SELECT
+home    = BTN_MODE
+
+# Analógico: faixa desconhecida, não preencher por palpite.

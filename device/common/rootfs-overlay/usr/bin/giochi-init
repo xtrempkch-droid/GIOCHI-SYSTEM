@@ -1,0 +1,136 @@
+#!/bin/sh
+# giochi-init — primeiro processo do console.
+#
+# Responsabilidade única: manter a interface viva. Ele NÃO desenha nada, não lê
+# controle e não conhece app nenhum.
+#
+# ## Por que ele existe
+#
+# O launcher não faz `fork` para abrir um jogo: faz `exec`, substituindo o próprio
+# processo. Isso evita dois processos disputando o DRM — o launcher deixa de
+# existir quando o jogo assume a tela.
+#
+# Consequência: quando o jogo termina, NÃO sobra ninguém para desenhar o launcher.
+# É este script que reinicia.
+#
+#     giochi-init ──▶ launcher ──exec──▶ jogo
+#          ▲                              │
+#          └────────── jogo termina ──────┘
+#
+# ## O que ele também resolve
+#
+# - Restaura o brilho salvo (senão o aparelho volta ao máximo a cada boot).
+# - Abre o configurador de controles quando o mapeamento precisa de conserto.
+#
+# POSIX sh de propósito: roda em busybox ash, sem bash na imagem.
+
+set -u
+
+LAUNCHER="${GIOCHI_LAUNCHER:-/opt/giochi/apps/launcher/bin/giochi-launcher}"
+CONTROLLERS="${GIOCHI_CONTROLLERS:-/opt/giochi/apps/controllers/bin/giochi-controllers}"
+
+CONFIG_DIR="${GIOCHI_CONFIG_DIR:-/user/.config/giochi}"
+SETUP_FLAG="$CONFIG_DIR/controller-setup"
+BRIGHTNESS_FILE="$CONFIG_DIR/brightness"
+
+# Quantas vezes o launcher pode cair antes de desistirmos. Sem isso, um launcher
+# quebrado entra em laço de reinício e a tela pisca sem parar — pior que uma
+# mensagem de erro parada.
+RESTART_MAX=5
+RESTART_WINDOW=60
+
+log() {
+    printf 'giochi-init: %s\n' "$1" >&2
+}
+
+uptime_seconds() {
+    # /proc/uptime em vez de `date`: sempre existe, não depende de RTC correto.
+    cut -d. -f1 /proc/uptime 2>/dev/null || echo 0
+}
+
+restore_brightness() {
+    [ -r "$BRIGHTNESS_FILE" ] || return 0
+
+    value=$(cat "$BRIGHTNESS_FILE" 2>/dev/null)
+    case "$value" in
+        ''|*[!0-9]*) log "brilho salvo inválido, ignorando"; return 0 ;;
+    esac
+
+    for backlight in /sys/class/backlight/*; do
+        [ -w "$backlight/brightness" ] || continue
+        max=$(cat "$backlight/max_brightness" 2>/dev/null)
+        case "$max" in
+            ''|*[!0-9]*) continue ;;
+        esac
+        if [ "$value" -gt "$max" ]; then
+            value=$max
+        fi
+        printf '%s' "$value" > "$backlight/brightness" 2>/dev/null \
+            && log "brilho restaurado para $value/$max em $backlight"
+        return 0
+    done
+
+    log "nenhum backlight gravável encontrado"
+}
+
+# Se o mapeamento de botões estiver errado, o usuário não consegue navegar até a
+# tela de configuração — o ovo e a galinha. Por isso o configurador roda ANTES,
+# quando o sinalizador existe.
+run_controller_setup() {
+    [ -e "$SETUP_FLAG" ] || return 0
+
+    if [ ! -x "$CONTROLLERS" ]; then
+        log "sinalizador de setup existe, mas $CONTROLLERS não é executável"
+        return 0
+    fi
+
+    log "abrindo configurador de controles"
+    "$CONTROLLERS"
+    status=$?
+    log "configurador saiu com $status"
+    rm -f "$SETUP_FLAG"
+}
+
+main() {
+    restore_brightness
+    run_controller_setup
+
+    if [ ! -x "$LAUNCHER" ]; then
+        log "launcher não encontrado ou não executável: $LAUNCHER"
+        log "nada a fazer; saindo"
+        exit 1
+    fi
+
+    restarts=0
+    window_start=0
+
+    while :; do
+        now=$(uptime_seconds)
+
+        # Janela deslizante: se passou tempo suficiente desde a primeira falha,
+        # zera a contagem. Um launcher saudável nunca chega perto do limite.
+        if [ $((now - window_start)) -ge $RESTART_WINDOW ]; then
+            restarts=0
+            window_start=$now
+        fi
+
+        "$LAUNCHER"
+        status=$?
+        restarts=$((restarts + 1))
+
+        log "launcher saiu com $status (reinício $restarts de $RESTART_MAX na janela de ${RESTART_WINDOW}s)"
+
+        if [ "$restarts" -gt "$RESTART_MAX" ]; then
+            log "launcher falhou $restarts vezes seguidas; parando de reiniciar"
+            log "para recuperar: remover $SETUP_FLAG? não — ver docs/troubleshooting"
+            # Não reinicia mais. Dorme para não consumir CPU, mas o processo
+            # continua vivo para o kernel não entrar em pânico por falta de init.
+            while :; do sleep 3600; done
+        fi
+
+        # Um intervalo curto evita loop apertado em falha instantânea.
+        sleep 1
+    done
+}
+
+main "$@"

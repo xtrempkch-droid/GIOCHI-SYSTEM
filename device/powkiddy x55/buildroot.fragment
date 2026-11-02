@@ -1,0 +1,43 @@
+# Powkiddy X55 — fragmento BUILDROOT
+#
+# Só símbolos `BR2_*`. Configuração de kernel (`CONFIG_*`) fica em
+# `linux.fragment`, que é outro arquivo e outro estágio do build.
+#
+# ## O que falta para este fragmento bastar
+#
+# 1. `buildrootDefconfig` em `device.json` — hoje vazio. Sem isso o device não
+#    entra no build (`status` continua `draft`).
+# 2. `BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES` apontando para `linux.fragment`.
+#    O caminho tem de ser absoluto, e por isso é injetado pelo
+#    `build-device.sh` — não pode ficar escrito aqui.
+# 3. DTS com `&rng { status = "okay" }` (o mainline deixa o TRNG desligado no
+#    rk356x e o rk3568.dtsi, que ligaria, não é usado pela X55).
+
+# ── plataforma ───────────────────────────────────────────────
+# Cortex-A55 — o RK3566 tem A55, não A53.
+BR2_cortex_a55=y
+
+# ── kernel ───────────────────────────────────────────────────
+# O DTS é mainline: arch/arm64/boot/dts/rockchip/rk3566-powkiddy-x55.dts
+BR2_LINUX_KERNEL_USE_INTREE_DTS=y
+BR2_LINUX_KERNEL_INTREE_DTS_NAME="rk3566-powkiddy-x55"
+
+# ── U-Boot ───────────────────────────────────────────────────
+# Defconfig mainline para esta placa.
+BR2_TARGET_UBOOT=y
+BR2_TARGET_UBOOT_BOARDNAME="powkiddy-x55-rk3566"
+BR2_TARGET_UBOOT_NEEDS_PYTHON3=y
+BR2_TARGET_UBOOT_NEEDS_PYLIBFDT=y
+# TPL/SPL do Rockchip: precisa dos blobs do rkbin.
+BR2_TARGET_UBOOT_NEEDS_ROCKCHIP_RKBIN=y
+
+# ── pacotes mínimos ──────────────────────────────────────────
+BR2_PACKAGE_BUSYBOX=y
+
+# ── o que NÃO está aqui, de propósito ────────────────────────
+#
+# - `BR2_PACKAGE_SDL2` e o launcher: são do Giochi app, não do sistema. O
+#   `Config.in` do pacote escolhe isso. O sistema entrega kernel + rootfs; a
+#   camada de app entra pelo overlay do `Giochi os`.
+# - RTL8821CS: driver de fornecedor, vira pacote próprio quando decidirmos se o
+#   X55 terá rádio. Sem ele o sistema liga e funciona.

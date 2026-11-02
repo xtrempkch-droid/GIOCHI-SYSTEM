@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "example-device",
+  "name": "Example Device",
+  "description": "Template para um novo dispositivo. Copie esta pasta, renomeie, ajuste o id e remova os campos que não se aplicam.",
+  "arch": "arm64",
+  "hostname": "giochi-system-example",
+  "buildrootDefconfig": "",
+  "buildrootFragment": "buildroot.fragment",
+  "rootfsOverlays": [
+    "rootfs-overlay"
+  ],
+  "artifacts": [
+    "sdcard.img"
+  ],
+  "runner": "ubuntu-24.04",
+  "timeoutMinutes": 300,
+  "status": "draft",
+  "bootNotes": "Documente aqui como a imagem inicializa e como gravá-la.",
+  "docs": "README.md"
+}

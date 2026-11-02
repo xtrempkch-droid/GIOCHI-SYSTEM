@@ -1,0 +1,25 @@
+{
+  "name": "giochi-system",
+  "version": "0.1.0",
+  "description": "Imagens Linux ARM64 mínimas e reproduzíveis para dispositivos, construídas com Buildroot e GitHub Actions.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "validate": "node scripts/validate-devices.mjs",
+    "devices": "node scripts/list-devices.mjs",
+    "matrix": "node scripts/list-devices.mjs --github-matrix",
+    "test": "node tests/run-all.mjs",
+    "build:qemu": "bash scripts/build-device.sh qemu-aarch64"
+  },
+  "keywords": [
+    "linux",
+    "arm64",
+    "buildroot",
+    "handheld",
+    "github-actions",
+    "embedded"
+  ]
+}

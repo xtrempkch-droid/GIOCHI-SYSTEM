@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "r35s",
+  "name": "R35S",
+  "description": "Console portátil Rockchip RK3326, tela 640x480. Device tree vindo do padrão ROCKNIX, que funciona em hardware real.",
+  "arch": "arm64",
+  "hostname": "giochi-system-r35s",
+  "buildrootDefconfig": "",
+  "buildrootFragment": "buildroot.fragment",
+  "rootfsOverlays": [
+    "rootfs-overlay"
+  ],
+  "artifacts": [
+    "sdcard.img"
+  ],
+  "runner": "ubuntu-24.04",
+  "timeoutMinutes": 300,
+  "status": "draft",
+  "bootNotes": "SoC RK3326 (não RK3566): sem NPU, Mali-G31, 1 GB de RAM. É o mesmo SoC da família rk3326-generic, então o fragmento de kernel tende a ser compartilhado. DTS do padrão ROCKNIX. Build nunca executado.",
+  "docs": "README.md"
+}

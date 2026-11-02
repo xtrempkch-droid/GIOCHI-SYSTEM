@@ -1,0 +1,20 @@
+# Buildroot output and local caches
+out/
+work/
+.cache/
+buildroot-*.tar.gz
+*.img
+*.img.xz
+*.img.gz
+*.ext2
+*.ext4
+*.log
+
+# Node (não há dependências hoje, mas mantém o repo limpo)
+node_modules/
+
+# Editores e sistema
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

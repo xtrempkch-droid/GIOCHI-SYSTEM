@@ -1,0 +1,8 @@
+Giochi System — QEMU AArch64 Virt
+=================================
+
+Imagem de referência para máquinas virtuais ARM64.
+Use docs/flashing.md para o comando do QEMU.
+
+Hostname: giochi-system-qemu
+Device ID: qemu-aarch64

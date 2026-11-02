@@ -1,0 +1,12 @@
+Giochi System
+=============
+
+Linux ARM64 mínimo, reproduzível e construído com Buildroot.
+
+- Usuário: root
+- Senha padrão: giochi (troque antes de distribuir)
+- Rede: DHCP em eth0 quando o hardware oferecer Ethernet
+- SSH: habilitado pelo pacote OpenSSH
+- Documentação: /etc/giochi-system/README e docs/ no repositório
+
+Para reconstruir: https://github.com/xtrempkch-droid/GIOCHI-SYSTEM

@@ -1,0 +1,12 @@
+# Steam Deck (x86_64)
+#
+# O pipeline padrão é ARM64. Este placeholder existe para manter
+# a árvore pronta para uma variante x86_64 quando o hardware for
+# adicionado:
+#   - kernel e firmware específicos do Steam Deck;
+#   - áudio, Wi-Fi, Bluetooth e controle (hid-steam);
+#   - layout de armazenamento/partições;
+#   - imagem de recuperação e instruções de instalação.
+#
+# Para habilitar, preencha buildrootDefconfig em device.json,
+# ajuste arch para x86_64 e marque enabled=true em devices.json.

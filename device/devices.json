@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "defaultArch": "arm64",
+  "devices": [
+    {
+      "id": "qemu-aarch64",
+      "folder": "qemu-aarch64",
+      "arch": "arm64",
+      "enabled": true
+    },
+    {
+      "id": "powkiddy-x55",
+      "folder": "powkiddy x55",
+      "arch": "arm64",
+      "enabled": false
+    },
+    {
+      "id": "powkiddy-x35s",
+      "folder": "powkiddy x35s",
+      "arch": "arm64",
+      "enabled": false
+    },
+    {
+      "id": "powkiddy-x35h",
+      "folder": "powkiddy x35h",
+      "arch": "arm64",
+      "enabled": false
+    },
+    {
+      "id": "r35s",
+      "folder": "r35s",
+      "arch": "arm64",
+      "enabled": false
+    },
+    {
+      "id": "steamdeck",
+      "folder": "steamdeck",
+      "arch": "x86_64",
+      "enabled": false
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+Giochi System — Steam Deck
+==========================
+
+Placeholder x86_64. O pipeline padrão deste repositório é ARM64;
+esta pasta existe para uma futura variante Giochi System para o
+Steam Deck.
+
+Device ID: steamdeck

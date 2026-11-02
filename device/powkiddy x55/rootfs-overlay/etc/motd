@@ -1,0 +1,8 @@
+Giochi System — Powkiddy X55
+============================
+
+Placeholder de dispositivo. A imagem ainda não inicializa no
+hardware real até que kernel, DTB, U-Boot e genimage do RK3566
+sejam configurados.
+
+Device ID: powkiddy-x55

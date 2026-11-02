@@ -1,0 +1,35 @@
+# ============================================================
+# Giochi System — configuração comum a todos os dispositivos
+# ============================================================
+# Este fragmento é aplicado depois do defconfig de cada device.
+# Opções específicas de hardware devem ficar no fragmento do
+# dispositivo, em device/<device>/buildroot.fragment.
+#
+# A senha de root, o hostname, o issue e os overlays são
+# definidos por scripts/prepare-config.mjs durante o build.
+
+# Pacotes básicos de operação e diagnóstico.
+BR2_PACKAGE_BASH=y
+BR2_PACKAGE_CA_CERTIFICATES=y
+BR2_PACKAGE_CURL=y
+BR2_PACKAGE_DOSFSTOOLS=y
+BR2_PACKAGE_E2FSPROGS=y
+BR2_PACKAGE_HTOP=y
+BR2_PACKAGE_LESS=y
+BR2_PACKAGE_NANO=y
+BR2_PACKAGE_OPENSSH=y
+BR2_PACKAGE_PROCPS_NG=y
+BR2_PACKAGE_RSYNC=y
+BR2_PACKAGE_STRACE=y
+BR2_PACKAGE_UTIL_LINUX=y
+
+# Console serial legível em placas e handhelds.
+BR2_TARGET_GENERIC_GETTY_BAUDRATE_115200=y
+
+# Imagem de rootfs em ext4; o tamanho pode ser sobrescrito no
+# fragmento do dispositivo.
+BR2_TARGET_ROOTFS_EXT2=y
+BR2_TARGET_ROOTFS_EXT2_4=y
+
+# O Buildroot gera um usuário root com a senha configurada no
+# build (padrão: giochi-system). Troque antes de distribuir imagens.

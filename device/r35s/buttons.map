@@ -1,0 +1,58 @@
+# Mapa de botões — R35S / R36S (RK3326)
+#
+# Fonte: `rocknix-singleadc-joypad`, nó `r36s_Gamepad`, lido do DTB
+# `rk3326-gameconsole-r36s.dtb` — o que o `extlinux.conf` da unidade ativa.
+# Registrado em docs/r35s-rk3326.md §9.5 do repositório Ouvila (2026-10-30).
+#
+# ── ATENÇÃO: este mapa depende de driver fora da árvore ──────
+#
+# Os botões NÃO vêm de `gpio-keys`. Vêm do driver `rocknix-singleadc-joypad`,
+# que lê **um** canal de ADC por meio de multiplexador (`amux-a` gpio3 p.11,
+# `amux-b` gpio3 p.8, `amux-en` gpio3 p.13, saradc canal 1, amux-count=4).
+#
+# Sem esse driver no kernel, estes códigos não existem e nenhum botão funciona.
+# O mainline não tem driver nem DTS para esta placa.
+#
+# ── 17 botões, e o que cada código significa ────────────────
+
+# ── direcional ───────────────────────────────────────────────
+up      = BTN_DPAD_UP        # 0x220
+down    = BTN_DPAD_DOWN      # 0x221
+left    = BTN_DPAD_LEFT      # 0x222
+right   = BTN_DPAD_RIGHT     # 0x223
+
+# ── face ─────────────────────────────────────────────────────
+# Igual à X55: A = EAST, B = SOUTH.
+a       = BTN_EAST           # 0x131
+b       = BTN_SOUTH          # 0x130
+x       = BTN_NORTH          # 0x133
+y       = BTN_WEST           # 0x134
+
+# ── ombro ────────────────────────────────────────────────────
+# ATENÇÃO ao agrupamento: o driver usa BTN_TL/BTN_TR para L1/L2 e
+# BTN_TL2/BTN_TR2 para R1/R2. Não é o padrão (BTN_TR costuma ser R1).
+# Veio assim do DTB; conferir com `evtest` antes de confiar.
+l       = BTN_TL             # 0x136  L1
+l2      = BTN_TR             # 0x137  L2
+r       = BTN_TL2            # 0x138  R1
+r2      = BTN_TR2            # 0x139  R2
+
+# ── sistema ──────────────────────────────────────────────────
+start   = BTN_START          # 0x13b
+select  = BTN_SELECT         # 0x13a
+home    = BTN_MODE           # 0x13c  rotulado FN no aparelho
+
+# ── clique dos analógicos ────────────────────────────────────
+thumbl  = BTN_THUMBL         # 0x13d  L3
+thumbr  = BTN_THUMBR         # 0x13e  R3
+
+# ── analógico ────────────────────────────────────────────────
+# Os dois sticks também passam pelo multiplexador de ADC, não por `adc-joystick`.
+# A faixa é definida pelo driver, não pelo DTS — não há `abs-range` para ler.
+# NÃO preencher por palpite: ler com `evtest` no aparelho.
+#
+# O launcher, sem a faixa, deixa o eixo em zero (analógico não funciona, mas a
+# navegação por D-pad continua).
+
+# ── volume ───────────────────────────────────────────────────
+# Não há nós de volume neste DTB. Se existirem no aparelho, devem ser KEY_*.

@@ -1,0 +1,6 @@
+# Powkiddy X35S — fragmento Buildroot
+#
+# Vazio de propósito: o kernel, o DTS e o U-Boot deste aparelho ainda não foram
+# levantados. Preencher só depois de decidir o caminho do DTB (ROCKNIX).
+#
+# Ver device/README.md e docs/button-maps.md.

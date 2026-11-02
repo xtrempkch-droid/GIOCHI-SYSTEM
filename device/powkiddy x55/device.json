@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "powkiddy-x55",
+  "name": "Powkiddy X55",
+  "description": "Handheld com SoC Rockchip RK3566 (ARM64). Placeholder: defconfig, kernel, DTB, U-Boot e layout de partições precisam ser definidos para o hardware real.",
+  "arch": "arm64",
+  "hostname": "giochi-system-x55",
+  "buildrootDefconfig": "",
+  "buildrootFragment": "buildroot.fragment",
+  "rootfsOverlays": [
+    "rootfs-overlay"
+  ],
+  "artifacts": [
+    "sdcard.img"
+  ],
+  "runner": "ubuntu-24.04",
+  "timeoutMinutes": 360,
+  "status": "draft",
+  "bootNotes": "Pendente: adicionar U-Boot, DTB do RK3566, firmware e genimage específicos do X55.",
+  "docs": "README.md"
+}

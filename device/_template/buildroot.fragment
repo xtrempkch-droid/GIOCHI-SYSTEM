@@ -1,0 +1,12 @@
+# Template de configuração Buildroot específica do dispositivo.
+#
+# Copie o fragmento para device/<seu-dispositivo>/buildroot.fragment
+# e adicione apenas o que for exclusivo do hardware. Opções comuns
+# ficam em config/common.fragment.
+#
+# Exemplos:
+# BR2_TARGET_ROOTFS_EXT2_SIZE="1024M"
+# BR2_LINUX_KERNEL_DTS_SUPPORT=y
+# BR2_LINUX_KERNEL_INTREE_DTS_NAME="rockchip/rk3566-example"
+# BR2_TARGET_UBOOT=y
+# BR2_TARGET_UBOOT_BOARD_DEFCONFIG="example-rk3566"

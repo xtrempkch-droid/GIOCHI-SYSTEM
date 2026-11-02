@@ -1,0 +1,10 @@
+#!/usr/bin/env node
+// Roda todos os testes em um único processo.
+//
+// Por que não `node --test tests/`: o runner do node:test spawna um processo
+// por arquivo, e sob o sandbox de arquivos isso falha com `spawn EPERM`.
+// Importar os arquivos aqui registra todos os testes no mesmo processo, o que
+// também funciona no CI e dá a saída completa de uma vez.
+import "./devices.test.mjs";
+import "./assert-config.test.mjs";
+import "./fdt.test.mjs";

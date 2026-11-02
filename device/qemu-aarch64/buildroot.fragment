@@ -1,0 +1,9 @@
+# QEMU AArch64 virt: alvo de referência do pipeline.
+# Aumenta o rootfs para acomodar os pacotes comuns.
+
+BR2_TARGET_ROOTFS_EXT2_SIZE="512M"
+
+# Não compile o QEMU de host dentro da imagem; o binário do
+# runner/local já é usado para inicializar a VM.
+# BR2_PACKAGE_HOST_QEMU is not set
+# BR2_PACKAGE_HOST_QEMU_SYSTEM_MODE is not set

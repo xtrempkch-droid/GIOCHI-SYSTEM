@@ -1,0 +1,134 @@
+# Powkiddy X55 — fragmento de KERNEL
+#
+# Aplicado ao `.config` do kernel via `BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES`.
+# NÃO é fragmento de Buildroot: símbolo `CONFIG_*` aqui não vira `BR2_*`.
+#
+# Conteúdo organizado por prioridade de falha: display, armazenamento, input,
+# depois o resto.
+#
+# Símbolo com "CONFERIR" no comentário é o que não pude validar contra a árvore do
+# kernel 6.12. Se o build parar em `assert-config` citando um deles, é nome errado.
+
+# ── display: o bloco mais frágil ─────────────────────────────
+#
+# ARMADILHA MEDIDA: o PHY DSI **tem de ser =y, nunca =m**.
+# Como módulo ele carrega depois do controlador DSI, o painel recebe -517
+# (EPROBE_DEFER) e desiste. Resultado: nenhum /dev/dri/card0, tela preta, e nenhuma
+# mensagem que ligue o sintoma à causa.
+CONFIG_DRM=y
+CONFIG_DRM_ROCKCHIP=y
+CONFIG_DRM_DW_MIPI_DSI=y
+CONFIG_PHY_ROCKCHIP_INNO_DSIDPHY=y
+CONFIG_DRM_PANEL_HIMAX_HX8394=y
+CONFIG_DRM_PANFROST=y
+CONFIG_FRAMEBUFFER_CONSOLE=y
+CONFIG_DRM_FBDEV_EMULATION=y
+
+# PWM4 alimenta o backlight: período 25000 ns (40 kHz).
+CONFIG_BACKLIGHT_CLASS_DEVICE=y
+CONFIG_BACKLIGHT_PWM=y
+CONFIG_PWM=y
+CONFIG_PWM_ROCKCHIP=y
+
+# ── energia: RK817 ───────────────────────────────────────────
+CONFIG_MFD_RK8XX_I2C=y
+CONFIG_REGULATOR=y
+CONFIG_REGULATOR_RK808=y
+CONFIG_RTC_CLASS=y
+CONFIG_RTC_DRV_RK808=y
+CONFIG_INPUT_RK805_PWRKEY=y
+
+# CONFERIR: driver de carga do RK817. Se não existir, o sistema funciona — só não
+# mostra carga nem estado da bateria.
+CONFIG_CHARGER_RK817=y
+
+# ── armazenamento ────────────────────────────────────────────
+CONFIG_MMC=y
+CONFIG_MMC_DW=y
+CONFIG_MMC_DW_ROCKCHIP=y
+CONFIG_MMC_SDHCI=y
+CONFIG_MMC_SDHCI_OF_DWCMSHC=y
+
+# ── entrada: 17 botões + 4 eixos ────────────────────────────
+#
+# NÃO é gpio-keys. Os botões e analógicos passam pelo `rocknix-joypad`
+# (fora da árvore): 17 botões GPIO + 4 eixos por SARADC.
+# Só o volume é gpio-keys mainline.
+CONFIG_INPUT=y
+CONFIG_INPUT_EVDEV=y
+CONFIG_INPUT_JOYSTICK=y
+CONFIG_JOYSTICK_ROCKNIX=y
+CONFIG_KEYBOARD_GPIO=y
+
+# SARADC: os 4 eixos do joypad (io-channels 2,3,0,1 → key-RY/RX/LY/LX).
+CONFIG_IIO=y
+CONFIG_ROCKCHIP_SARADC=y
+
+# ── áudio: RK817 em I2S ──────────────────────────────────────
+#
+# ARMADILHA MEDIDA (custou uma imagem sem áudio): o `olddefconfig` descarta o
+# filho em silêncio se o pai estiver unset. Sem `ROCKCHIP_I2S` o
+# `simple-audio-card` fica em deferred probe para sempre ("parse error") e não
+# existe placa de som. Precisam estar os três: pai, I2S e I2S_TDM.
+#
+# Segunda armadilha: o `Playback Mux` do RK817 tem de ficar em **HP**. O
+# amplificador do falante é alimentado por HPOL/HPOR; em SPK o aparelho fica mudo
+# (o SPK DAC é class-D interno e não está roteado nesta placa).
+CONFIG_SOUND=y
+CONFIG_SND=y
+CONFIG_SND_SOC=y
+CONFIG_SND_SOC_ROCKCHIP=y
+CONFIG_SND_SOC_ROCKCHIP_I2S=y
+CONFIG_SND_SOC_ROCKCHIP_I2S_TDM=y
+CONFIG_SND_SOC_RK817=y
+CONFIG_SND_SIMPLE_CARD=y
+
+# ── USB ──────────────────────────────────────────────────────
+CONFIG_PHY_ROCKCHIP_INNO_USB2=y
+CONFIG_PHY_ROCKCHIP_NANENG_COMBO_PHY=y
+CONFIG_USB_DWC3=y
+CONFIG_USB_DWC3_DUAL_ROLE=y
+CONFIG_USB_XHCI_HCD=y
+CONFIG_USB_GADGET=y
+CONFIG_USB_CONFIGFS=y
+
+# ── energia / CPU ────────────────────────────────────────────
+CONFIG_ARM_ROCKCHIP_CPUFREQ=y
+CONFIG_ROCKCHIP_THERMAL=y
+
+# ── entropia ─────────────────────────────────────────────────
+#
+# ARMADILHA MEDIDA: o TRNG do RK3566 fica desligado no `rk356x.dtsi` (quem liga é o
+# `rk3568.dtsi`, e a X55 é rk3566). Sem ele não há fonte de entropia: o crng
+# inicializa tarde e `getrandom()` bloqueia — medido em 11 s num boot e 1024 s em
+# outro.
+#
+# Isto só resolve com o nó `&rng { status = "okay" }` no DTS. O DTS mainline não
+# traz — ver `docs/x55-bringup.md`.
+CONFIG_HW_RANDOM=y
+CONFIG_HW_RANDOM_ROCKCHIP=y
+
+# ── Wi-Fi: RTL8821CS por SDIO ───────────────────────────────
+#
+# TEM driver mainline: família `rtw88`. Só o firmware precisa estar em
+# /lib/firmware/rtw88/rtw8821c_fw.bin (vem do linux-firmware).
+#
+# Pode ser =m (ao contrário do PHY DSI, que exige =y). O SDIO precisa de
+# `no-mmc` / `no-sd` / `sd-uhs-sdr50` no `&sdmmc1` do DTS, senão o probe falha
+# com -110 e o wlan0 não aparece.
+CONFIG_RTW88=m
+CONFIG_RTW88_SDIO=m
+CONFIG_RTW88_8821CS=m
+
+# ── Bluetooth: mesmo chip, por UART em 3 fios ───────────────
+#
+# O chip é tratado como H5 de três fios via o fallback `rtl8723bs-bt`, mesmo o DTS
+# declarando 4 fios com RTS/CTS — funciona porque o `btrtl` liga o flow control
+# por comando do firmware.
+#
+# Armadilha: o `rtl8821cs_config.bin` do linux-firmware NÃO serve (sem entrada de
+# offset 0x0c). Precisa do arquivo gerado de 25 bytes. Ver docs/x55-bringup.md.
+CONFIG_BT=y
+CONFIG_BT_HCIUART=m
+CONFIG_BT_HCIUART_RTL=y
+CONFIG_BT_HCIUART_3WIRE=y

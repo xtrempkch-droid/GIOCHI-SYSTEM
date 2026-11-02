@@ -1,0 +1,8 @@
+# R35S — fragmento Buildroot
+#
+# Vazio de propósito: os símbolos de kernel/driver deste aparelho ainda não foram
+# levantados.
+#
+# Ponto de partida quando for preencher: é RK3326, o mesmo SoC do
+# `rk3326-generic`. O fragmento tende a ser quase idêntico ao dele, mudando o DTS
+# e o driver de painel.

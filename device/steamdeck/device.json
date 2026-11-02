@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "steamdeck",
+  "name": "Steam Deck",
+  "description": "Handheld x86_64 da Valve. Placeholder para uma futura variante Giochi System; o pipeline padrão é ARM64, mas o modelo de dispositivo aceita arquiteturas diferentes.",
+  "arch": "x86_64",
+  "hostname": "giochi-system-steamdeck",
+  "buildrootDefconfig": "",
+  "buildrootFragment": "buildroot.fragment",
+  "rootfsOverlays": [
+    "rootfs-overlay"
+  ],
+  "artifacts": [
+    "*.img"
+  ],
+  "runner": "ubuntu-24.04",
+  "timeoutMinutes": 360,
+  "status": "draft",
+  "bootNotes": "Pendente: kernel, firmware, áudio, Wi-Fi, controle e layout de armazenamento do Steam Deck.",
+  "docs": "README.md"
+}

@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "powkiddy-x35h",
+  "name": "Powkiddy X35H",
+  "description": "Console portátil Rockchip RK3566, tela 640x480, variante do X35S. Device tree e mapa de botões compartilhados com o X35S.",
+  "arch": "arm64",
+  "hostname": "giochi-system-x35h",
+  "buildrootDefconfig": "",
+  "buildrootFragment": "buildroot.fragment",
+  "rootfsOverlays": [
+    "rootfs-overlay"
+  ],
+  "artifacts": [
+    "sdcard.img"
+  ],
+  "runner": "ubuntu-24.04",
+  "timeoutMinutes": 300,
+  "status": "draft",
+  "bootNotes": "Compartilha DTS e mapa de botões com o X35S (decisão de 02/11/2026). A diferença entre as duas variantes ainda não foi levantada.",
+  "docs": "README.md"
+}
