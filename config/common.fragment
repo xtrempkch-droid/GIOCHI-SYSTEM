@@ -9,6 +9,12 @@
 # definidos por scripts/prepare-config.mjs durante o build.
 
 # Pacotes básicos de operação e diagnóstico.
+#
+# BR2_PACKAGE_BUSYBOX_SHOW_OTHERS libera os pacotes que o BusyBox já fornece
+# (bash, less, procps-ng e outros). Sem ele o `olddefconfig` DESCARTARIA os
+# três em silêncio — foi o que o `assert-config` pegou no primeiro build real.
+# O defconfig do QEMU deixa essa opção desligada.
+BR2_PACKAGE_BUSYBOX_SHOW_OTHERS=y
 BR2_PACKAGE_BASH=y
 BR2_PACKAGE_CA_CERTIFICATES=y
 BR2_PACKAGE_CURL=y
