@@ -34,10 +34,23 @@ BR2_PACKAGE_RSYNC=y
 BR2_PACKAGE_STRACE=y
 BR2_PACKAGE_UTIL_LINUX=y
 
-# `giochi-selftest` precisa de um binário para PROVAR que EGL/GLES e scanout
-# funcionam — checar /dev/dri só mostra que o driver carregou. kmscube desenha
-# de verdade e apresenta na tela; se ele roda, 3D está de pé.
-BR2_PACKAGE_KMSCUBE=y
+# kmscube NÃO entra aqui.
+#
+# `BR2_PACKAGE_KMSCUBE` não sobrevive ao olddefconfig no 2024.02: ele depende da
+# pilha mesa3d (GBM + OpenGL ES + libdrm), que o defconfig do QEMU não liga. Ligar
+# só o kmscube não basta — arrasta mesa inteiro, e num aparelho real o custo é
+# outro (Mali via panfrost).
+#
+# Consequência assumida: `giochi-selftest` marca o bloco 3D como SKIP e DIZ que
+# não pode provar EGL/GLES, em vez de assumir que funciona. Provar 3D exige
+# habilitar a pilha gráfica por aparelho, com a GPU daquele SoC.
+#
+# Para habilitar no futuro, no fragmento DO DISPOSITIVO (não no comum):
+#   BR2_PACKAGE_MESA3D=y
+#   BR2_PACKAGE_MESA3D_GBM=y
+#   BR2_PACKAGE_MESA3D_OPENGL_ES=y
+#   BR2_PACKAGE_KMSCUBE=y
+# e confirmar que os quatro sobrevivem ao assert-config.
 
 # Console serial legível em placas e handhelds.
 BR2_TARGET_GENERIC_GETTY_BAUDRATE_115200=y
