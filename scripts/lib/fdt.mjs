@@ -34,8 +34,9 @@ const CODE_NAMES = new Map([
   [0x221, "BTN_DPAD_DOWN"],
   [0x222, "BTN_DPAD_LEFT"],
   [0x223, "BTN_DPAD_RIGHT"],
-  [0x114, "KEY_VOLUMEDOWN"],
-  [0x115, "KEY_VOLUMEUP"],
+  // KEY_VOLUMEDOWN = 114 = 0x72 · KEY_VOLUMEUP = 115 = 0x73
+  [0x72, "KEY_VOLUMEDOWN"],
+  [0x73, "KEY_VOLUMEUP"],
 ]);
 
 /** Símbolo do kernel → nome lógico do mapa. */
@@ -221,6 +222,11 @@ export function buttonsFromFdt(root) {
   walkFdt(root, (node, path) => {
     const compatible = readStringListProp(node.props, "compatible");
     const isKeys = compatible.includes("gpio-keys") || compatible.includes("gpio-keys-polled");
+    // Drivers da ROCKNIX também hospedam botões: filhos `swN` com `linux,code`,
+    // igual ao gpio-keys. Sem isto, os aparelhos que usam esses drivers (R35S,
+    // R36S, X55 do projeto) apareceriam com "nenhum botão encontrado".
+    const isRocknixJoypad =
+      compatible.includes("rocknix-singleadc-joypad") || compatible.includes("rocknix-joypad");
     const isAdc = compatible.includes("adc-joystick");
 
     if (isAdc) {
@@ -242,7 +248,7 @@ export function buttonsFromFdt(root) {
       return;
     }
 
-    if (!isKeys) return;
+    if (!isKeys && !isRocknixJoypad) return;
 
     for (const button of node.children) {
       const code = readU32Prop(button.props, "linux,code");
