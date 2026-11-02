@@ -30,6 +30,11 @@ on:
         required: false
         default: ""
         type: string
+      allow_draft:
+        description: "Incluir rascunho que já declare defconfig (ex.: powkiddy-x55)"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -80,6 +85,9 @@ jobs:
         env:
           REQUESTED_DEVICE: ${{ github.event.inputs.device || 'all' }}
           REQUESTED_ARCH: ${{ github.event.inputs.arch || 'arm64' }}
+          # Rascunho só entra na matriz se declarar defconfig — quem garante
+          # isso é o list-devices, não este YAML.
+          ALLOW_DRAFT: ${{ github.event.inputs.allow_draft == 'true' && '1' || '0' }}
         run: |
           node scripts/validate-devices.mjs
           MATRIX="$(node scripts/list-devices.mjs --github-matrix --device "$REQUESTED_DEVICE" --arch "$REQUESTED_ARCH")"
@@ -99,6 +107,9 @@ jobs:
       GIOCHI_SYSTEM_CACHE_DIR: ${{ github.workspace }}/.cache
       GIOCHI_SYSTEM_WORK_DIR: ${{ github.workspace }}/work
       GIOCHI_SYSTEM_CCACHE_DIR: ${{ github.workspace }}/.cache/ccache
+      # O `build-device.sh` recusa device desabilitado sem isto. Mesmo valor do
+      # `discover`: só entra rascunho que declarou defconfig.
+      ALLOW_DRAFT: ${{ github.event.inputs.allow_draft == 'true' && '1' || '0' }}
 
     steps:
       - name: Checkout

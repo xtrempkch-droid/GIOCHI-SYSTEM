@@ -2,20 +2,23 @@
   "schemaVersion": 1,
   "id": "powkiddy-x55",
   "name": "Powkiddy X55",
-  "description": "Handheld com SoC Rockchip RK3566 (ARM64). Placeholder: defconfig, kernel, DTB, U-Boot e layout de partições precisam ser definidos para o hardware real.",
+  "description": "Handheld Rockchip RK3566 (4x Cortex-A55, Mali-G52, 2 GB), painel MIPI-DSI Himax HX8394 720x1280. Base Buildroot derivada do defconfig que bootou em hardware real no antecessor GIOCHI-KONSOL-OS.",
   "arch": "arm64",
   "hostname": "giochi-system-x55",
-  "buildrootDefconfig": "",
+  "buildrootDefconfig": "giochi_x55_defconfig",
   "buildrootFragment": "buildroot.fragment",
   "rootfsOverlays": [
     "rootfs-overlay"
   ],
   "artifacts": [
-    "sdcard.img"
+    "Image",
+    "rootfs.ext4",
+    "idbloader.img",
+    "u-boot.itb"
   ],
   "runner": "ubuntu-24.04",
   "timeoutMinutes": 360,
   "status": "draft",
-  "bootNotes": "Pendente: adicionar U-Boot, DTB do RK3566, firmware e genimage específicos do X55.",
+  "bootNotes": "DTS mainline desde a v6.8 (rockchip/rk3566-powkiddy-x55), kernel 6.12, U-Boot mainline 2024.10 (defconfig powkiddy-x55-rk3566), DDR+BL31 do rkbin (rk3566_ddr_1056MHz_v1.18 / rk3568_bl31_v1.43). Console ttyS2 a 1500000n8. Painel HX8394 720x1280 com rotation=270, backlight em pwm4 (25000 ns); o PHY DSI precisa ser =y, nunca =m, senão o painel recebe EPROBE_DEFER e não existe /dev/dri/card0. Áudio RK817 por i2s1_8ch: o Playback Mux tem de ficar em HP, senão o aparelho fica mudo. Os 17 botões dependem do driver FORA DA ÁRVORE rocknix-joypad (nó na raiz do DT, mais o shim input-polldev removido no 6.12); sem ele só o volume funciona. Wi-Fi/BT RTL8821CS integrados: o Bluetooth exige rtl8821cs_config.bin gerado de 25 bytes (o do linux-firmware não serve). Falta para bootar de cartão: genimage/idbloader e os patches de DTS documentados em README.md.",
   "docs": "README.md"
 }

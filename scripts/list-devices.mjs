@@ -30,10 +30,14 @@ const args = parseArgs(process.argv.slice(2));
 const index = await loadIndex();
 const arch = args.arch || index.defaultArch;
 const deviceId = args.device || "all";
+// `--allow-draft` (ou ALLOW_DRAFT=1) inclui rascunhos que já declaram
+// buildrootDefconfig. É o que permite tentar um aparelho novo no CI antes de
+// ligá-lo na matriz normal.
+const allowDraft = Boolean(args["allow-draft"]) || process.env.ALLOW_DRAFT === "1";
 
 try {
   if (args["github-matrix"]) {
-    const matrix = await buildGithubMatrix({ arch, deviceId });
+    const matrix = await buildGithubMatrix({ arch, deviceId, allowDraft });
     process.stdout.write(`${JSON.stringify(matrix)}\n`);
   } else {
     const { devices, errors } = await loadAllDevices();

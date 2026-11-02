@@ -3,13 +3,15 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 function parseArgs(argv) {
-  const args = { fragments: [], overlays: [] };
+  const args = { fragments: [], overlays: [], kernelFragments: [] };
   for (let index = 0; index < argv.length; index += 1) {
     const item = argv[index];
     if (item === "--fragment") {
       args.fragments.push(argv[++index]);
     } else if (item === "--overlay") {
       args.overlays.push(argv[++index]);
+    } else if (item === "--kernel-fragment") {
+      args.kernelFragments.push(argv[++index]);
     } else if (item.startsWith("--")) {
       args[item.slice(2)] = argv[++index];
     } else {
@@ -140,6 +142,29 @@ for (const overlay of args.overlays) {
   if (!overlays.includes(resolved)) overlays.push(resolved);
 }
 lines = setKey(lines, "BR2_ROOTFS_OVERLAY", quote(overlays.join(" ")));
+
+// Fragmentos de KERNEL (símbolos `CONFIG_*`). O Buildroot exige caminho
+// ABSOLUTO aqui, então a resolução acontece neste ponto — o fragmento do
+// aparelho não pode escrever o próprio caminho.
+//
+// Sem esta linha o `linux.fragment` de um aparelho é um arquivo morto: o kernel
+// compila apenas com o defconfig da arquitetura, e o hardware existe no DTS sem
+// funcionar (painel, áudio, controles). Erro silencioso clássico.
+const kernelFragments = [];
+for (const kernelFragment of args.kernelFragments) {
+  if (!kernelFragment) continue;
+  if (!existsSync(kernelFragment)) {
+    throw new Error(`Fragmento de kernel não encontrado: ${kernelFragment}`);
+  }
+  kernelFragments.push(path.resolve(kernelFragment));
+}
+if (kernelFragments.length > 0) {
+  lines = setKey(
+    lines,
+    "BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES",
+    quote(kernelFragments.join(" ")),
+  );
+}
 
 writeFileSync(args.config, `${lines.join("\n")}\n`, "utf8");
 console.log(

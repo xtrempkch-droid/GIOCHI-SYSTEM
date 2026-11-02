@@ -1,0 +1,155 @@
+# ============================================================
+# Powkiddy X55 — defconfig BASE do Buildroot
+# ============================================================
+# Este arquivo é copiado para `buildroot/configs/<buildrootDefconfig>` pelo
+# `scripts/build-device.sh` antes de `make <defconfig>`. É a base; o
+# `config/common.fragment` e o `buildroot.fragment` deste aparelho são mesclados
+# depois, e `linux.fragment` entra pelo `BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES`.
+#
+# ## Proveniência (conferir antes de confiar)
+#
+# Derivado do defconfig que **bootou em hardware real** no antecessor
+# `GIOCHI-KONSOL-OS` (`buildroot/configs/giochi_x55_defconfig`), com três
+# diferenças conscientes:
+#
+# 1. Sem `$(BR2_EXTERNAL_*)`: lá os scripts de board, os fragmentos e os pacotes
+#    `BR2_PACKAGE_GIOCHI_*` moram numa árvore externa. Aqui não existe árvore
+#    externa — o que era dela está neste repositório ou foi retirado.
+# 2. Sem os pacotes de interface (`GIOCHI_LAUNCHER`, `GIOCHI_MUSIC`, ...): este
+#    repositório entrega o sistema, o app entra pelo `Giochi os`.
+# 3. **glibc em vez de musl.** O antecessor usou musl e funcionou; aqui fica a
+#    libc padrão do Buildroot para não divergir do que já foi compilado no CI
+#    para o QEMU. Trocar é decisão consciente, não acidente.
+#
+# Nenhum símbolo abaixo foi verificado contra a árvore do 2024.02 por leitura:
+# quem faz isso é o `assert-config` no primeiro build, falhando com o nome na
+# mão. Símbolo errado = erro visível, não imagem errada.
+
+# ── plataforma ───────────────────────────────────────────────
+# RK3566 = 4× Cortex-A55 (não A53), Mali-G52.
+BR2_aarch64=y
+BR2_cortex_a55=y
+BR2_TOOLCHAIN_BUILDROOT_CXX=y
+BR2_TARGET_OPTIMIZATION="-O3 -pipe"
+
+# ── rootfs ───────────────────────────────────────────────────
+# ext4: o layout de boot documentado do aparelho tem o rootfs em ext4 na
+# partição 2.
+BR2_TARGET_ROOTFS_EXT2=y
+BR2_TARGET_ROOTFS_EXT2_4=y
+BR2_TARGET_ROOTFS_EXT2_SIZE="1024M"
+
+# ── kernel: 6.12 ─────────────────────────────────────────────
+# 6.12 é o mínimo real: o DTS da X55 existe desde a v6.8, e o `input-polldev`
+# usado pelo joypad foi REMOVIDO no 6.12 (por isso existe o shim). Em kernel
+# mais antigo o DTS não existe; em mais novo o shim muda.
+BR2_LINUX_KERNEL=y
+BR2_LINUX_KERNEL_CUSTOM_VERSION=y
+BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE="6.12"
+# arm64 tem UM defconfig no kernel (arch/arm64/configs/defconfig). NÃO usar
+# BR2_LINUX_KERNEL_USE_DEFCONFIG: o Buildroot acrescenta "_defconfig" ao valor
+# e "defconfig" vira "defconfig_defconfig" → "Can't find default configuration".
+BR2_LINUX_KERNEL_USE_ARCH_DEFAULT_CONFIG=y
+BR2_LINUX_KERNEL_IMAGE=y
+BR2_LINUX_KERNEL_DTS_SUPPORT=y
+# DTS mainline, sem patch. O prefixo `rockchip/` é obrigatório: sem ele o
+# Buildroot procura em arch/arm64/boot/dts/ e não em .../dts/rockchip/.
+BR2_LINUX_KERNEL_INTREE_DTS_NAME="rockchip/rk3566-powkiddy-x55"
+
+# ── U-Boot: mainline 2024.10 ─────────────────────────────────
+# O defconfig `powkiddy-x55-rk3566` só existe a partir da 2024.07. O Buildroot
+# 2024.02 traz a 2024.01 por padrão — sem o pin abaixo, o defconfig não existe
+# e o build para aqui.
+BR2_TARGET_UBOOT=y
+BR2_TARGET_UBOOT_BUILD_SYSTEM_KCONFIG=y
+BR2_TARGET_UBOOT_CUSTOM_VERSION=y
+BR2_TARGET_UBOOT_CUSTOM_VERSION_VALUE="2024.10"
+BR2_TARGET_UBOOT_BOARD_DEFCONFIG="powkiddy-x55-rk3566"
+BR2_TARGET_UBOOT_NEEDS_PYTHON3=y
+BR2_TARGET_UBOOT_NEEDS_PYLIBFDT=y
+BR2_TARGET_UBOOT_NEEDS_OPENSSL=y
+BR2_TARGET_UBOOT_NEEDS_PYELFTOOLS=y
+BR2_TARGET_UBOOT_NEEDS_UTIL_LINUX=y
+BR2_TARGET_UBOOT_NEEDS_GNUTLS=y
+# DDR + BL31 vêm do rkbin (blob da Rockchip). Caminhos conferidos em b4558da0.
+BR2_TARGET_UBOOT_NEEDS_ROCKCHIP_RKBIN=y
+BR2_PACKAGE_ROCKCHIP_RKBIN=y
+BR2_PACKAGE_ROCKCHIP_RKBIN_TPL_FILENAME="bin/rk35/rk3566_ddr_1056MHz_v1.18.bin"
+BR2_PACKAGE_ROCKCHIP_RKBIN_BL31_FILENAME="bin/rk35/rk3568_bl31_v1.43.elf"
+
+# ── pilha gráfica ────────────────────────────────────────────
+# O GPU é Mali-G52 e o driver é panfrost (medido no features.txt do Mesa:
+# GL 3.1 / GLES 3.1, sem Vulkan). kmsro fala com o rockchip-drm e delega o
+# render ao panfrost.
+BR2_PACKAGE_MESA3D=y
+BR2_PACKAGE_MESA3D_GALLIUM_DRIVER_PANFROST=y
+# swrast não é luxo: sem ele, se o panfrost não subir, não existe NENHUM
+# caminho de render e o EGL falha com uma mensagem que não aponta a causa.
+# Os dois .so são hardlink da mesma biblioteca, então a imagem quase não cresce.
+BR2_PACKAGE_MESA3D_GALLIUM_DRIVER_SWRAST=y
+BR2_PACKAGE_MESA3D_OPENGL_ES=y
+BR2_PACKAGE_MESA3D_OPENGL_EGL=y
+BR2_PACKAGE_LIBDRM=y
+BR2_PACKAGE_SDL2=y
+# KMSDRM depende de SDL2_OPENGL||SDL2_OPENGLES além de libdrm/gbm/egl. Sem o
+# OPENGLES o Kconfig DESCARTA o KMSDRM em silêncio e o SDL2 fica sem driver de
+# vídeo com /dev/dri/card0 perfeitamente funcional.
+BR2_PACKAGE_SDL2_OPENGLES=y
+BR2_PACKAGE_SDL2_KMSDRM=y
+BR2_PACKAGE_SDL2_IMAGE=y
+
+# ── áudio ────────────────────────────────────────────────────
+BR2_PACKAGE_ALSA_LIB=y
+BR2_PACKAGE_ALSA_UTILS=y
+BR2_PACKAGE_MPG123=y
+BR2_PACKAGE_FLAC=y
+BR2_PACKAGE_LIBVORBIS=y
+
+# ── utilitários base ─────────────────────────────────────────
+# KMOD_TOOLS depende de BUSYBOX_SHOW_OTHERS (ligado no comum). O modprobe do
+# kmod resolve modules.dep.bin/softdeps/blacklist; o do BusyBox não.
+BR2_PACKAGE_KMOD=y
+BR2_PACKAGE_KMOD_TOOLS=y
+BR2_PACKAGE_ZSTD=y
+BR2_PACKAGE_LIBARCHIVE=y
+BR2_PACKAGE_OPENSSL=y
+BR2_PACKAGE_LIBPNG=y
+BR2_PACKAGE_E2FSPROGS=y
+BR2_PACKAGE_E2FSPROGS_RESIZE2FS=y
+BR2_PACKAGE_UTIL_LINUX=y
+BR2_PACKAGE_UTIL_LINUX_BINARIES=y
+BR2_PACKAGE_UTIL_LINUX_PARTX=y
+BR2_PACKAGE_UTIL_LINUX_RFKILL=y
+
+# ── rede e Bluetooth (o rádio é integrado nesta placa) ───────
+BR2_PACKAGE_WPA_SUPPLICANT=y
+BR2_PACKAGE_WPA_SUPPLICANT_CLI=y
+BR2_PACKAGE_WPA_SUPPLICANT_PASSPHRASE=y
+BR2_PACKAGE_IW=y
+BR2_PACKAGE_BLUEZ5_UTILS=y
+BR2_PACKAGE_BLUEZ5_UTILS_CLIENT=y
+# Sem regulatory.db o cfg80211 reclama no boot e o Wi-Fi fica sem tabela de
+# canais — medido na X55.
+BR2_PACKAGE_WIRELESS_REGDB=y
+BR2_PACKAGE_DROPBEAR=y
+BR2_PACKAGE_DROPBEAR_CLIENT=n
+BR2_PACKAGE_IPROUTE2=y
+
+# ── firmware ─────────────────────────────────────────────────
+# RTL8821CS: Wi-Fi por SDIO (rtw88) e Bluetooth por UART (rtl_bt).
+# Sem o blob o driver termina em -22, que NÃO parece falta de firmware na
+# primeira leitura.
+BR2_PACKAGE_LINUX_FIRMWARE=y
+BR2_PACKAGE_LINUX_FIRMWARE_RTL_RTW88=y
+BR2_PACKAGE_LINUX_FIRMWARE_RTL_88XX_BT=y
+BR2_PACKAGE_LINUX_FIRMWARE_RTL_81XX=y
+
+# ── o que NÃO está aqui, de propósito ────────────────────────
+#
+# - `genimage` / imagem de cartão: depende do layout de partições e do
+#   idbloader. É o próximo passo; sem ele os artefatos são Image, rootfs.ext4,
+#   idbloader.img e u-boot.itb.
+# - `rocknix-joypad`: driver fora da árvore, sem pacote no Buildroot. Sem ele
+#   os 17 botões não existem (só o volume, que é gpio-keys).
+# - Patches de DTS (F2 HDMI off, F3 SDIO no-mmc/no-sd, F4 dma-names do uart1):
+#   são patches de kernel, não símbolos de config.

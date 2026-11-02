@@ -1,43 +1,35 @@
-# Powkiddy X55 — fragmento BUILDROOT
+# Powkiddy X55 — fragmento BUILDROOT (deltas do nosso sistema)
 #
-# Só símbolos `BR2_*`. Configuração de kernel (`CONFIG_*`) fica em
-# `linux.fragment`, que é outro arquivo e outro estágio do build.
+# A base do hardware NÃO mora aqui: ela está em `defconfig`, que o
+# `scripts/build-device.sh` instala em `buildroot/configs/` antes do
+# `make giochi_x55_defconfig`. Este arquivo carrega só o que é decisão DESTE
+# repositório por cima daquela base.
 #
-# ## O que falta para este fragmento bastar
+# Divisão consciente:
 #
-# 1. `buildrootDefconfig` em `device.json` — hoje vazio. Sem isso o device não
-#    entra no build (`status` continua `draft`).
-# 2. `BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES` apontando para `linux.fragment`.
-#    O caminho tem de ser absoluto, e por isso é injetado pelo
-#    `build-device.sh` — não pode ficar escrito aqui.
-# 3. DTS com `&rng { status = "okay" }` (o mainline deixa o TRNG desligado no
-#    rk356x e o rk3568.dtsi, que ligaria, não é usado pela X55).
+# | Onde | O quê | Por que |
+# | --- | --- | --- |
+# | `defconfig` | arch, kernel 6.12, U-Boot 2024.10, rkbin, DTS, pilha gráfica, firmware | veio do defconfig que bootou em hardware real |
+# | `buildroot.fragment` (aqui) | escolhas nossas: tamanho do rootfs, ajustes de imagem | muda entre aparelhos e evoluí sem tocar na base |
+# | `linux.fragment` | símbolos `CONFIG_*` do kernel | outro estágio do build; o build passa o caminho absoluto |
+# | `buttons.map` | nome lógico → código evdev | vira `/etc/giochi/buttons.map` no rootfs |
+#
+# Só símbolos `BR2_*` neste arquivo. `CONFIG_*` em `linux.fragment` — misturar
+# os dois faz o `applyFragment` ignorar tudo em silêncio.
 
-# ── plataforma ───────────────────────────────────────────────
-# Cortex-A55 — o RK3566 tem A55, não A53.
-BR2_cortex_a55=y
-
-# ── kernel ───────────────────────────────────────────────────
-# O DTS é mainline: arch/arm64/boot/dts/rockchip/rk3566-powkiddy-x55.dts
-BR2_LINUX_KERNEL_USE_INTREE_DTS=y
-BR2_LINUX_KERNEL_INTREE_DTS_NAME="rk3566-powkiddy-x55"
-
-# ── U-Boot ───────────────────────────────────────────────────
-# Defconfig mainline para esta placa.
-BR2_TARGET_UBOOT=y
-BR2_TARGET_UBOOT_BOARDNAME="powkiddy-x55-rk3566"
-BR2_TARGET_UBOOT_NEEDS_PYTHON3=y
-BR2_TARGET_UBOOT_NEEDS_PYLIBFDT=y
-# TPL/SPL do Rockchip: precisa dos blobs do rkbin.
-BR2_TARGET_UBOOT_NEEDS_ROCKCHIP_RKBIN=y
-
-# ── pacotes mínimos ──────────────────────────────────────────
-BR2_PACKAGE_BUSYBOX=y
+# ── rootfs ───────────────────────────────────────────────────
+# A base traz ext4 em 1024M; aqui fica explícito porque o tamanho é nosso, não
+# do hardware. O rootfs real medido no antecessor ficou em ~35 MB comprimido,
+# então 1 GB é folga para a camada de app entrar depois.
+BR2_TARGET_ROOTFS_EXT2_SIZE="1024M"
 
 # ── o que NÃO está aqui, de propósito ────────────────────────
 #
-# - `BR2_PACKAGE_SDL2` e o launcher: são do Giochi app, não do sistema. O
-#   `Config.in` do pacote escolhe isso. O sistema entrega kernel + rootfs; a
-#   camada de app entra pelo overlay do `Giochi os`.
-# - RTL8821CS: driver de fornecedor, vira pacote próprio quando decidirmos se o
-#   X55 terá rádio. Sem ele o sistema liga e funciona.
+# - `genimage` e a imagem de cartão: dependem do layout de partições (FAT 128 MB
+#   com Image + dtbs + extlinux na p1, rootfs ext4 na p2) e da gravação do
+#   idbloader. É o próximo passo de verdade; hoje o build entrega Image,
+#   rootfs.ext4, idbloader.img e u-boot.itb soltos.
+# - `rocknix-joypad` e o shim `input-polldev.h`: driver fora da árvore, precisa
+#   virar pacote ou patch de kernel antes de os botões existirem.
+# - Patches de DTS (HDMI off, SDIO no-mmc/no-sd, dma-names do uart1): são
+#   patch de kernel, não símbolo de config. Listados em `README.md`.

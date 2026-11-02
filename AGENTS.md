@@ -78,17 +78,21 @@ compatibilidade com ash continua não provada. O build de verdade só o CI prova
 
 ### Pendente de verdade
 
-- **O primeiro build completo ainda não terminou.** Histórico real do CI em §8.
+- **O primeiro build completo do `qemu-aarch64` passou em 02/11/2026** (run #15,
+  22 min 45 s de compilação, artefato publicado). O que falta é o segundo, para
+  provar o ccache.
+- **O X55 tem defconfig e fragmentos prontos, mas nunca compilou.** O que falta
+  é código e layout, não configuração: `rocknix-joypad` (driver fora da árvore),
+  os patches de DTS, o `rtl8821cs_config.bin` de 25 bytes e o `genimage` da
+  imagem de cartão. Ver `device/powkiddy x55/README.md`.
 - `/etc/inittab` **não** tem a linha de `respawn` do `giochi-init`: o script está
   no rootfs e ninguém o chama (§11).
-- `buttons.map` não é copiado para `/etc/giochi/buttons.map` no staging (§11).
 - `giochi-controllers` (configurador de controles) não existe: só o desenho, em
   `Giochi app/docs/controles.md`.
-- `device/powkiddy x55/linux.fragment` existe mas **não é consumido** por
-  `build-device.sh` — só `buildroot.fragment` é aplicado. Discrepância aberta.
 - `buildrootFragments`, `kernelPatches` e `firmwareFiles` estão **documentados**
   em `device/README.md` mas não são lidos por nenhum script.
-- Nenhum aparelho real boota: X55, X35S, X35H e R35S são drafts sem defconfig.
+- Nenhum aparelho real boota com esta árvore. X35S, X35H, R35S e Steam Deck são
+  drafts sem defconfig.
 - SHA256 do tarball do Buildroot não é fixado/verificado.
 - Sem GitHub Release; artefatos expiram em 14 dias.
 - Sem assinatura de imagem, OTA ou atualização.
@@ -245,7 +249,8 @@ que torna a instalação do `/etc/inittab` uma decisão em aberto (§11).
 - `concurrency` com `cancel-in-progress: true`: **um push novo mata o build em
   andamento.** Consequência prática: não empurre mudança em `device/` ou
   `scripts/` enquanto houver build rodando — você perde 1–3 h de compilação.
-- Entradas manuais: `device`, `arch`, `buildroot_version`.
+- Entradas manuais: `device`, `arch`, `buildroot_version` e `allow_draft`
+  (rascunho com defconfig, pedido **pelo id**; `device=all` nunca puxa draft).
 - Caches de chave **estável** (`giochi-system-<device>-<versão>`): com hash de
   config a chave mudava a cada commit e todo build era frio.
 - Passo *Free disk space* remove ~20–25 GB de SDKs que o build não usa.
@@ -261,7 +266,13 @@ Havia **15 execuções** do build. As relevantes:
 | --- | --- | --- |
 | 13 | `5d1a1c0` selftest | **cancelado** (push novo) |
 | 14 | `55d4345` perf/cache | **falhou** — passo *Build image* morreu em **3 s** |
-| 15 | `80e58ee` sem KMSCUBE | em andamento no momento desta revisão |
+| 15 | `80e58ee` sem KMSCUBE | **sucesso** — 22 min 45 s de compilação, artefato `giochi-system-qemu-aarch64` publicado |
+
+O primeiro build completo do pipeline **passou**. O que ele provou: Buildroot
+2024.02 baixa, extrai, aplica defconfig, `prepare-config` mescla, `olddefconfig`
+roda, `assert-config` aprova, o `make` compila e os artefatos com `SHA256SUMS`
+sobem. Continua sem prova o **ccache acertar na segunda vez** (o run 15 foi o
+primeiro com cache salvo).
 
 **A falha de 3 s do run 14 não foi diagnosticada.** Um build que morre em 3 s não
 chegou a compilar: os candidatos são a checagem de espaço livre, um `curl` que
@@ -324,7 +335,7 @@ O script existe, está executável no índice do Git, tem o limite de 5 reiníci
 60 s **testado** (§3) e um comportamento de desistência correto: para de
 reiniciar mas continua vivo, porque matar o PID 1 derruba o kernel.
 
-**Duas ligações faltam** e nenhuma é grande:
+**Uma ligação falta; as outras duas já estão feitas e testadas:**
 
 1. **`/etc/inittab` sem a linha `::respawn:/usr/bin/giochi-init`.** Sem ela, o
    `giochi-init` está na imagem e ninguém o chama.
@@ -332,10 +343,13 @@ reiniciar mas continua vivo, porque matar o PID 1 derruba o kernel.
    sobrescrever. As opções são: (a) assumir a autoria completa do `/etc/inittab`
    no overlay comum; (b) usar post-build e aceitar o acoplamento com defconfigs
    de placa. **É uma decisão em aberto, não um bug.**
-2. **`buttons.map` não chega ao rootfs.** O mapa mora em
-   `device/<pasta>/buttons.map`; o launcher lê `/etc/giochi/buttons.map`. Basta o
-   staging copiar o arquivo do aparelho para `etc/giochi/buttons.map` — mudança
-   pequena em `build-device.sh`, em código que agora já passou por `bash -n`.
+2. **`buttons.map` chega ao rootfs** (feito). O staging copia
+   `device/<pasta>/buttons.map` para `etc/giochi/buttons.map` e avisa quando o
+   aparelho não tem mapa.
+3. **`giochi-init` não sai mais em 99 ms** (feito): medido, ele saía com `exit 1`
+   quando o launcher não existia — e com `::respawn:` isso vira ~10 reinícios por
+   segundo inundando o console. Agora espera em intervalos de
+   `GIOCHI_LAUNCHER_WAIT` (30 s), sem CPU e sem ruído.
 
 Fora do escopo daqui: `giochi-controllers` (configurador de controles) não
 existe. Ele precisa ser **binário separado, iniciado antes do launcher** — se o
@@ -406,7 +420,7 @@ assumir que funciona. Provar 3D exige ligar a pilha no fragmento **do aparelho**
 | ID | Pasta | SoC | Arch | Status | Falta |
 | --- | --- | --- | --- | --- | --- |
 | `qemu-aarch64` | `qemu-aarch64/` | virtual | arm64 | **ready** | nada — é o smoke test do pipeline |
-| `powkiddy-x55` | `powkiddy x55/` | RK3566 | arm64 | draft | defconfig, DTB de build, U-Boot, genimage |
+| `powkiddy-x55` | `powkiddy x55/` | RK3566 | arm64 | draft | `rocknix-joypad`, patches de DTS, `genimage` — defconfig e fragmentos prontos |
 | `powkiddy-x35s` | `powkiddy x35s/` | RK3326 | arm64 | draft | o mesmo + driver de joypad |
 | `powkiddy-x35h` | `powkiddy x35h/` | RK3326 | arm64 | draft | o mesmo |
 | `r35s` | `r35s/` | RK3326 | arm64 | draft | pipeline RK3326 (BL31/DDR/U-Boot), joypad fora da árvore |
@@ -419,17 +433,22 @@ O R35S é o que está mais avançado nisso: o DTB real está versionado em
 
 ## 14. Próximos passos, por ordem de risco
 
-1. **Terminar o build do `qemu-aarch64` no CI.** Se falhar, ler o log (precisa
-   de token/`gh`) — a falha de 3 s do run 14 continua sem diagnóstico.
-2. **Ligar a camada de boot** (§11): inittab + `buttons.map` no staging.
-3. **Rodar o build duas vezes** para provar que o ccache acerta.
-4. **Validar a imagem do QEMU no qemu-system-aarch64** e rodar
+1. **Rodar o build de novo** para provar que o ccache acerta (o run #15 foi o
+   primeiro com cache salvo; hoje não há prova).
+2. **Ligar a camada de boot** (§11): falta só a linha do `inittab`.
+3. **Tentar o build do `powkiddy-x55` no CI** — `device: powkiddy-x55` +
+   `allow_draft: true`. É o primeiro teste real do `defconfig` e do fragmento de
+   kernel: o `assert-config` vai listar qualquer símbolo que não exista no
+   2024.02.
+4. **`genimage` do X55**: hoje o build entrega `Image`, `rootfs.ext4`,
+   `idbloader.img` e `u-boot.itb` soltos, não uma imagem de cartão.
+5. **`rocknix-joypad` + shim `input-polldev` + patches de DTS** (F2/F3/F4):
+   sem eles o X55 liga sem botões e sem Wi-Fi.
+6. **Validar a imagem do QEMU no qemu-system-aarch64** e rodar
    `giochi-selftest` dentro dela — é o único jeito de testar o script no ash de
    verdade.
-5. **Primeiro aparelho real**: o R35S é o mais perto (DTB e mapa prontos), mas a
-   família RK3326 exige pipeline próprio, não é ajuste de config.
-6. Fixar SHA256 do tarball do Buildroot.
-7. Release público em vez de artefato de 14 dias.
+7. Fixar SHA256 do tarball do Buildroot.
+8. Release público em vez de artefato de 14 dias.
 
 ## 15. Decisões que não devem ser reabertas sem motivo
 
@@ -463,7 +482,8 @@ tem precedência histórica e a divergência precisa ser resolvida explicitament
 
 ## 17. Limitações conhecidas
 
-- Build completo nunca terminou nesta máquina nem no CI (até esta revisão).
+- O build completo do `qemu-aarch64` passou no CI (run #15); nenhum aparelho
+  real compilou ainda.
 - Nenhum aparelho real é inicializável; só o QEMU é `ready`.
 - `bash -n` prova sintaxe, não comportamento; o `sh` local não é busybox ash.
 - `.config` interno em `work/` contém a senha real — não publique `work/`.

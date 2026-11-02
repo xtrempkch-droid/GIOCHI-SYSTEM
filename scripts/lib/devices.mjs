@@ -250,7 +250,7 @@ export async function validateDevice(device) {
   return errors;
 }
 
-export async function getBuildableDevices({ arch = null, deviceId = "all" } = {}) {
+export async function getBuildableDevices({ arch = null, deviceId = "all", allowDraft = false } = {}) {
   const index = await loadIndex();
   const targetArch = arch || index.defaultArch;
 
@@ -261,7 +261,9 @@ export async function getBuildableDevices({ arch = null, deviceId = "all" } = {}
   if (deviceId && deviceId !== "all") {
     const entry = index.devices.find((item) => item.id === deviceId);
     if (!entry) throw new Error(`Dispositivo não encontrado: ${deviceId}`);
-    if (!entry.enabled) throw new Error(`Dispositivo desabilitado: ${deviceId}`);
+    if (!entry.enabled && !allowDraft) {
+      throw new Error(`Dispositivo desabilitado: ${deviceId}`);
+    }
     if (entry.arch !== targetArch) {
       throw new Error(
         `Dispositivo ${deviceId} é ${entry.arch}, mas o filtro é ${targetArch}.`,
@@ -278,13 +280,31 @@ export async function getBuildableDevices({ arch = null, deviceId = "all" } = {}
 
   const devices = [];
   for (const entry of entries) {
-    devices.push(await loadDevice(entry.id, index));
+    const device = await loadDevice(entry.id, index);
+    // Um rascunho entra na matriz por dois critérios: precisa ser pedido pelo
+    // id (`--device`) e precisa declarar defconfig. `device=all` NUNCA puxa
+    // rascunho, nem com allowDraft: tentar todos os rascunhos de uma vez é
+    // como se perde uma tarde. Sem defconfig o job falharia antes de compilar,
+    // e um CI vermelho por rascunho treina todo mundo a ignorar o vermelho.
+    if (!device.enabled && !(allowDraft && deviceId !== "all" && device.buildrootDefconfig)) {
+      continue;
+    }
+    devices.push(device);
+  }
+
+  if (devices.length === 0) {
+    throw new Error(
+      `Nenhum dispositivo construível para arch=${targetArch}.` +
+        (allowDraft
+          ? " Nenhum rascunho desta arquitetura declara buildrootDefconfig."
+          : " Verifique device/devices.json ou use --allow-draft."),
+    );
   }
   return devices;
 }
 
-export async function buildGithubMatrix({ arch = null, deviceId = "all" } = {}) {
-  const devices = await getBuildableDevices({ arch, deviceId });
+export async function buildGithubMatrix({ arch = null, deviceId = "all", allowDraft = false } = {}) {
+  const devices = await getBuildableDevices({ arch, deviceId, allowDraft });
   return {
     include: devices.map((device) => ({
       device: device.id,

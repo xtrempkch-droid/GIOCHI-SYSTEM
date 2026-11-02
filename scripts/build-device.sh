@@ -104,6 +104,21 @@ if ! [[ "$MIN_FREE_GB" =~ ^[0-9]+$ ]]; then
   exit 2
 fi
 
+# Buildroot trata BR2_ROOTFS_OVERLAY, BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES e
+# BR2_LINUX_KERNEL_PATCH como listas separadas por espaço. Um caminho com
+# espaço no repositório (ou no diretório de trabalho) faz o Buildroot procurar
+# metade de um caminho e falhar com erro que não cita a causa. Melhor dizer o
+# que é, na hora.
+case "$ROOT" in
+  *" "*)
+    echo "ERRO: o caminho do repositório tem espaço:" >&2
+    echo "  $ROOT" >&2
+    echo "O Buildroot separa essas opções por espaço. Copie o repositório para" >&2
+    echo "um caminho sem espaços (ex.: ~/giochi-system) e rode de novo." >&2
+    exit 2
+    ;;
+esac
+
 echo "Giochi System"
 echo "  device:    $DEVICE_ID ($DEVICE_NAME)"
 echo "  arch:      $DEVICE_ARCH"
@@ -178,6 +193,16 @@ if [[ ! -f "$BR2_DIR/Makefile" ]]; then
 fi
 
 echo "Aplicando defconfig $DEFCONFIG..."
+# O Buildroot 2024.02 não tem defconfig para nenhum aparelho Rockchip de
+# handheld, e o antecessor resolvia isso com uma árvore BR2_EXTERNAL. Aqui o
+# aparelho traz o próprio defconfig em `device/<pasta>/defconfig` e o build o
+# instala no lugar onde o `make` procura. Sem árvore externa, sem caminho
+# absoluto escrito à mão no fragmento.
+DEVICE_DEFCONFIG="$DEVICE_DIR/defconfig"
+if [[ -f "$DEVICE_DEFCONFIG" ]]; then
+  cp -a "$DEVICE_DEFCONFIG" "$BR2_DIR/configs/$DEFCONFIG"
+  echo "  defconfig: fornecido pelo aparelho (device/$DEVICE_FOLDER/defconfig)"
+fi
 if ! make -C "$BR2_DIR" O="$BUILD_DIR" "$DEFCONFIG" >"$WORK_DIR/defconfig.log" 2>&1; then
   tail -n 120 "$WORK_DIR/defconfig.log" >&2
   exit 1
@@ -223,6 +248,11 @@ else
 fi
 
 echo "Mesclando configuração comum + device..."
+KERNEL_FRAGMENT="$DEVICE_DIR/linux.fragment"
+KERNEL_FRAGMENT_ARGS=()
+if [[ -f "$KERNEL_FRAGMENT" ]]; then
+  KERNEL_FRAGMENT_ARGS=(--kernel-fragment "$KERNEL_FRAGMENT")
+fi
 node "$ROOT/scripts/prepare-config.mjs" \
   --config "$BUILD_DIR/.config" \
   --hostname "$HOSTNAME_VALUE" \
@@ -232,6 +262,7 @@ node "$ROOT/scripts/prepare-config.mjs" \
   --fragment "$ROOT/config/common.fragment" \
   --fragment "$FRAGMENT" \
   --ccache-dir "$CCACHE_ARG" \
+  "${KERNEL_FRAGMENT_ARGS[@]}" \
   "${OVERLAY_ARGS[@]}"
 
 make -C "$BR2_DIR" O="$BUILD_DIR" olddefconfig >"$WORK_DIR/olddefconfig.log" 2>&1
@@ -247,8 +278,22 @@ if ! node "$ROOT/scripts/assert-config.mjs" \
   exit 1
 fi
 
-case "$DEVICE_ARCH" in
-  arm64) ARCH_SYMBOL="BR2_aarch64" ;;
+# `assert-config` acima cobre os fragmentos BR2_*. O fragmento de KERNEL é outra
+# história: se o símbolo `BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES` cair (porque o
+# defconfig do aparelho não liga BR2_LINUX_KERNEL, por exemplo), o kernel compila
+# com o defconfig da arquitetura e o hardware existe no DTS SEM funcionar —
+# sem uma linha de erro ligando o sintoma à causa.
+if [[ ${#KERNEL_FRAGMENT_ARGS[@]} -gt 0 ]]; then
+  if ! grep -q '^BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES=.*linux\.fragment' "$BUILD_DIR/.config"; then
+    echo "ERRO: linux.fragment não entrou em BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES." >&2
+    echo "Sem isso o kernel sai sem painel, áudio e controles — e nada falha." >&2
+    echo "Símbolos BR2_LINUX_KERNEL* no .config final:" >&2
+    grep -n '^BR2_LINUX_KERNEL' "$BUILD_DIR/.config" >&2 || echo "  (nenhum)" >&2
+    exit 1
+  fi
+fi
+
+case "$DEVICE_ARCH" in  arm64) ARCH_SYMBOL="BR2_aarch64" ;;
   x86_64) ARCH_SYMBOL="BR2_x86_64" ;;
   arm) ARCH_SYMBOL="BR2_arm" ;;
   *)
