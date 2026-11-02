@@ -17,7 +17,12 @@
 BR2_PACKAGE_BUSYBOX_SHOW_OTHERS=y
 BR2_PACKAGE_BASH=y
 BR2_PACKAGE_CA_CERTIFICATES=y
-BR2_PACKAGE_CURL=y
+# O símbolo antigo `BR2_PACKAGE_CURL` é LEGACY no 2024.02: ele seleciona
+# BR2_LEGACY, e o Buildroot aborta com "You have legacy configuration in your
+# .config!" sem dizer qual símbolo é o culpado. O nome atual é
+# BR2_PACKAGE_LIBCURL_CURL (o binário); a biblioteca é BR2_PACKAGE_LIBCURL.
+BR2_PACKAGE_LIBCURL=y
+BR2_PACKAGE_LIBCURL_CURL=y
 BR2_PACKAGE_DOSFSTOOLS=y
 BR2_PACKAGE_E2FSPROGS=y
 BR2_PACKAGE_HTOP=y
