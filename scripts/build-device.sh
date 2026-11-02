@@ -205,6 +205,23 @@ for overlay in "${OVERLAYS[@]}"; do
   index=$((index + 1))
 done
 
+# O mapa de botões mora em device/<pasta>/buttons.map, mas o launcher lê
+# /etc/giochi/buttons.map. Sem esta cópia o mapa existe no repositório e NÃO
+# existe na imagem: o launcher cai no mapa embutido e os botões erram sem
+# mensagem nenhuma — a mesma classe de falha silenciosa do assert-config.
+DEVICE_BUTTONS_MAP="$DEVICE_DIR/buttons.map"
+if [[ -f "$DEVICE_BUTTONS_MAP" ]]; then
+  if [[ -s "$DEVICE_BUTTONS_MAP" ]]; then
+    mkdir -p "$OVERLAY_STAGE/01-device/etc/giochi"
+    cp -a "$DEVICE_BUTTONS_MAP" "$OVERLAY_STAGE/01-device/etc/giochi/buttons.map"
+    echo "  botões:    buttons.map → /etc/giochi/buttons.map ($(wc -l <"$DEVICE_BUTTONS_MAP") linhas)"
+  else
+    echo "AVISO: $DEVICE_BUTTONS_MAP está vazio; o launcher usaria o mapa embutido." >&2
+  fi
+else
+  echo "  botões:    sem buttons.map neste aparelho (launcher usa o mapa embutido)"
+fi
+
 echo "Mesclando configuração comum + device..."
 node "$ROOT/scripts/prepare-config.mjs" \
   --config "$BUILD_DIR/.config" \

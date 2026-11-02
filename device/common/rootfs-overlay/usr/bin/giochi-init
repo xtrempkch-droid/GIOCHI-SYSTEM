@@ -39,6 +39,9 @@ BRIGHTNESS_FILE="$CONFIG_DIR/brightness"
 RESTART_MAX=5
 RESTART_WINDOW=60
 
+# Intervalo entre tentativas de encontrar o launcher, em segundos.
+LAUNCHER_WAIT="${GIOCHI_LAUNCHER_WAIT:-30}"
+
 log() {
     printf 'giochi-init: %s\n' "$1" >&2
 }
@@ -91,20 +94,38 @@ run_controller_setup() {
     rm -f "$SETUP_FLAG"
 }
 
+# O launcher NÃO nasce neste repositório: ele vem do Giochi app e entra na
+# imagem pelo Giochi os. Portanto existe uma janela — e talvez uma imagem
+# inteira — em que o giochi-init roda sem launcher.
+#
+# Sair na hora aqui é o pior comportamento possível. Medido: 99 ms até o
+# `exit 1`. Com `::respawn:` no inittab, o BusyBox reinicia o processo assim que
+# ele morre, então isso vira um laço de ~10 vezes por segundo inundando o
+# console — e mensagem repetida é pior que mensagem nenhuma, porque esconde o
+# getty na mesma tela.
+#
+# Então espera. Sem CPU, sem ruído, e o PID 1 continua vivo.
+wait_for_launcher() {
+    log "launcher ausente ainda: $LAUNCHER"
+    log "esperando aparecer; verifico a cada ${LAUNCHER_WAIT}s (sem inundar o console)"
+    while [ ! -x "$LAUNCHER" ]; do
+        sleep "$LAUNCHER_WAIT"
+    done
+    log "launcher encontrado: $LAUNCHER"
+}
+
 main() {
     restore_brightness
     run_controller_setup
-
-    if [ ! -x "$LAUNCHER" ]; then
-        log "launcher não encontrado ou não executável: $LAUNCHER"
-        log "nada a fazer; saindo"
-        exit 1
-    fi
 
     restarts=0
     window_start=0
 
     while :; do
+        # Cobre tanto o primeiro boot sem launcher quanto o caso de ele
+        # desaparecer depois (imagem trocada, app removido).
+        [ -x "$LAUNCHER" ] || wait_for_launcher
+
         now=$(uptime_seconds)
 
         # Janela deslizante: se passou tempo suficiente desde a primeira falha,
