@@ -286,8 +286,22 @@ GROWTH_LIMIT_KB=$((DISK_GROWTH_LIMIT_MIB * 1024))
 
 # setsid coloca o make como líder de grupo, para que o kill derrube também
 # os compiladores filhos. Sem isso sobra processo escrevendo em disco.
+#
+# `--wait` NÃO é opcional: sem ele o `setsid` faz fork e sai na hora, então
+# `$!` aponta para um processo que já morreu. Resultado medido no CI: o laço de
+# vigia não espera nada, o `wait` devolve status de outro processo, o build é
+# declarado falho e o `build.log` fica VAZIO (o make continuava rodando solto).
+SETSID_WAIT=""
 if command -v setsid >/dev/null 2>&1; then
-  setsid make -C "$BR2_DIR" O="$BUILD_DIR" -j"$JOBS" >"$LOG_FILE" 2>&1 &
+  if setsid --wait true >/dev/null 2>&1; then
+    SETSID_WAIT="--wait"
+  else
+    echo "AVISO: setsid sem --wait; o vigia de disco pode não acompanhar." >&2
+  fi
+fi
+
+if [[ -n "$SETSID_WAIT" ]]; then
+  setsid "$SETSID_WAIT" make -C "$BR2_DIR" O="$BUILD_DIR" -j"$JOBS" >"$LOG_FILE" 2>&1 &
 else
   make -C "$BR2_DIR" O="$BUILD_DIR" -j"$JOBS" >"$LOG_FILE" 2>&1 &
 fi
@@ -342,8 +356,32 @@ if [[ -n "$WATCHDOG_REASON" ]]; then
 fi
 
 if [[ "$BUILD_STATUS" -ne 0 ]]; then
-  echo "ERRO: build falhou. Últimas linhas do log:" >&2
-  tail -n 160 "$LOG_FILE" >&2
+  echo "ERRO: build falhou (status $BUILD_STATUS)." >&2
+  if [[ -s "$LOG_FILE" ]]; then
+    echo "Últimas linhas do log:" >&2
+    tail -n 160 "$LOG_FILE" >&2
+  else
+    # Log vazio = o `make` não escreveu nada. Isso separa "make falhou" de
+    # "make nunca executou", que pedem correções diferentes — e sem esta
+    # mensagem o CI mostra apenas um exit 1 sem contexto.
+    echo "O log está VAZIO — o make não chegou a rodar." >&2
+    echo "diretório de build: $BUILD_DIR" >&2
+    if [[ -d "$BUILD_DIR" ]]; then
+      echo "conteúdo (topo):" >&2
+      ls -la "$BUILD_DIR" 2>&1 | head -15 >&2
+      if [[ -f "$BUILD_DIR/.config" ]]; then
+        echo ".config: presente ($(wc -l <"$BUILD_DIR/.config") linhas)" >&2
+      else
+        echo ".config: AUSENTE" >&2
+      fi
+    else
+      echo "o diretório de build NÃO EXISTE" >&2
+    fi
+    [[ -d "$BR2_DIR" ]] && echo "buildroot: $BR2_DIR (existe)" >&2 \
+                        || echo "buildroot: $BR2_DIR (AUSENTE)" >&2
+    echo "make: $(command -v make || echo 'NAO ENCONTRADO NO PATH')" >&2
+    echo "setsid: $(command -v setsid || echo 'ausente') ${SETSID_WAIT:-(sem --wait)}" >&2
+  fi
   exit 1
 fi
 
