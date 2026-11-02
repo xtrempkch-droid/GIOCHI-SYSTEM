@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import path from "node:path";
 
 import {
@@ -81,10 +82,18 @@ test("arquitetura sem device habilitado retorna erro claro", async () => {
 });
 
 test("o caminho do repositório é utilizado como raiz", () => {
-  const base = path.basename(ROOT);
-  assert.ok(
-    base === "Giochi System" || base === "Giochi system" || base === "Linuxlimpo",
-    `raiz inesperada: ${ROOT}`,
-  );
-  assert.ok(path.isAbsolute(ROOT));
+  assert.ok(path.isAbsolute(ROOT), `raiz não absoluta: ${ROOT}`);
+
+  // NÃO afirmar o nome da pasta. Ele muda conforme onde o projeto foi clonado
+  // (`Giochi system` no Desktop, `GIOCHI-SYSTEM` no CI, qualquer coisa num fork),
+  // e um teste que depende disso passa só na máquina de quem escreveu.
+  //
+  // O que importa é que a raiz aponte para o repositório: os marcadores do
+  // projeto têm de existir a partir dela.
+  for (const marker of ["buildroot.version", "device/devices.json", "scripts/validate-devices.mjs"]) {
+    assert.ok(
+      existsSync(path.join(ROOT, marker)),
+      `faltou ${marker} sob a raiz calculada (${ROOT})`,
+    );
+  }
 });
