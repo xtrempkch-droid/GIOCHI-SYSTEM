@@ -35,8 +35,12 @@ permissions:
   contents: read
 
 concurrency:
+  # cancel-in-progress: true — um push novo cancela o build em andamento em vez
+  # de enfileirar. Com `false`, cada commit em device/ ou config/ dispara um
+  # build de 3-4 h que espera o anterior terminar: a fila nunca esvazia e só o
+  # último é útil. Medido em 02/11/2026: 6 builds enfileirados, nenhum com cache.
   group: giochi-system-build-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   validate:
@@ -147,7 +151,11 @@ jobs:
           path: |
             .cache/downloads
             .cache/buildroot-dl
-          key: giochi-system-${{ matrix.device }}-${{ env.BUILDROOT_VERSION }}-${{ hashFiles('buildroot.version', 'config/**', 'device/**') }}
+          # Chave ESTÁVEL (sem hashFiles). Com hash de config/device a chave muda
+          # a cada commit, então TODO build é frio — baixa o Buildroot e os
+          # tarballs de novo. Cache do actions é imutável: chave estável restaura
+          # sempre e só salva na primeira vez.
+          key: giochi-system-${{ matrix.device }}-${{ env.BUILDROOT_VERSION }}
           restore-keys: |
             giochi-system-${{ matrix.device }}-${{ env.BUILDROOT_VERSION }}-
             giochi-system-${{ matrix.device }}-
@@ -158,7 +166,11 @@ jobs:
           path: .cache/ccache
           # BR2_CCACHE_USE_BASEDIR torna o cache independente do caminho do
           # workspace, então ele acerta entre execuções mesmo com runner novo.
-          key: giochi-ccache-${{ matrix.device }}-${{ env.BUILDROOT_VERSION }}-${{ hashFiles('config/**', 'device/**', 'buildroot.version') }}
+          # Também estável, e pelo mesmo motivo: chave por hash de config/
+          # invalidava o ccache a cada ajuste de fragmento, então o build nunca
+          # aproveitava objeto compilado. É o erro que o antecessor documentou:
+          # "ccache não pagou porque a chave era hashFiles('buildroot/**')".
+          key: giochi-ccache-${{ matrix.device }}-${{ env.BUILDROOT_VERSION }}
           restore-keys: |
             giochi-ccache-${{ matrix.device }}-${{ env.BUILDROOT_VERSION }}-
             giochi-ccache-${{ matrix.device }}-
