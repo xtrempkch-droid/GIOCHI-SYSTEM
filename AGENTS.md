@@ -1,165 +1,166 @@
 # AGENTS.md — Giochi System
 
 > Handoff técnico do repositório. Leia antes de continuar o trabalho.
-> Atualizado em: 02/11/2026.
+> Atualizado em: 02/11/2026 (revisão 2 — reescrito sobre fatos verificados).
 
-## 1. Objetivo do usuário
+---
 
-Criar, no Desktop, a pasta **`Giochi System`** com uma estrutura pronta para publicar no GitHub. O projeto deve:
+## 1. O que este repositório é
 
-- ter uma pasta **`device/`** com a lista de dispositivos, configurações e arquivos únicos;
-- permitir adicionar dispositivos depois (o usuário citou exemplos como `device/powkiddy x55/` e `device/steamdeck/`);
-- ter um **workflow** que construa **Linux ARM64** conforme as configurações da pasta `device/`;
-- ter uma pasta **`docs/`** com documentação;
-- ter um **`AGENTS.md`** na raiz para que qualquer pessoa continue o processo.
+O **Giochi System** produz o Linux limpo de cada aparelho: kernel, rootfs, boot,
+drivers, painel e a camada de inicialização. **Sem UI e sem loja** — a interface é
+do `Giochi app`, e a junção dos dois é o `Giochi os`.
 
-O usuário esclareceu que **os dispositivos ARM serão adicionados depois**. Portanto, a estrutura foi criada com:
+```text
+Giochi System ──imagem por aparelho──▶ Giochi os ◀──pacotes .giochi── Giochi app
+```
 
-- `qemu-aarch64` — device virtual ARM64 **habilitado**, usado como referência e smoke test do pipeline;
-- `powkiddy-x55` — placeholder ARM64 **desabilitado**;
-- `steamdeck` — placeholder x86_64 **desabilitado** (mantém o modelo pronto para outra arquitetura);
-- `_template` — template para novos devices.
+Cada pasta é **repositório Git individual**. Não há import de código entre eles:
+a comunicação é sempre por **artefato declarado explicitamente**.
 
 ## 2. Localização
 
 ```text
-C:\Users\Jussara dias\Desktop\Giochi System
+C:\Users\Jussara dias\Desktop\plataforma sistema\
+├── Giochi system\    ← este (repo GIOCHI-SYSTEM)
+├── Giochi app\       ← repo GIOCHI-APP
+└── Giochi os\        ← repo GIOCHI-OS
 ```
+
+Repositório: `https://github.com/xtrempkch-droid/GIOCHI-SYSTEM` — branch `main`.
+
+> A revisão anterior deste documento apontava `Desktop\Giochi System`. O projeto
+> foi movido para dentro de `plataforma sistema\` e os três repos passaram a ser
+> inicializados no Git.
 
 ## 3. Estado atual
 
-### Concluído
+### Concluído e verificado
 
-- Estrutura completa de repositório.
-- `device/devices.json` como fonte da verdade da lista e da matriz.
-- `device.json` por dispositivo, com validação de schema e arquivos.
-- Pasta `device/common/rootfs-overlay/` com arquivos comuns do rootfs.
-- Overlays únicos em `qemu-aarch64`, `powkiddy x55`, `steamdeck` e `_template`.
+- Estrutura de repositório, `.gitignore`, `.gitattributes`, licença MIT.
+- `device/devices.json` como fonte da verdade da lista **e** da matriz de CI.
+- `device.json` por aparelho, validado por schema em `scripts/lib/devices.mjs`.
+- 6 aparelhos registrados: `qemu-aarch64` (único habilitado) + 5 drafts.
 - Buildroot fixado em **2024.02** (`buildroot.version`).
-- Script de build Buildroot: `scripts/build-device.sh`.
-- Merge de configuração: `scripts/prepare-config.mjs`.
-- Validação: `scripts/validate-devices.mjs`.
-- Matriz de CI: `scripts/list-devices.mjs`.
-- Consulta de metadados de device: `scripts/device-info.mjs`.
-- Asserção pós-`olddefconfig`: `scripts/assert-config.mjs` + núcleo em `scripts/lib/assert-config.mjs`.
-- Loader/validador reutilizável: `scripts/lib/devices.mjs`.
-- Testes em Node.js puro: `tests/devices.test.mjs`, `tests/assert-config.test.mjs` e runner `tests/run-all.mjs`.
-- ccache habilitado no build e no CI, com checagem de espaço livre antes de compilar.
-- Workflow de build: `.github/workflows/build-linux-arm64.yml`.
-- Workflow de validação: `.github/workflows/validate.yml`.
-- README raiz e documentação em `docs/`.
-- Licença MIT.
-- Pasta de dispositivo com espaço (`powkiddy x55`) suportada por staging de overlays em caminho sem espaços.
+- Pipeline: `build-device.sh` → `prepare-config.mjs` → `olddefconfig` →
+  `assert-config.mjs` → `make` → artefatos + `SHA256SUMS`.
+- `assert-config` fechando a falha silenciosa do `olddefconfig` (§12.1).
+- ccache no build e no CI, com `BR2_CCACHE_USE_BASEDIR=y` (§12.2).
+- Monitor de disco contra cópia recursiva (§12.3).
+- Workflows: `build-linux-arm64.yml` (matriz + build) e `validate.yml`.
+- Leitura de **device tree**: `scripts/lib/fdt.mjs` + `dtb-inspect`, `dtb-buttons`,
+  `dtb-catalog` — sem `dtc`, em Node puro.
+- Catálogo de 15 aparelhos RK3326 extraído dos DTBs do ROCKNIX
+  (`docs/rk3326-catalog.md` + `.json`).
+- `buttons.map` por aparelho, gerado do DTB (`device/*/buttons.map`).
+- Camada de boot inicial no overlay comum: `giochi-init` e `giochi-selftest`.
+- Documentação em `docs/` (12 páginas) + template de issue para aparelho novo.
 
-### Validado nesta sessão
+### Verificado nesta sessão de retomada
 
-- `node scripts/validate-devices.mjs` passou:
-  - 3 devices carregados;
-  - 1 habilitado (`qemu-aarch64`);
-  - 2 drafts.
-- `node tests/devices.test.mjs` passou: **10/10 testes**.
-- `node scripts/list-devices.mjs --github-matrix` gerou a matriz com `qemu-aarch64`.
-- `scripts/prepare-config.mjs` foi testado com um `.config` falso e os fragmentos reais:
-  - aplicou pacotes comuns;
-  - aplicou `BR2_TARGET_ROOTFS_EXT2_SIZE="512M"`;
-  - desabilitou `BR2_PACKAGE_HOST_QEMU`;
-  - preservou overlay existente e anexou os overlays do Giochi System;
-  - aplicou hostname, issue, senha e `BR2_DL_DIR`.
-- Geração de ícones/Assets não se aplica a este projeto.
+| Verificação | Resultado |
+| --- | --- |
+| `node tests/run-all.mjs` | **33/33** (10 devices + 12 assert-config + 11 fdt) |
+| `node scripts/validate-devices.mjs` | OK — 6 devices, 1 habilitado |
+| `node scripts/list-devices.mjs --github-matrix` | matriz com `qemu-aarch64` |
+| `bash -n scripts/build-device.sh` | **exit 0** (primeira vez que rodou) |
+| `bash -n` em `Giochi app/scripts/migrar-do-antecessor.sh` | exit 0 |
+| `sh -n` em `giochi-init`, `giochi-selftest`, `profile.d/giochi-system.sh` | exit 0 |
+| Final de linha dos 5 scripts | LF puro, zero CRLF |
+| `prepare-config.mjs` com `.config` falso + fragmentos reais | OK: hostname, issue, senha, `BR2_DL_DIR`, `BR2_CCACHE*`, `EXT2_SIZE=512M`, `HOST_QEMU` desligado, overlays anexados ao existente |
+| `assert-config.mjs` sobre o mesmo par | OK — 21 símbolos de 2 fragmentos |
+| `giochi-selftest` executado num `sh` real | roda de ponta a ponta: PASS 2 · WARN 10 · FAIL 7 · SKIP 3, exit 1 |
+| `giochi-init` com launcher falso (sai 7) | 6 reinícios e para, como desenhado |
 
-### Não executado / pendente
+**O que isso NÃO prova:** `bash -n` valida sintaxe, não comportamento. O
+`sh` do Git for Windows é o bash em modo POSIX, **não** o busybox ash da imagem —
+compatibilidade com ash continua não provada. O build de verdade só o CI prova.
 
-- **Build Buildroot completo** não foi executado nesta máquina (Windows, sem bash/WSL disponível). O workflow foi escrito para Ubuntu 24.04. A primeira execução no GitHub Actions deve ser tratada como validação real do build.
-- **`scripts/build-device.sh` nunca foi executado nem passou por `bash -n`.** É o maior risco aberto: erro de sintaxe shell não aparece em revisão visual. Decisão do usuário: testar no primeiro push — ver §19.5.
-- **Não há repositório Git local nem remoto.** `git` não está instalado neste ambiente. O usuário ainda precisa criar o repositório no GitHub e enviar os arquivos.
-- **Powkiddy X55 e Steam Deck não são inicializáveis.** São placeholders; falta kernel, DTB, U-Boot, firmware, genimage/partições e validação em hardware.
-- O workflow não cria GitHub Releases automaticamente; apenas publica artefatos por 14 dias. Para release permanente, anexar manualmente ou criar um job futuro.
-- O SHA256 do tarball do Buildroot não está fixado/verificado no script; é uma melhoria de segurança recomendada.
-- O `buildroot.config` do artefato é redigido (`BR2_TARGET_GENERIC_ROOT_PASSWD="__REDACTED__"`), mas o `.config` interno em `work/` contém a senha real.
-- O caminho local do projeto contém espaço (`Jussara dias`), mas o build local deve ser feito em Linux/WSL com um caminho sem espaços para evitar limitações do Buildroot. O CI usa workspace sem espaços.
+### Pendente de verdade
 
-## 4. Ambiente da sessão
+- **O primeiro build completo ainda não terminou.** Histórico real do CI em §8.
+- `/etc/inittab` **não** tem a linha de `respawn` do `giochi-init`: o script está
+  no rootfs e ninguém o chama (§11).
+- `buttons.map` não é copiado para `/etc/giochi/buttons.map` no staging (§11).
+- `giochi-controllers` (configurador de controles) não existe: só o desenho, em
+  `Giochi app/docs/controles.md`.
+- `device/powkiddy x55/linux.fragment` existe mas **não é consumido** por
+  `build-device.sh` — só `buildroot.fragment` é aplicado. Discrepância aberta.
+- `buildrootFragments`, `kernelPatches` e `firmwareFiles` estão **documentados**
+  em `device/README.md` mas não são lidos por nenhum script.
+- Nenhum aparelho real boota: X55, X35S, X35H e R35S são drafts sem defconfig.
+- SHA256 do tarball do Buildroot não é fixado/verificado.
+- Sem GitHub Release; artefatos expiram em 14 dias.
+- Sem assinatura de imagem, OTA ou atualização.
 
-- Windows.
-- Node.js usado: `C:\Users\Jussara dias\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe` (v24.21.0).
-- Sem `git`.
-- Sem `bash` no PATH do Windows; o shell script foi revisado manualmente, mas não executado.
-- Acesso à internet disponível durante a sessão (usado para conferir os defconfigs do Buildroot 2024.02).
-- O projeto não tem dependências npm; os scripts usam apenas Node built-ins.
-- Buildroot 2024.02 foi confirmado para:
-  - `qemu_aarch64_virt_defconfig`;
-  - `raspberrypi4_64_defconfig` (não usado no projeto, mas referência);
-  - `raspberrypi3_64_defconfig` (não usado no projeto, mas referência).
+## 4. Ambiente — o que dá e o que não dá para verificar
+
+Máquina: Windows. Nada de Linux nativo.
+
+| Ferramenta | Estado | Consequência |
+| --- | --- | --- |
+| `node` | **disponível** — runtime do DSH (v24.21.0) | scripts e testes rodam |
+| `git` | **disponível** em `C:\Program Files\Git\cmd\git.exe`, **fora do PATH** | repos existem, commits e push funcionam |
+| `bash` / `sh` | **disponível** em `C:\Program Files\Git\{bin,usr\bin}` | `bash -n` e execução de POSIX sh funcionam |
+| `WSL` | instalado, **sem distro** | não há Linux de verdade |
+| `rustc` / `cargo` | ausente | nada do launcher Rust compila aqui |
+| Buildroot / `make` de kernel | ausente | **o build só roda no CI** |
+
+**Detalhe que custa tempo:** o `bash` do Git for Windows falha com
+`couldn't create signal pipe, Win32 error 5` quando o sandbox está confinado.
+Ele só roda com o sandbox liberado. Não é bug do script.
+
+Chamadas úteis:
+
+```powershell
+& "C:\Program Files\Git\cmd\git.exe" status
+& "C:\Program Files\Git\bin\bash.exe" -n scripts/build-device.sh
+```
 
 ## 5. Estrutura de arquivos
 
 ```text
-Giochi System/
-├── buildroot.version
-├── config/
-│   └── common.fragment
+Giochi system/
+├── buildroot.version                  # 2024.02
+├── config/common.fragment             # pacotes e opções comuns a todos os aparelhos
 ├── device/
-│   ├── devices.json
-│   ├── README.md
+│   ├── devices.json                   # fonte da verdade: id, folder, arch, enabled
+│   ├── README.md                      # modelo de device e camada de drivers
 │   ├── common/rootfs-overlay/
-│   │   └── etc/...
-│   ├── qemu-aarch64/
-│   │   ├── device.json
-│   │   ├── buildroot.fragment
-│   │   ├── rootfs-overlay/
-│   │   └── README.md
-│   ├── powkiddy x55/
-│   │   ├── device.json
-│   │   ├── buildroot.fragment
-│   │   ├── rootfs-overlay/
-│   │   └── README.md
-│   ├── steamdeck/
-│   │   ├── device.json
-│   │   ├── buildroot.fragment
-│   │   ├── rootfs-overlay/
-│   │   └── README.md
+│   │   ├── etc/…                      # issue, motd, release, profile.d
+│   │   └── usr/bin/
+│   │       ├── giochi-init            # mantém o launcher vivo; restaura brilho
+│   │       └── giochi-selftest        # diagnóstico do aparelho até o render 3D
+│   ├── qemu-aarch64/                  # device de referência (habilitado)
+│   ├── powkiddy x55/                  # RK3566 — draft
+│   │   ├── device.json, buildroot.fragment, linux.fragment, buttons.map
+│   │   └── README.md, rootfs-overlay/
+│   ├── powkiddy x35s/                 # RK3326 — draft
+│   ├── powkiddy x35h/                 # RK3326 — draft
+│   ├── r35s/                          # RK3326 — draft, com dts/*.dtb real
+│   │   └── dts/rk3326-gameconsole-r36s.dtb
+│   ├── steamdeck/                     # x86_64 — draft
 │   └── _template/
-│       ├── device.json
-│       ├── buildroot.fragment
-│       ├── rootfs-overlay/
-│       └── README.md
 ├── docs/
-│   ├── README.md
-│   ├── architecture.md
-│   ├── adding-a-device.md
-│   ├── building-locally.md
-│   ├── github-actions.md
-│   ├── flashing.md
-│   ├── troubleshooting.md
-│   ├── security.md
-│   └── dependencies-manifest.md
+│   ├── README.md, architecture.md, adding-a-device.md, building-locally.md
+│   ├── github-actions.md, flashing.md, troubleshooting.md, security.md
+│   ├── dependencies-manifest.md       # contrato forge.json com o Giochi app
+│   ├── button-maps.md                 # mapa evdev por aparelho, a partir do DTS
+│   ├── rk3326-catalog.md / .json      # 15 aparelhos extraídos de DTB
+│   └── giochi-init.md                 # o que falta para a camada de boot
 ├── scripts/
-│   ├── build-device.sh
-│   ├── prepare-config.mjs
-│   ├── assert-config.mjs
-│   ├── validate-devices.mjs
-│   ├── list-devices.mjs
-│   ├── device-info.mjs
-│   └── lib/
-│       ├── devices.mjs
-│       └── assert-config.mjs
-├── tests/
-│   ├── devices.test.mjs
-│   ├── assert-config.test.mjs
-│   └── run-all.mjs
-├── .github/workflows/
-│   ├── build-linux-arm64.yml
-│   └── validate.yml
-├── package.json
-├── Makefile
-├── README.md
-├── AGENTS.md
-├── CONTRIBUTING.md
-├── SECURITY.md
-├── LICENSE
-├── .gitignore
-├── .gitattributes
-└── .editorconfig
+│   ├── build-device.sh                # build completo de um device
+│   ├── prepare-config.mjs             # mescla fragmentos + hostname/issue/senha
+│   ├── assert-config.mjs              # falha se símbolo pedido sumiu (núcleo em lib/)
+│   ├── validate-devices.mjs, list-devices.mjs, device-info.mjs
+│   ├── dtb-inspect.mjs, dtb-buttons.mjs, dtb-catalog.mjs
+│   └── lib/{devices,assert-config,fdt}.mjs
+├── tests/{devices,assert-config,fdt}.test.mjs + run-all.mjs
+├── .github/
+│   ├── workflows/{build-linux-arm64,validate}.yml
+│   └── ISSUE_TEMPLATE/novo-aparelho.yml
+├── package.json, Makefile, README.md, AGENTS.md, CONTRIBUTING.md,
+│   SECURITY.md, LICENSE, .gitignore, .gitattributes, .editorconfig
 ```
 
 ## 6. Modelo de dispositivo
@@ -167,22 +168,15 @@ Giochi System/
 ### Índice: `device/devices.json`
 
 ```json
-{
-  "id": "qemu-aarch64",
-  "folder": "qemu-aarch64",
-  "arch": "arm64",
-  "enabled": true
-}
+{ "id": "qemu-aarch64", "folder": "qemu-aarch64", "arch": "arm64", "enabled": true }
 ```
 
-- `id` é slug (`a-z`, `0-9`, `-`), usado no build, artefatos e CI.
-- `folder` é a pasta real e pode conter espaços.
-- `arch` deve coincidir com o `device.json`.
-- `enabled` controla a entrada no CI. Drafts ficam `false`.
+- `id` — slug (`a-z`, `0-9`, `-`); é o nome no build, no artefato e no CI.
+- `folder` — a pasta real; **pode conter espaços** (`powkiddy x55`).
+- `arch` — precisa coincidir com o `device.json`.
+- `enabled` — só entra na matriz se `true`, `status: ready` **e** tiver defconfig.
 
 ### `device/<pasta>/device.json`
-
-Campos principais:
 
 | Campo | Obrigatório | Observação |
 | --- | --- | --- |
@@ -192,7 +186,7 @@ Campos principais:
 | `description` | sim | mínimo 10 caracteres |
 | `arch` | sim | `arm64`, `x86_64` ou `arm` |
 | `hostname` | sim | hostname válido |
-| `buildrootDefconfig` | para enabled | ex.: `qemu_aarch64_virt_defconfig` |
+| `buildrootDefconfig` | para `enabled` | ex.: `qemu_aarch64_virt_defconfig` |
 | `buildrootFragment` | sim | caminho relativo |
 | `rootfsOverlays` | sim | array de diretórios |
 | `artifacts` | sim | globs em `output/images` |
@@ -200,399 +194,299 @@ Campos principais:
 | `timeoutMinutes` | sim | 60–360 |
 | `status` | sim | `ready` ou `draft` |
 | `bootNotes` | recomendado | anotações de boot |
-| `docs` | sim | README do device |
+| `docs` | sim | README do aparelho |
+
+Campos **aceitos na documentação mas não lidos por script**: `buildrootFragments`,
+`kernelPatches`, `firmwareFiles`. Não conte com eles até o loader implementar.
 
 ## 7. Pipeline de build
 
 1. `list-devices.mjs` lê `devices.json`, filtra `enabled` + `arch` e gera a matriz.
 2. `build-device.sh <id>`:
-   - valida device e `buildrootDefconfig`;
-   - baixa Buildroot 2024.02 para `/tmp/giochi-system-cache` (ou cache do CI);
-   - extrai em `/tmp/giochi-system-work/<device>`;
+   - valida id, `enabled`, defconfig, comandos e versão do Buildroot;
+   - **aborta se houver menos de `GIOCHI_SYSTEM_MIN_FREE_GB` (15) livres**;
+   - baixa/valida o tarball do Buildroot, extrai em `work/<device>`;
    - aplica o defconfig com `make O=<build> <defconfig>`;
-   - copia `device/common/rootfs-overlay` e os overlays do device para um staging **sem espaços**;
-   - chama `prepare-config.mjs` para mesclar `config/common.fragment` + fragmento do device, hostname, issue, senha, `BR2_DL_DIR` e overlays;
-   - roda `make olddefconfig`;
-   - roda `scripts/assert-config.mjs` e **falha** se algum símbolo pedido pelos fragmentos desapareceu ou mudou de valor (ver §19);
-   - valida `BR2_aarch64=y`/`BR2_x86_64=y`/`BR2_arm=y` e `BR2_ROOTFS_OVERLAY`;
-   - compila com `make -j`;
-   - copia artefatos, `.config` redigido, `device.json`, fragmento, README, `build-info.txt` e `SHA256SUMS` para `out/<device>/`.
+   - copia `device/common/rootfs-overlay` e os overlays do aparelho para um
+     staging **sem espaços** (`00-common`, `01-device`, …);
+   - chama `prepare-config.mjs` (fragmentos + hostname + issue + senha + DL_DIR +
+     ccache + overlays);
+   - roda `olddefconfig` e **falha** no `assert-config` se um símbolo pedido
+     desapareceu ou mudou de valor;
+   - confirma `BR2_aarch64=y`/`BR2_x86_64=y`/`BR2_arm=y` e `BR2_ROOTFS_OVERLAY`;
+   - compila sob `setsid --wait`, com vigia de disco;
+   - copia artefatos, `.config` **redigido**, `device.json`, fragmento, README,
+     `build-info.txt` e `SHA256SUMS` para `out/<device>/`.
 3. O workflow publica `out/<device>` como artefato.
 
-### Por que staging de overlays?
+### Por que staging de overlays
 
-Buildroot separa `BR2_ROOTFS_OVERLAY` por espaços. A pasta `device/powkiddy x55` contém espaço. O script copia cada overlay para `.../giochi-system-overlays/00-common`, `01-device`, etc., e usa esses caminhos sem espaços. **Não remova esse staging** sem substituir por outra solução.
+O Buildroot separa `BR2_ROOTFS_OVERLAY` por espaços. Como `device/powkiddy x55`
+tem espaço no nome, o script copia cada overlay para `…/giochi-system-overlays/`
+e usa caminhos sem espaço. **Não remova esse staging** sem substituir por outra
+solução. Efeito colateral bom: `cp -a` preserva o bit de execução — por isso
+`giochi-init` e `giochi-selftest` estão `100755` **no índice do Git**, e não
+precisam de `chmod` em post-build.
 
-### Por que não sobrescrever `post-build`/`post-image`?
+### Por que não sobrescrever `post-build`/`post-image`
 
-Os defconfigs de placas reais podem depender dos scripts de pós-build/pós-imagem do Buildroot. O `prepare-config` só altera hostname/issue/senha/DL_DIR/OVERLAY; ele **não** toca nesses scripts.
+Defconfigs de placas reais podem depender dos scripts de pós-build do Buildroot.
+`prepare-config` só mexe em hostname/issue/senha/DL_DIR/OVERLAY/ccache. Isso é o
+que torna a instalação do `/etc/inittab` uma decisão em aberto (§11).
 
-## 8. Workflow
+## 8. Workflow e o histórico real do CI
 
 ### `.github/workflows/build-linux-arm64.yml`
 
-- `validate`: valida devices e roda testes.
-- `discover`: gera a matriz.
-- `build`: matriz de jobs, instala dependências, baixa Buildroot, compila, escreve resumo com SHA256 e publica artefato.
-- Entradas manuais: `device`, `arch` (arm64/x86_64/arm), `buildroot_version`.
-- Cache: `.cache/downloads` + `.cache/buildroot-dl` + `.cache/ccache`.
-- O job `build` roda um passo **Free disk space** antes de compilar: remove `/usr/share/dotnet`, `/usr/local/lib/android`, `/opt/ghc`, `/opt/hostedtoolcache/CodeQL`, `/usr/local/share/boost` (~20-25 GB). Sem isso o disco enche no meio do build.
-- Secret opcional: `GIOCHI_SYSTEM_ROOT_PASSWORD`.
-- `permissions: contents: read`.
-- Timeout por device (`timeoutMinutes`, máximo 360).
-- Artefatos ficam 14 dias.
-- O workflow padrão é ARM64.
+- `validate` → `discover` → `build` (matriz).
+- Dispara em push para `main` que toque `buildroot.version`, `config/**`,
+  `device/**`, `scripts/**` ou o próprio workflow. **`docs/**` e `AGENTS.md` não
+  disparam build.**
+- `concurrency` com `cancel-in-progress: true`: **um push novo mata o build em
+  andamento.** Consequência prática: não empurre mudança em `device/` ou
+  `scripts/` enquanto houver build rodando — você perde 1–3 h de compilação.
+- Entradas manuais: `device`, `arch`, `buildroot_version`.
+- Caches de chave **estável** (`giochi-system-<device>-<versão>`): com hash de
+  config a chave mudava a cada commit e todo build era frio.
+- Passo *Free disk space* remove ~20–25 GB de SDKs que o build não usa.
+- `GIOCHI_SYSTEM_ROOT_PASSWORD` é opcional; sem ele a senha é a de
+  desenvolvimento.
+- Artefatos: 14 dias.
 
-### `.github/workflows/validate.yml`
+### Histórico (02/11/2026)
 
-Roda em PRs e pushes de configuração; não compila imagem.
+Havia **15 execuções** do build. As relevantes:
+
+| Run | Commit | Resultado |
+| --- | --- | --- |
+| 13 | `5d1a1c0` selftest | **cancelado** (push novo) |
+| 14 | `55d4345` perf/cache | **falhou** — passo *Build image* morreu em **3 s** |
+| 15 | `80e58ee` sem KMSCUBE | em andamento no momento desta revisão |
+
+**A falha de 3 s do run 14 não foi diagnosticada.** Um build que morre em 3 s não
+chegou a compilar: os candidatos são a checagem de espaço livre, um `curl` que
+falhou ou um erro que mata o script antes do `defconfig`. O log do job **exige
+token** (`GET /actions/jobs/<id>/logs` devolve 403 sem autenticação), então não
+foi possível ler de fora. Para diagnosticar: `gh run view --log-failed` ou abrir
+o log no navegador.
+
+O commit seguinte (`80e58ee`) removeu `BR2_PACKAGE_KMSCUBE` — decisão correta por
+si (§12.4), mas provavelmente **não** era a causa dos 3 s.
 
 ## 9. Comandos
 
 ```bash
 node scripts/validate-devices.mjs
-node tests/run-all.mjs
+node tests/run-all.mjs                          # 33 testes
 node scripts/list-devices.mjs
 node scripts/list-devices.mjs --github-matrix
 node scripts/device-info.mjs qemu-aarch64 json
-bash scripts/build-device.sh qemu-aarch64
+node scripts/dtb-inspect.mjs device/r35s/dts/rk3326-gameconsole-r36s.dtb joypad
+node scripts/dtb-buttons.mjs <arquivo.dtb> --out device/r35s/buttons.map
+node scripts/dtb-catalog.mjs                    # regenera docs/rk3326-catalog.*
+bash scripts/build-device.sh qemu-aarch64       # só em Linux/CI
 ```
 
-`tests/run-all.mjs` roda todos os testes num só processo. Não use `node --test tests/`:
-o runner spawna um processo por arquivo e sob sandbox isso falha com `spawn EPERM`.
+**Não use `node --test tests/`:** o runner spawna um processo por arquivo e sob
+sandbox falha com `spawn EPERM`. Use `tests/run-all.mjs`, que importa tudo num
+processo só — é o que o `package.json` e os dois workflows usam.
 
-Variáveis do build:
+Variáveis do build: `BUILDROOT_VERSION`, `ROOT_PASSWORD` (8–128; letras, números,
+`.`, `-`, `_`, `@`), `GIOCHI_SYSTEM_WORK_DIR`, `GIOCHI_SYSTEM_CACHE_DIR`,
+`GIOCHI_SYSTEM_CCACHE_DIR`, `GIOCHI_SYSTEM_MIN_FREE_GB` (15),
+`GIOCHI_SYSTEM_ABORT_FREE_GIB` (2), `GIOCHI_SYSTEM_DISK_POLL_SECONDS` (20),
+`GIOCHI_SYSTEM_GROWTH_LIMIT_MIB` (4096), `GIOCHI_SYSTEM_OUT_DIR`, `JOBS`,
+`ALLOW_DRAFT=1`.
 
-- `BUILDROOT_VERSION`
-- `ROOT_PASSWORD` (8–128; letras, números, `.`, `-`, `_`, `@`)
-- `GIOCHI_SYSTEM_WORK_DIR` (padrão `/tmp/giochi-system-work`)
-- `GIOCHI_SYSTEM_CACHE_DIR` (padrão `/tmp/giochi-system-cache`)
-- `GIOCHI_SYSTEM_CCACHE_DIR` (padrão `<cache>/ccache`)
-- `GIOCHI_SYSTEM_MIN_FREE_GB` (padrão `15`)
-- `GIOCHI_SYSTEM_ABORT_FREE_GIB` (padrão `2`) — piso que aborta o build em execução
-- `GIOCHI_SYSTEM_DISK_POLL_SECONDS` (padrão `20`)
-- `GIOCHI_SYSTEM_GROWTH_LIMIT_MIB` (padrão `4096`) — consumo por intervalo que indica cópia recursiva
-- `GIOCHI_SYSTEM_OUT_DIR`
-- `JOBS`
-- `ALLOW_DRAFT=1`
+## 10. Testes
 
-## 10. Testes realizados
+`node tests/run-all.mjs` → **33/33**:
 
-- `node tests/run-all.mjs`: **22/22** (10 de devices + 12 de assert-config).
-- `node scripts/validate-devices.mjs`: OK.
-- Matriz:
-  ```json
-  {"include":[{"device":"qemu-aarch64","name":"QEMU AArch64 Virt","arch":"arm64","runner":"ubuntu-24.04","timeout":360}]}
-  ```
-- `prepare-config.mjs` com `.config` falso: OK, incluindo `BR2_CCACHE*` quando `--ccache-dir` é passado.
-- `assert-config.mjs` verificado nos quatro cenários: sobrevive, desaparece, cai de `=y` para `=m`, pedido-desligado-veio-ligado.
-- Teste manual do workflow YAML: revisão visual; não há parser YAML instalado. Verificar no GitHub Actions na primeira execução.
-- Build Buildroot completo: **não executado** (ambiente Windows sem bash/WSL).
+| Arquivo | Testes | Cobre |
+| --- | --- | --- |
+| `tests/devices.test.mjs` | 10 | índice, schema, pastas com espaço, matriz, draft habilitado |
+| `tests/assert-config.test.mjs` | 12 | símbolo que sobrevive, desaparece, cai `=y`→`=m`, pedido-desligado-veio-ligado, `allow-drop`, aspas |
+| `tests/fdt.test.mjs` | 11 | parse de DTB, gpio-keys, adc-joystick, `buttons.map`, truncado/ inválido |
 
-## 11. Adicionar um dispositivo real
+## 11. A camada de boot — o que falta para o aparelho sair do console
 
-1. Copiar `device/_template/` para `device/<nome>/`.
-2. Editar `device.json`:
-   - id slug;
-   - arch;
-   - hostname;
-   - `buildrootDefconfig` válido no Buildroot 2024.02 ou em árvore externa;
-   - artefatos e runner.
-3. Editar `buildroot.fragment` com kernel/DTB/U-Boot/genimage/firmware.
-4. Colocar arquivos únicos em `rootfs-overlay/`.
-5. Registrar em `device/devices.json` com `enabled: false`.
-6. Validar.
-7. Construir com `ALLOW_DRAFT=1`.
-8. Testar em hardware real.
-9. Trocar `status` para `ready` e `enabled` para `true`.
-10. Commit/push.
-
-### Powkiddy X55
-
-- Pasta: `device/powkiddy x55/`.
-- Arch: `arm64`.
-- SoC: Rockchip RK3566.
-- Pendente: defconfig, kernel, DTS/DTB, U-Boot, genimage, firmware, tela/botões, validação.
-- `buildrootDefconfig` está vazio; `enabled: false`.
-
-### Steam Deck
-
-- Pasta: `device/steamdeck/`.
-- Arch: `x86_64` (não entra no build ARM64 padrão).
-- Pendente: kernel, firmware, áudio, Wi-Fi, Bluetooth, controle, layout de armazenamento/recuperação.
-- `buildrootDefconfig` está vazio; `enabled: false`.
-- Para construir no futuro: preencher defconfig, `status: ready`, `enabled: true`, rodar workflow com `arch=x86_64`.
-
-## 12. Próximos passos recomendados
-
-1. **Criar o repositório no GitHub** e enviar o projeto (git não está instalado neste ambiente).
-2. **Rodar o workflow** manualmente com `device=all`, `arch=arm64` para validar o Buildroot no CI.
-3. **Corrigir eventuais erros do primeiro build** (pacotes, tamanho de rootfs, versão Buildroot).
-4. **Adicionar o primeiro device ARM real** (por exemplo, Powkiddy X55) com defconfig/kernel/DTB/U-Boot.
-5. **Adicionar um artifício de release** para anexar imagens a tags, se desejado.
-6. **Fixar SHA256 do tarball do Buildroot** para supply-chain mais forte.
-7. **Configurar `GIOCHI_SYSTEM_ROOT_PASSWORD`** e evitar a senha padrão.
-8. **Testar imagens em hardware real** antes de publicar.
-9. **Adicionar toolchain externa** se o tempo de CI continuar alto mesmo com ccache.
-10. **Atualizar a documentação e o README do device** com os resultados reais.
-
-## 13. Decisões e justificativas
-
-- **Buildroot em vez de um fork de distro:** gera kernel/rootfs/imagem com configuração declarativa e funciona em runners x86_64.
-- **Node.js nos scripts de metadados/validação:** sem dependências externas, portável e testável.
-- **qemu-aarch64 habilitado:** mantém o pipeline executável enquanto os devices ARM reais não existem.
-- **Powkiddy/Steam Deck desabilitados:** evita publicar imagens que não inicializam.
-- **Pasta com espaço suportada:** atende ao exemplo do usuário (`powkiddy x55`) sem quebrar o Buildroot, via staging.
-- **Arquitetura por device:** Steam Deck é x86_64; o workflow filtra por `arch` e o build padrão é arm64.
-- **Senha de root via secret:** evita credenciais fixas no Git; fallback documentado para desenvolvimento.
-- **Config final redigido no artefato:** evita vazar a senha no `buildroot.config` publicado.
-
-## 14. Decisões de arquitetura (02/11/2026)
-
-O usuário definiu a organização do projeto:
-
-- **Giochi System** (`Giochi System/`, ex-`Linuxlimpo`) é a **área de criação do sistema Linux limpo**. Produz apenas o sistema operacional pronto para cada aparelho — kernel, rootfs, boot, drivers e painel. Sem UI, sem loja.
-- **Giochi app** (`Giochi app/`) é a aplicação/camada de experiência, projeto separado que consome as imagens geradas.
-- **Giochi os** (`Giochi os/`) é a **área de junção dos dois repositórios**: recebe o sistema vindo de Giochi System e os apps vindos de Giochi app e monta o sistema operacional final por aparelho.
-- Cada pasta é **repositório Git individual** e **raiz da sua própria função** — sem imports cruzados, sem leitura implícita de pasta irmã. A comunicação entre elas é sempre por **artefato ou arquivo declarado explicitamente**, nunca por caminho relativo presumido.
-- A pasta **`devices`** fica **dentro de `Giochi System`**. Ela contém, para cada aparelho, a configuração e os **fragmentos de driver** (incluindo driver de painel).
-
-### Antecessor: `GIOCHI-KONSOL-OS`
-
-O projeto tem um **antecessor monolítico** público em [github.com/xtrempkch-droid/GIOCHI-KONSOL-OS](https://github.com/xtrempkch-droid/GIOCHI-KONSOL-OS). Ele **não** é o alvo: é a **fonte de fragmentos comprovados** — configurações, caminhos e soluções de build que já funcionaram em hardware real.
-
-O que existe lá (verificado em 02/11/2026):
-
-| Caminho | Conteúdo |
-| --- | --- |
-| `device/` | Dispositivos reais (mesmo nome de pasta que usamos) |
-| `docs/architecture-v1.1.md`, `architecture-v1.2.md` | Spec de arquitetura (35 KB cada) |
-| `docs/hardware-e-drivers.md` | Drivers e painel (35 KB) |
-| `docs/DEVICES.md`, `APPS.md`, `APP-SDK.md`, `GAMES.md` | Modelos de device e app |
-| `docs/BUILD.md`, `BOOT-DEBUG.md` | Pipeline de build e depuração de boot |
-| `schemas/` | 7 JSON Schemas (`engines`, `layout`, `settings`, `theme`, `metadata`, `default-games`, `forge`) |
-| `apps/`, `Jogos/` | Apps e jogos **dentro do mesmo repo** — o que estamos separando |
-| `buildroot/`, `src/`, `tools/`, `tests/`, `assets/` | Build e código |
-
-**Regra ao reaproveitar:** copiar de lá exige conferir que ainda se aplica — é antecessor, não verdade atual. Trechos entram em `device/<pasta>/`, `config/` ou `docs/` só depois de entendidos, nunca por cópia cega.
-
-**Risco de divergência:** o `docs/architecture.md` deste repositório foi escrito sem consultar `architecture-v1.2.md` do antecessor. Se os dois conflitarem, o antecessor tem precedência histórica e a divergência precisa ser resolvida explicitamente, não por omissão.
-
-### Contrato de dependências: `forge.json`
-
-> **Superado.** Os parágrafos seguintes descrevem o desenho inicial em `DEPENDENCIAS.yaml`, **revertido** em favor de `forge.json`. Ficam como registro do raciocínio; a decisão válida está em "DECISÃO" mais abaixo e em [docs/dependencies-manifest.md](docs/dependencies-manifest.md).
-
-O **Giochi app** publica na raiz do seu repositório um arquivo **`DEPENDENCIAS.yaml`** — YAML puro, sem acentuação no nome (o acento quebra com normalização NFC/NFD entre Linux, macOS e `git`). O **Giochi System** consome esse arquivo para gerar o fragmento com as dependências necessárias para os apps funcionarem.
-
-`Giochi System` **não** lê a pasta `Giochi app` por conta própria. O manifesto entra como **input explícito**:
-
-```bash
-bash scripts/build-device.sh qemu-aarch64 --apps-manifest ../"Giochi app"/DEPENDENCIAS.yaml
-```
-
-Sem o parâmetro, o build gera a **base limpa** e avisa — nunca falha por ausência do manifesto.
-
-Fluxo:
+O launcher **não faz `fork`**: faz `exec` para abrir um jogo, para nunca haver
+dois processos disputando o DRM. Quem o reinicia quando o jogo termina é o
+`giochi-init`.
 
 ```text
-Giochi app ──► DEPENDENCIAS.yaml (publicado, versionado no repo dele)
-                        │
-                        ▼
-Giochi os  ──► busca o manifesto ──► repassa a Giochi System
-                        │
-                        ▼
-Giochi System ──► lê YAML ──► config/apps.fragment ──► build
-                        │
-                        ▼
-Giochi os  ──► junta imagem do sistema + apps ──► imagem final por device
+giochi-init ──▶ launcher ──exec──▶ jogo
+     ▲                              │
+     └────────── jogo termina ──────┘
 ```
 
-A mediação por `Giochi os` preserva a independência: `Giochi System` não conhece URL nem caminho do `Giochi app`; apenas recebe um arquivo.
+O script existe, está executável no índice do Git, tem o limite de 5 reinícios em
+60 s **testado** (§3) e um comportamento de desistência correto: para de
+reiniciar mas continua vivo, porque matar o PID 1 derruba o kernel.
 
-**CORREÇÃO (02/11/2026 — verificado no antecessor): o modelo acima estava errado.**
+**Duas ligações faltam** e nenhuma é grande:
 
-O `GIOCHI-KONSOL-OS` **não tem** manifesto de dependências, e o desenho anterior (app declarando `BR2_PACKAGE_*`) não corresponde a nada comprovado. Fatos:
+1. **`/etc/inittab` sem a linha `::respawn:/usr/bin/giochi-init`.** Sem ela, o
+   `giochi-init` está na imagem e ninguém o chama.
+   O caminho óbvio (`BR2_ROOTFS_POST_BUILD_SCRIPT`) é justamente o que a §7 evita
+   sobrescrever. As opções são: (a) assumir a autoria completa do `/etc/inittab`
+   no overlay comum; (b) usar post-build e aceitar o acoplamento com defconfigs
+   de placa. **É uma decisão em aberto, não um bug.**
+2. **`buttons.map` não chega ao rootfs.** O mapa mora em
+   `device/<pasta>/buttons.map`; o launcher lê `/etc/giochi/buttons.map`. Basta o
+   staging copiar o arquivo do aparelho para `etc/giochi/buttons.map` — mudança
+   pequena em `build-device.sh`, em código que agora já passou por `bash -n`.
 
-- `metadata.json` do pacote `.giochi` tem `"additionalProperties": false` e as únicas chaves são `title, developer, version, arch, runtime, entrypoint`. Não existe `dependencies`/`requires`/lista de pacotes.
-- **App não declara `BR2_PACKAGE_*`.** Quem declara é o `Config.in` do pacote de sistema, via `select`. Exemplo literal de `giochi-launcher/Config.in`: `select BR2_PACKAGE_SDL2`. E `giochi-portmaster/Config.in` declara `select BR2_PACKAGE_BASH LIBCURL ZIP` — "exigências de runtime" do app, mas escritas pelo **sistema**.
+Fora do escopo daqui: `giochi-controllers` (configurador de controles) não
+existe. Ele precisa ser **binário separado, iniciado antes do launcher** — se o
+mapeamento está errado, o usuário não consegue navegar até a tela de
+configuração.
 
-O acoplamento real estava em três mecanismos separados:
+## 12. Blindagens contra falha silenciosa
 
-| Mecanismo | Lado | Papel |
-| --- | --- | --- |
-| `forge.json` (JSON Schema draft-07) | **app**, na raiz do projeto Godot, **fora** do pacote | requisitos: `arch`, `runtime`, `graphics_api_min`, `graphics_api_fallback`, `godot_version`, `ram_min_mb`, `vram_min_mb`, `display_min_width/height`, `touchscreen_required` |
-| `device_profile.json` | **sistema**, publicado em `/user/.giochi/`, regenerado a cada boot | capacidades: `soc`, `cpu.*`, `gpu.*`, `ram_mb`, `vram_mb`, `graphics_api.*`, `display.*`, `engine.godot_min/max`, `input.*`, `proton.*` |
-| `Config.in` + `select` | **sistema** | dependência real de pacote Buildroot |
+Todas têm o mesmo formato: o build fica **verde** e entrega imagem errada.
 
-A compatibilidade é **calculada**, não declarada: compara `forge.json` × `device_profile.json` → `Compatível` / `Parcial` / `Incompatível`, com `NEAR_LIMIT_RATIO = 0.80` (80–100% de um recurso vira "Parcial", risco de swap). Veredito é o pior caso, listando **todas** as exigências não atendidas.
+### 12.1 `olddefconfig` descartando símbolos
 
-**Consequência para o desenho:** o manifesto correto declara **capacidade exigida**, não pacote. Um app não deve escolher símbolo Buildroot — ele não conhece o empacotamento do sistema, e `BR2_PACKAGE_*` quebra a abstração de arquitetura. As dependências de pacote pertencem ao `Giochi System`, que sabe quais pacotes a imagem tem.
+O Buildroot descarta símbolo em silêncio quando o nome não existe, virou legacy
+ou o pai está unset. Sintoma real no antecessor: imagem sem áudio porque
+`CONFIG_SND_SOC_ROCKCHIP_I2S=y` caiu sem aviso.
 
-**Limitação herdada a resolver:** o `device_profile.json` **não tem JSON Schema** no antecessor — é validado só no código Python (`profile.py`). O schema não existe em `schemas/`.
-
-**DECISÃO (02/11/2026): adotar `forge.json`.** O YAML próprio fica revertido — o arquivo **não** se chama `DEPENDENCIAS.yaml`. Motivo: o antecessor já tem formato **e validador** testados; reescrever o validador em YAML custaria meses de bugs silenciosos. O contrato completo está em [docs/dependencies-manifest.md](docs/dependencies-manifest.md). O que continua pendente é o `device_profile.json` (o lado do sistema), que o antecessor **não** tinha schema — validava só em Python.
-
-**Estado:** nada implementado. `Giochi app/` e `Giochi os/` estão **vazias**. `build-device.sh` não aceita `--apps-manifest`.
-
-**Estado:** a pasta de devices existente hoje é **`device/`** (singular). O usuário chamou de "devices". Nenhuma renomeação foi feita ainda — renomear exige atualizar `devices.json`, todos os paths de `device.json`, os scripts em `scripts/lib/`, os workflows e a documentação.
-
-**Renomeação Linuxlimpo → Giochi System (concluída em 02/11/2026):**
-
-- `package.json` → `giochi-system`; `LICENSE` → "Giochi System contributors".
-- Preview de senha de root padrão: `giochi` (antes `linuxlimpo`).
-- Variáveis: `LINUXLIPPO_*` → `GIOCHI_SYSTEM_*` (`ROOT_PASSWORD`, `WORK_DIR`, `CACHE_DIR`, `OUT_DIR`, `VERSION`).
-- Secret do CI: `GIOCHI_SYSTEM_ROOT_PASSWORD`. **Precisa ser criado de novo no GitHub** — o secret antigo não é lido.
-- Pastas/files do rootfs: `etc/linuxlimpo/` → `etc/giochi-system/`, `linuxlimpo-release` → `giochi-system-release`, `profile.d/linuxlimpo.sh` → `profile.d/giochi-system.sh`.
-- Staging de overlays: `linuxlimpo-overlays` → `giochi-system-overlays`.
-- Hostnames: `giochi-system-qemu`, `giochi-system-x55`, `giochi-system-steamdeck`, `giochi-system-example`.
-- Workflow, artefatos e caches: prefixo `giochi-system-`.
-- O nome do arquivo de workflow (`.github/workflows/build-linux-arm64.yml`) **não** foi renomeado.
-
-**Camada de drivers/painel foi apenas documentada** (não implementada) em `docs/architecture.md` e `device/README.md`. Os campos `buildrootFragments`, `kernelPatches` e `firmwareFiles` em `device.json` estão especificados mas o `validate-devices.mjs` e o `build-device.sh` ainda **não** os consomem.
-
-## 15. Limitações conhecidas
-
-- Build completo não validado nesta sessão.
-- Nenhum repositório Git/remote.
-- Placeholders de Powkiddy/Steam Deck não são imagens funcionais.
-- `qemu-aarch64` é referência, não hardware de produção.
-- Sem assinatura de imagem, OTA ou atualização.
-- Sem SHA256 fixo do tarball Buildroot.
-- Sem parser YAML no ambiente; workflow validado visualmente e deverá ser testado no GitHub.
-- O `.config` interno em `work/` contém a senha real; não publique `work/`.
-- `buildroot.config` no artefato é redigido; o hash do SHA256SUMS é do arquivo redigido, não do `.config` real.
-
-## 16. Como retomar
-
-```bash
-cd "C:\Users\Jussara dias\Desktop\Giochi System"
-node scripts/validate-devices.mjs
-node tests/run-all.mjs
-node scripts/list-devices.mjs --github-matrix
-```
-
-Para build real:
-
-```bash
-# Em Linux/WSL2, clone/copie para um caminho sem espaços
-cd ~/giochi-system
-bash scripts/build-device.sh qemu-aarch64
-```
-
-Para publicar no GitHub:
-
-```bash
-git init
-git add .
-git commit -m "Initial Giochi System device tree"
-git branch -M main
-git remote add origin https://github.com/xtrempkch-droid/GIOCHI-SYSTEM.git
-git push -u origin main
-```
-
-Depois, no GitHub:
-
-1. Actions → **Build Giochi System ARM64** → Run workflow.
-2. `device=all`, `arch=arm64`.
-3. Configurar `GIOCHI_SYSTEM_ROOT_PASSWORD` (opcional, recomendado).
-4. Baixar artefato.
-
-## 17. Arquivos que não devem ser commitados
-
-- `out/`, `work/`, `.cache/` (builds locais);
-- imagens `.img`, `.ext4`, `.ext2`;
-- logs;
-- `.env`/segredos;
-- `node_modules/` (não usado hoje).
-
-O `.gitignore` cobre esses casos.
-
-## 18. Contato com o pedido original
-
-O usuário pediu explicitamente:
-
-- pasta `Giochi System` no Desktop — **criada**;
-- estrutura para GitHub — **criada**;
-- pasta `device` com dispositivos/configurações/arquivos únicos — **criada**, com `qemu-aarch64`, `powkiddy x55`, `steamdeck` e template;
-- workflow para criar Linux ARM64 conforme devices — **criado**;
-- pasta `docs` — **criada**;
-- `AGENTS.md` na raiz — **criado**.
-
-## 19. Blindagem do build (02/11/2026)
-
-Três falhas silenciosas foram fechadas. Todas têm o mesmo formato: o build fica **verde** e entrega uma imagem errada, sem nenhuma mensagem de erro.
-
-### 19.1 `olddefconfig` descartando símbolos
-
-O Buildroot descarta símbolo em silêncio quando o nome não existe, quando ele virou legacy, ou quando o pai está unset. Sintoma real no antecessor: imagem sem áudio porque `CONFIG_SND_SOC_ROCKCHIP_I2S=y` caiu sem aviso.
-
-Correção: [`scripts/assert-config.mjs`](scripts/assert-config.mjs) roda depois do `olddefconfig` e **falha o build** listando cada símbolo que desapareceu ou mudou de valor. Núcleo testável em [`scripts/lib/assert-config.mjs`](scripts/lib/assert-config.mjs), 12 testes em [`tests/assert-config.test.mjs`](tests/assert-config.test.mjs).
-
-Exceção justificada, escrita no próprio fragmento:
+`scripts/assert-config.mjs` roda depois do `olddefconfig` e **falha o build**
+listando cada símbolo que desapareceu ou mudou de valor. Exceção justificada,
+escrita no próprio fragmento:
 
 ```make
 # giochi-system:allow-drop BR2_PACKAGE_MESA3D motivo curto
 ```
 
-Regra: **não** silencie com `allow-drop` sem escrever o motivo. O ponto da checagem é justamente impedir que um símbolo suma sem ninguém notar.
+Não silencie com `allow-drop` sem escrever o motivo — o ponto é justamente
+impedir que um símbolo suma sem ninguém notar.
 
-### 19.2 ccache
+Casos reais que ele pegou neste repositório: `BR2_PACKAGE_BUSYBOX_SHOW_OTHERS`
+(desligado no defconfig do QEMU descartava `bash`, `less` e `procps-ng`) e
+`BR2_PACKAGE_CURL`, que é **legacy** no 2024.02 e aborta o build sem dizer qual
+símbolo é o culpado — o nome atual é `BR2_PACKAGE_LIBCURL_CURL`.
 
-O antecessor não tinha ccache e o build levava 1–3 h. Agora:
+### 12.2 ccache
 
-- `build-device.sh` detecta `ccache` no PATH e passa `--ccache-dir` para o `prepare-config`;
-- `prepare-config.mjs` emite `BR2_CCACHE=y`, `BR2_CCACHE_DIR` e **`BR2_CCACHE_USE_BASEDIR=y`** — sem o último, o cache do CI nunca acerta, porque cada runner monta o repositório num caminho absoluto diferente;
-- o workflow instala `ccache`, cacheia `.cache/ccache` com chave por device + versão do Buildroot, e expõe `GIOCHI_SYSTEM_CCACHE_DIR`.
+`prepare-config` emite `BR2_CCACHE=y`, `BR2_CCACHE_DIR` e
+**`BR2_CCACHE_USE_BASEDIR=y`**. Sem o último o cache do CI nunca acerta, porque
+cada runner monta o repositório num caminho absoluto diferente. Sem `ccache` no
+PATH o build continua e avisa.
 
-Sem `ccache` instalado o build continua, apenas avisa.
+### 12.3 Cópia recursiva enchendo o disco
 
-### 19.3 Cópia recursiva enchendo o disco
+**Este foi o bug real** do antecessor: uma pasta copiava o repositório inteiro
+para dentro de si mesma, em loop — 66 GB e build travado em `Syncing from source
+dir`, horas depois, sem mensagem que ligasse o sintoma à causa.
 
-**Este foi o bug real** — não era só "disco pequeno". Uma pasta copiava o repositório inteiro para dentro de si mesma, em loop. O disco enchia progressivamente e o build morria horas depois sem mensagem que ligasse o sintoma à causa. No antecessor isso gerou uma árvore de **66 GB** e o build travou em `Syncing from source dir`.
+Mecanismo: `SITE_METHOD = local` com `SITE` na raiz do repositório quando o
+diretório de saída mora dentro dele. O rsync copia o próprio `output/`, que na
+volta seguinte é copiado de novo.
 
-Mecanismo: `SITE_METHOD = local` com `SITE` apontando para a raiz do repositório, quando o diretório de saída fica **dentro** dele. O rsync copia o próprio `output/`, que na volta seguinte é copiado de novo — crescimento exponencial.
+Defesas: piso de 15 GB antes de começar; monitor a cada 20 s que aborta por
+espaço livre (< 2 GiB) **ou** por taxa de crescimento (> 4 GiB no intervalo — pega
+a espiral mesmo com disco grande); aviso de aninhamento; `setsid --wait` para o
+`kill` derrubar os compiladores filhos; e ~20 GB liberados no CI.
 
-Três defesas implementadas:
+**Ao empacotar o `Giochi app` como fonte local, isso volta:** use um snapshot
+congelado das fontes e aponte `SITE` para ele, nunca para a raiz do repo.
 
-1. **Piso de espaço livre** — `build-device.sh` aborta antes de começar se houver menos de `GIOCHI_SYSTEM_MIN_FREE_GB` (padrão **15**). Falha em 2 s em vez de 3 h.
-2. **Monitor de disco durante o build** — mede o espaço a cada `GIOCHI_SYSTEM_DISK_POLL_SECONDS` (padrão 20 s) e aborta por dois critérios:
-   - espaço livre abaixo de `GIOCHI_SYSTEM_ABORT_FREE_GIB` (padrão 2);
-   - consumo acima de `GIOCHI_SYSTEM_GROWTH_LIMIT_MIB` (padrão 4096) num único intervalo — **isso pega a espiral mesmo com disco grande**, que era o caso original.
-   O `make` roda sob `setsid`, então o `kill` derruba também os compiladores filhos. A mensagem de erro aponta a causa provável em vez de só dizer "falhou".
-3. **Aviso de aninhamento** — se `BUILD_DIR` ou `OUT_DIR` estiver dentro do repositório, o script avisa que a combinação com `SITE_METHOD = local` produz a recursão.
+### 12.4 Pilha gráfica é opt-in por aparelho
 
-**Ao empacotar o `Giochi app` como fonte local, isso volta:** use um snapshot congelado das fontes (ex.: `out/<device>/pkg-src`) e aponte `SITE` para ele, **nunca** para a raiz do repositório. Ver `docs/troubleshooting.md`, seção "Cópia recursiva".
-4. **Free disk space no CI** — o workflow remove `/usr/share/dotnet`, `/usr/local/lib/android`, `/opt/ghc`, `/opt/hostedtoolcache/CodeQL`, `/usr/local/share/boost` (~20–25 GB que o runner traz e este build não usa).
+`BR2_PACKAGE_KMSCUBE` **não** sobrevive ao `olddefconfig` no 2024.02 sozinho:
+depende de mesa3d (GBM + OpenGL ES + libdrm). Ficou fora do fragmento comum, e o
+`giochi-selftest` marca 3D como **SKIP** dizendo que não pode provar — em vez de
+assumir que funciona. Provar 3D exige ligar a pilha no fragmento **do aparelho**
+(virtio-gpu no QEMU, panfrost no RK3566, Mali-G31 no RK3326).
 
-### 19.4 Runner de testes
+## 13. Aparelhos
 
-`node --test tests/` **não funciona** no ambiente com sandbox: o runner spawna um processo por arquivo e recebe `EPERM`. Use `node tests/run-all.mjs`, que importa todos os arquivos num processo só. É o comando usado no `package.json` e nos dois workflows.
+| ID | Pasta | SoC | Arch | Status | Falta |
+| --- | --- | --- | --- | --- | --- |
+| `qemu-aarch64` | `qemu-aarch64/` | virtual | arm64 | **ready** | nada — é o smoke test do pipeline |
+| `powkiddy-x55` | `powkiddy x55/` | RK3566 | arm64 | draft | defconfig, DTB de build, U-Boot, genimage |
+| `powkiddy-x35s` | `powkiddy x35s/` | RK3326 | arm64 | draft | o mesmo + driver de joypad |
+| `powkiddy-x35h` | `powkiddy x35h/` | RK3326 | arm64 | draft | o mesmo |
+| `r35s` | `r35s/` | RK3326 | arm64 | draft | pipeline RK3326 (BL31/DDR/U-Boot), joypad fora da árvore |
+| `steamdeck` | `steamdeck/` | x86_64 | x86_64 | draft | kernel, firmware, áudio, Wi-Fi, controle |
 
-### 19.5 O que ainda NÃO foi executado — testar no primeiro push
+Mapas de botão: saem do **DTS**, não de banco público (`docs/button-maps.md`).
+O R35S é o que está mais avançado nisso: o DTB real está versionado em
+`device/r35s/dts/` e o `buttons.map` saiu dele. Confirmação final só com
+`evtest` no aparelho.
 
-**Decisão do usuário (02/11/2026): não testar localmente, é perda de tempo. Validar quando o repositório subir para o GitHub.**
+## 14. Próximos passos, por ordem de risco
 
-Este ambiente é Windows **sem `bash`**. Nada em `scripts/build-device.sh` foi executado nem passou por `bash -n`. O código foi apenas revisado à mão. Ordem de teste sugerida no primeiro push:
+1. **Terminar o build do `qemu-aarch64` no CI.** Se falhar, ler o log (precisa
+   de token/`gh`) — a falha de 3 s do run 14 continua sem diagnóstico.
+2. **Ligar a camada de boot** (§11): inittab + `buttons.map` no staging.
+3. **Rodar o build duas vezes** para provar que o ccache acerta.
+4. **Validar a imagem do QEMU no qemu-system-aarch64** e rodar
+   `giochi-selftest` dentro dela — é o único jeito de testar o script no ash de
+   verdade.
+5. **Primeiro aparelho real**: o R35S é o mais perto (DTB e mapa prontos), mas a
+   família RK3326 exige pipeline próprio, não é ajuste de config.
+6. Fixar SHA256 do tarball do Buildroot.
+7. Release público em vez de artefato de 14 dias.
 
-| # | O que testar | Como | Sinal de sucesso |
-| --- | --- | --- | --- |
-| 1 | Sintaxe do shell | `bash -n scripts/build-device.sh` (WSL ou CI) | sai com 0, sem mensagem |
-| 2 | Parser de config | `node scripts/prepare-config.mjs --config <fake> --hostname x --root-password senha12345 --dl-dir /tmp/dl --fragment config/common.fragment` | `.config` contém `BR2_CCACHE` e `BR2_ROOTFS_OVERLAY` |
-| 3 | Asserção de símbolos | `node tests/run-all.mjs` | 22/22 |
-| 4 | Workflow de validação | push em PR | job `Validate device tree` verde |
-| 5 | Build real | Actions → run com `device=qemu-aarch64`, `arch=arm64` | artefato `giochi-system-qemu-aarch64` publicado |
-| 6 | **Monitor de disco** | ver abaixo | aborta com mensagem de cópia recursiva |
-| 7 | ccache | rodar o build **duas vezes** | segunda execução bem mais rápida; `.cache/ccache` não vazio |
+## 15. Decisões que não devem ser reabertas sem motivo
 
-**Teste do monitor de disco (item 6)** — só faz sentido se você quiser provar que ele funciona antes de confiar:
+- **Buildroot em vez de fork de distro:** configuração declarativa, build em
+  runner x86_64.
+- **Node.js nos scripts de metadados:** zero dependência npm, portável, testável.
+- **`qemu-aarch64` habilitado:** mantém o pipeline executável enquanto não há
+  hardware.
+- **Drafts desabilitados:** evita publicar imagem que não boota.
+- **Pasta com espaço suportada:** atende ao pedido do usuário sem quebrar o
+  Buildroot, via staging.
+- **Arquitetura por aparelho:** Steam Deck é x86_64 e fica fora do build ARM64.
+- **Senha de root por secret** e `.config` **redigido** no artefato.
+- **Contrato com o `Giochi app` é `forge.json`, não YAML próprio:** o antecessor
+  já tem formato **e validador** testados. App declara **capacidade**, nunca
+  `BR2_PACKAGE_*` — quem sabe o empacotamento é este repositório. Ver
+  `docs/dependencies-manifest.md`.
+- **Launcher fica no `Giochi app`:** este repositório entrega o sistema e a
+  camada de boot, não a interface.
+
+## 16. Antecessor: `GIOCHI-KONSOL-OS`
+
+Fonte de **fragmentos comprovados**, não o alvo:
+`https://github.com/xtrempkch-droid/GIOCHI-KONSOL-OS`.
+
+Regra ao reaproveitar: copiar de lá exige conferir que ainda se aplica — é
+antecessor, não verdade atual. Trechos entram em `device/<pasta>/`, `config/` ou
+`docs/` só depois de entendidos, nunca por cópia cega. Se
+`docs/architecture.md` conflitar com `architecture-v1.2.md` de lá, o antecessor
+tem precedência histórica e a divergência precisa ser resolvida explicitamente.
+
+## 17. Limitações conhecidas
+
+- Build completo nunca terminou nesta máquina nem no CI (até esta revisão).
+- Nenhum aparelho real é inicializável; só o QEMU é `ready`.
+- `bash -n` prova sintaxe, não comportamento; o `sh` local não é busybox ash.
+- `.config` interno em `work/` contém a senha real — não publique `work/`.
+- `buildroot.config` no artefato é redigido; o hash do `SHA256SUMS` é do arquivo
+  redigido, não do `.config` real.
+- Sem assinatura, OTA, atualização ou Release.
+
+## 18. Como retomar
 
 ```bash
-# Simula a espiral sem esperar 3 h: limite baixo + arquivo grande em loop
-GIOCHI_SYSTEM_GROWTH_LIMIT_MIB=64 \
-GIOCHI_SYSTEM_ABORT_FREE_GIB=1 \
-bash scripts/build-device.sh qemu-aarch64
+cd "C:\Users\Jussara dias\Desktop\plataforma sistema\Giochi system"
+node scripts/validate-devices.mjs
+node tests/run-all.mjs
+node scripts/list-devices.mjs --github-matrix
 ```
 
-Antes disso, dentro de `work/qemu-aarch64/`, rode um laço que escreve arquivos grandes para forçar o consumo. Se o monitor estiver correto, o build para em ≤20 s com "padrão de cópia recursiva".
+Estado do Git (nesta revisão): `main` limpo, sincronizado com `origin/main`,
+remoto `https://github.com/xtrempkch-droid/GIOCHI-SYSTEM.git`.
 
-**Prioridade:** os itens 1–4 são baratos e pegam erro de sintaxe — que é o risco real, porque esse código nunca rodou. Os itens 5–7 validam o comportamento.
+Build real: só em Linux/WSL2 com caminho sem espaços, ou pelo GitHub Actions
+(Actions → *Build Giochi System ARM64* → `device=qemu-aarch64`, `arch=arm64`).
+
+## 19. O que não deve ser commitado
+
+`out/`, `work/`, `.cache/`, imagens `.img`/`.ext4`/`.ext2`, logs, `.env`,
+segredos, `node_modules/`. O `.gitignore` cobre.

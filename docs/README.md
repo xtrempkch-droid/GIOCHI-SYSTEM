@@ -10,14 +10,21 @@
 - [Solução de problemas](troubleshooting.md) — falhas comuns de build e configuração.
 - [Segurança](security.md) — senha padrão, SSH, cadeia de suprimentos e limitações.
 - [Manifesto de dependências](dependencies-manifest.md) — contrato `forge.json` com o Giochi app.
+- [Mapas de botões](button-maps.md) — de onde vêm os códigos evdev de cada aparelho.
+- [Catálogo RK3326](rk3326-catalog.md) — 15 aparelhos extraídos de device tree.
+- [`giochi-init`](giochi-init.md) — a camada de boot e o que falta para ligá-la.
 
 ## Estado atual
 
 - `qemu-aarch64`: device de referência **habilitado** para validar o pipeline ARM64.
-- `powkiddy-x55`: placeholder ARM64 **desabilitado**.
+- Drafts ARM64 **desabilitados**: `powkiddy-x55` (RK3566), `powkiddy-x35s`,
+  `powkiddy-x35h` e `r35s` (RK3326).
 - `steamdeck`: placeholder x86_64 **desabilitado**.
 - Buildroot fixado em `2024.02` no arquivo [`buildroot.version`](../buildroot.version).
 - O workflow principal gera imagens por device e publica artefatos no GitHub Actions.
+
+O estado detalhado — o que está verificado, o que só o CI pode provar e o que
+falta — fica em [`AGENTS.md`](../AGENTS.md), que é o documento a ler primeiro.
 
 ## Princípios
 
