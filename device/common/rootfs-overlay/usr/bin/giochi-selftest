@@ -1,0 +1,277 @@
+#!/bin/sh
+# giochi-selftest — verifica se o hardware e as camadas de software estão
+# acordando, do kernel até o render 3D.
+#
+# Roda no APARELHO, não no PC. Serve para responder uma pergunta só:
+# "este aparelho está convergindo?" — e produzir um relatório que dá para
+# colar numa issue.
+#
+# POSIX sh (busybox ash). Sem dependência obrigatória: cada checagem degrada
+# para SKIP quando a ferramenta não existe na imagem.
+#
+# Uso:
+#   giochi-selftest              # relatório no terminal
+#   giochi-selftest > r.txt      # salvar
+#   giochi-selftest --quiet      # só as falhas
+#
+# Saída: PASS (funciona), WARN (parcial / a conferir), FAIL (não funciona),
+# SKIP (não aplicável ou ferramenta ausente). Exit 1 se houver FAIL.
+
+QUIET=0
+[ "$1" = "--quiet" ] && QUIET=1
+
+PASS=0; WARN=0; FAIL=0; SKIP=0
+
+say() { [ "$QUIET" -eq 1 ] && return 0; printf '%s\n' "$*"; }
+pass() { PASS=$((PASS+1)); say "  [PASS] $*"; }
+warn() { WARN=$((WARN+1)); say "  [WARN] $*"; }
+fail() { FAIL=$((FAIL+1)); say "  [FAIL] $*"; }
+skip() { SKIP=$((SKIP+1)); say "  [SKIP] $*"; }
+head2() { say ""; say "── $* ──"; }
+
+read_or() {
+    # read_or <arquivo> — primeira linha, ou vazio
+    [ -r "$1" ] || return 0
+    head -n 1 "$1" 2>/dev/null
+}
+
+now() { date '+%Y-%m-%d %H:%M:%S' 2>/dev/null; }
+
+say "Giochi self-test"
+say "  quando: $(now)"
+say "  host:   $(hostname 2>/dev/null)"
+say "  kernel: $(uname -srv 2>/dev/null)"
+
+# ── identidade ───────────────────────────────────────────────
+head2 "identidade do aparelho"
+
+MODEL=""
+if [ -r /proc/device-tree/model ]; then
+    # termina em NUL: cortar no primeiro zero
+    MODEL=$(tr -d '\000' </proc/device-tree/model)
+fi
+
+if [ -n "$MODEL" ]; then
+    pass "device tree: $MODEL"
+else
+    fail "sem /proc/device-tree/model — kernel não carregou DTB?"
+fi
+
+if [ -r /etc/giochi-system-release ]; then
+    pass "release: $(read_or /etc/giochi-system-release)"
+else
+    warn "sem /etc/giochi-system-release"
+fi
+
+# ── entropia ─────────────────────────────────────────────────
+# Sem TRNG o crng inicializa tarde e getrandom() bloqueia. Já medido em 11 s
+# num boot e 1024 s em outro.
+head2 "entropia"
+RNG="$(read_or /sys/class/misc/hw_random/rng_current)"
+if [ -n "$RNG" ] && [ "$RNG" != "none" ]; then
+    pass "hwrng: $RNG"
+else
+    warn "sem hwrng — crng pode demorar; ver nó &rng no DTS"
+fi
+
+# ── armazenamento ────────────────────────────────────────────
+head2 "armazenamento"
+if command -v lsblk >/dev/null 2>&1; then
+    pass "blocos: $(lsblk -dn -o NAME,SIZE 2>/dev/null | tr '\n' ' ')"
+else
+    skip "lsblk ausente"
+fi
+ROOT_DEV=$(awk '$2=="/" {print $1}' /proc/mounts 2>/dev/null | head -n 1)
+if [ -n "$ROOT_DEV" ]; then
+    pass "rootfs em $ROOT_DEV"
+else
+    fail "não achei o rootfs em /proc/mounts"
+fi
+
+# ── display / DRM ────────────────────────────────────────────
+# Esta é a cadeia que mais falha, e onde o sintoma (tela preta) não diz nada
+# sobre a causa. Por isso cada elo é verificado separadamente.
+head2 "display (DRM)"
+
+if [ -e /dev/dri/card0 ]; then
+    pass "/dev/dri/card0 presente"
+else
+    fail "/dev/dri/card0 AUSENTE — sem console gráfico (suspeite do PHY DSI)"
+fi
+
+if [ -e /dev/dri/renderD128 ]; then
+    pass "render node presente (3D disponível para processos)"
+else
+    warn "sem /dev/dri/renderD128 — 3D pode não inicializar"
+fi
+
+DRM_DRIVER=""
+[ -r /sys/class/drm/card0/device/driver ] && \
+    DRM_DRIVER=$(basename "$(readlink -f /sys/class/drm/card0/device/driver 2>/dev/null)" 2>/dev/null)
+[ -n "$DRM_DRIVER" ] && pass "driver DRM: $DRM_DRIVER" || warn "driver DRM não identificado"
+
+CONNECTED=0
+for c in /sys/class/drm/card0-*; do
+    [ -d "$c" ] || continue
+    st="$(read_or "$c/status")"
+    name=$(basename "$c")
+    [ "$st" = "connected" ] || continue
+    CONNECTED=$((CONNECTED+1))
+    mode=$(head -n 1 "$c/modes" 2>/dev/null)
+    pass "conector $name: connected $mode"
+done
+[ "$CONNECTED" -eq 0 ] && fail "nenhum conector 'connected' — painel não subiu"
+
+BL=""
+for b in /sys/class/backlight/*; do
+    [ -d "$b" ] || continue
+    BL="$(read_or "$b/brightness")/$(read_or "$b/max_brightness")"
+    break
+done
+[ -n "$BL" ] && pass "backlight: $BL" || warn "sem backlight em /sys/class/backlight"
+
+# ── render 3D ────────────────────────────────────────────────
+head2 "render 3D"
+
+if [ -n "$DRM_DRIVER" ]; then
+    case "$DRM_DRIVER" in
+        panfrost|msm|etnaviv|lima|v3d|virtio_gpu|vgem) pass "driver de GPU reconhecido: $DRM_DRIVER" ;;
+        *) warn "driver DRM '$DRM_DRIVER' — não é GPU conhecida; 3D pode ser software" ;;
+    esac
+fi
+
+# EGL/GLES: sem binário de teste não há como provar. Não fingir.
+if command -v kmscube >/dev/null 2>&1; then
+    if timeout 10 kmscube -D /dev/dri/card0 >/dev/null 2>&1; then
+        pass "kmscube rodou (EGL/GLES + scanout OK)"
+    else
+        fail "kmscube falhou — EGL/GLES ou scanout quebrado"
+    fi
+else
+    skip "kmscube ausente — não dá para provar 3D; habilitar BR2_PACKAGE_KMSCUBE"
+fi
+
+if [ -r /proc/meminfo ]; then
+    pass "RAM: $(awk '/MemTotal/ {printf "%d MB", $2/1024}' /proc/meminfo)"
+fi
+
+# ── entrada ──────────────────────────────────────────────────
+head2 "entrada"
+
+EVENTS=$(ls /dev/input/event* 2>/dev/null | wc -l)
+if [ "$EVENTS" -gt 0 ]; then
+    pass "$EVENTS dispositivo(s) /dev/input/event*"
+else
+    fail "nenhum /dev/input/event* — sem controle"
+fi
+
+for n in /sys/class/input/event*/device/name; do
+    [ -r "$n" ] || continue
+    say "         nome: $(read_or "$n")"
+done
+
+if [ -r /etc/giochi/buttons.map ]; then
+    MAPS=$(grep -c '=' /etc/giochi/buttons.map 2>/dev/null)
+    pass "/etc/giochi/buttons.map ($MAPS entradas)"
+else
+    fail "/etc/giochi/buttons.map AUSENTE — launcher usaria o padrão embutido"
+fi
+
+# ── áudio ────────────────────────────────────────────────────
+head2 "áudio"
+
+if [ -r /proc/asound/cards ]; then
+    CARDS=$(grep -c '^\s*[0-9]' /proc/asound/cards 2>/dev/null)
+    if [ "${CARDS:-0}" -gt 0 ]; then
+        pass "placas de som: $(grep '^\s*[0-9]' /proc/asound/cards | sed 's/^ *//' | tr '\n' ' ')"
+    else
+        fail "nenhuma placa de som — asoc provavelmente em deferred probe"
+    fi
+else
+    fail "sem /proc/asound — ALSA não carregou"
+fi
+
+if command -v amixer >/dev/null 2>&1; then
+    MUX=$(amixer sget "Playback Mux" 2>/dev/null | grep -o "Item0: '[A-Z]*'" | head -n 1)
+    if [ -n "$MUX" ]; then
+        case "$MUX" in
+            *HP*) pass "Playback Mux = $MUX" ;;
+            *) fail "Playback Mux = $MUX — falante fica MUDO; precisa ser HP" ;;
+        esac
+    else
+        warn "não achei o controle 'Playback Mux'"
+    fi
+else
+    skip "amixer ausente"
+fi
+
+# ── USB ──────────────────────────────────────────────────────
+head2 "USB"
+UDC=$(ls /sys/class/udc 2>/dev/null)
+if [ -n "$UDC" ]; then
+    pass "UDC: $UDC · estado $(read_or /sys/class/udc/$UDC/state)"
+else
+    warn "sem UDC — sem gadget USB (rede por USB/SSH indisponível)"
+fi
+
+# ── rede ─────────────────────────────────────────────────────
+head2 "rede"
+IFACES=$(ls /sys/class/net 2>/dev/null | grep -v '^lo$' | tr '\n' ' ')
+if [ -n "$IFACES" ]; then
+    pass "interfaces: $IFACES"
+else
+    warn "nenhuma interface além de lo"
+fi
+
+# ── energia ──────────────────────────────────────────────────
+head2 "energia"
+BAT=""
+for p in /sys/class/power_supply/*; do
+    [ "$(read_or "$p/type")" = "Battery" ] || continue
+    BAT="$(read_or "$p/capacity")% ($(read_or "$p/status"))"
+    break
+done
+[ -n "$BAT" ] && pass "bateria: $BAT" || warn "sem bateria detectada"
+
+TEMP=""
+for t in /sys/class/thermal/thermal_zone*; do
+    [ -r "$t/temp" ] || continue
+    TEMP="$(( $(read_or "$t/temp") / 1000 ))C"
+    break
+done
+[ -n "$TEMP" ] && pass "temperatura: $TEMP" || warn "sem zona térmica"
+
+# ── camada Giochi ────────────────────────────────────────────
+head2 "camada Giochi"
+
+if [ "$(cat /proc/1/comm 2>/dev/null)" = "giochi-init" ]; then
+    pass "PID 1 é giochi-init"
+elif [ -x /usr/bin/giochi-init ]; then
+    warn "giochi-init existe mas não é o PID 1 ($(cat /proc/1/comm 2>/dev/null))"
+else
+    fail "giochi-init ausente"
+fi
+
+if [ -r /opt/giochi/apps/index.json ]; then
+    pass "catálogo de apps: $(grep -c '"id"' /opt/giochi/apps/index.json) app(s)"
+else
+    warn "sem /opt/giochi/apps/index.json — a grade ficaria vazia"
+fi
+
+# ── resumo ───────────────────────────────────────────────────
+say ""
+say "════════════════════════════════════════"
+say "  PASS $PASS · WARN $WARN · FAIL $FAIL · SKIP $SKIP"
+say "════════════════════════════════════════"
+
+if [ "$FAIL" -gt 0 ]; then
+    say ""
+    say "Há falha(s). Ordem de investigação, do mais provável:"
+    say "  1. tela preta        -> DTB errado, não kernel (ver docs/troubleshooting.md)"
+    say "  2. sem /dev/dri      -> CONFIG_PHY_ROCKCHIP_INNO_DSIDPHY=y (nunca =m)"
+    say "  3. mudou o Mux       -> Playback Mux precisa ser HP"
+    say "  4. sem botão         -> buttons.map e o driver do joypad"
+    exit 1
+fi
+
+exit 0

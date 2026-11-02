@@ -34,6 +34,11 @@ BR2_PACKAGE_RSYNC=y
 BR2_PACKAGE_STRACE=y
 BR2_PACKAGE_UTIL_LINUX=y
 
+# `giochi-selftest` precisa de um binário para PROVAR que EGL/GLES e scanout
+# funcionam — checar /dev/dri só mostra que o driver carregou. kmscube desenha
+# de verdade e apresenta na tela; se ele roda, 3D está de pé.
+BR2_PACKAGE_KMSCUBE=y
+
 # Console serial legível em placas e handhelds.
 BR2_TARGET_GENERIC_GETTY_BAUDRATE_115200=y
 
