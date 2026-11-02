@@ -77,7 +77,10 @@ if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(args.hostname)) {
   throw new Error(`Hostname inválido: ${args.hostname}`);
 }
 
-const password = String(args["root-password"] || process.env.ROOT_PASSWORD || "giochi");
+// Padrão de desenvolvimento. Precisa respeitar a validação logo abaixo:
+// `giochi` tinha 6 caracteres e quebrava o build no CI, onde o secret
+// ROOT_PASSWORD não existe e o fallback entra em ação.
+const password = String(args["root-password"] || process.env.ROOT_PASSWORD || "giochi-dev");
 if (!/^[A-Za-z0-9._@-]{8,128}$/.test(password)) {
   throw new Error(
     "A senha de root deve ter 8–128 caracteres e usar apenas letras, números, ponto, hífen, underscore ou @.",

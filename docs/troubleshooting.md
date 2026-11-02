@@ -124,7 +124,7 @@ git update-index --chmod=+x <arquivo>
 
 ## Senha de root não funciona
 
-- O build usa `ROOT_PASSWORD` ou o padrão `giochi`.
+- O build usa `ROOT_PASSWORD` ou o padrão `giochi-dev`.
 - A senha é definida no `.config` e aplicada ao rootfs.
 - Se você alterou a imagem depois, a senha pode ter mudado.
 - O `buildroot.config` do artefato tem a senha redigida; não tente recuperá-la dele.

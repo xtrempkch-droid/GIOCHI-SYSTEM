@@ -57,7 +57,7 @@ out/qemu-aarch64/
 | Variável | Padrão | Uso |
 | --- | --- | --- |
 | `BUILDROOT_VERSION` | conteúdo de `buildroot.version` | Fixa outra versão do Buildroot. |
-| `ROOT_PASSWORD` | `giochi` | Senha de root da imagem (8–128 caracteres seguros). |
+| `ROOT_PASSWORD` | `giochi-dev` | Senha de root da imagem (8–128 caracteres seguros). |
 | `GIOCHI_SYSTEM_WORK_DIR` | `/tmp/giochi-system-work` | Diretório de extração/build. |
 | `GIOCHI_SYSTEM_CACHE_DIR` | `/tmp/giochi-system-cache` | Downloads e cache do Buildroot. |
 | `GIOCHI_SYSTEM_CCACHE_DIR` | `<cache>/ccache` | Cache de compilação. Vazio desabilita `BR2_CCACHE`. |

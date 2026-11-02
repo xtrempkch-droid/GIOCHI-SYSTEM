@@ -7,7 +7,7 @@
 #
 # Variáveis úteis:
 #   BUILDROOT_VERSION     sobrescreve buildroot.version
-#   ROOT_PASSWORD          senha de root (padrão: giochi)
+#   ROOT_PASSWORD          senha de root (padrão: giochi-dev)
 #   GIOCHI_SYSTEM_WORK_DIR    diretório de trabalho (padrão: /tmp/giochi-system-work)
 #   GIOCHI_SYSTEM_CACHE_DIR   cache de downloads (padrão: /tmp/giochi-system-cache)
 #   GIOCHI_SYSTEM_OUT_DIR     saída (padrão: <repo>/out/<device>)
@@ -78,7 +78,7 @@ if [[ ${#OVERLAYS[@]} -eq 0 || ${#ARTIFACTS[@]} -eq 0 ]]; then
   exit 2
 fi
 
-ROOT_PASSWORD="${ROOT_PASSWORD:-giochi}"
+ROOT_PASSWORD="${ROOT_PASSWORD:-giochi-dev}"
 JOBS="${JOBS:-$(nproc)}"
 if [[ ! "$JOBS" =~ ^[1-9][0-9]*$ ]]; then
   echo "ERRO: JOBS inválido: $JOBS" >&2
