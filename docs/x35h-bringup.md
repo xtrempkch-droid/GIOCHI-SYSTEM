@@ -197,7 +197,7 @@ Procedimento: ligar, esperar ~40 s, desligar, tirar o cartão, ler a partição
 | Item | Valor |
 | --- | --- |
 | Imagem | `giochi-system-powkiddy-x35h-sd.img`, 2.0 GiB |
-| SHA256 | `9f1a7d370b9be3777f812c08f93aca6b3ac3e082809f8efc8ec0b33d43949ded` |
+| SHA256 | `9f1a7d37…` (1ª gravação) · `57d232f6e085dee3cdcef4189edebd8d55d65c26588a36a4fd9dbe76c02ec5fa` (2ª, com o bootlog corrigido) |
 | Cartão | `Multi-Reader -3`, 29.7 GiB (slot 4 do leitor; os outros três vazios) |
 | Conferência | SHA256 relido **do cartão** depois da gravação — confere |
 | Estrutura no cartão | idbloader `RKNS` no setor 64, FIT `d00dfeed` no setor 16384, p1 em LBA 131072 |
@@ -209,6 +209,46 @@ já custou uma gravação no lugar errado neste projeto.
 
 O cartão já tinha rótulos de uma gravação anterior (`GIOCHI_BOOT` + `rootfs`),
 então é mídia de teste descartável — nada de valor foi perdido ao sobrescrever.
+
+### 5.2 O log não apareceu — e a causa foi medida
+
+Primeira tentativa: LED aceso, **tela preta**, e **nenhum `giochi-boot.log`** no
+cartão. Sem console serial, "não tem log" é indistinguível de "não ligou" — e
+era o problema mais grave dos dois.
+
+Causa, encontrada no `.config` do busybox da imagem:
+
+```text
+# CONFIG_FEATURE_MOUNT_LABEL is not set
+```
+
+Sem essa opção o `mount` do busybox **não resolve `PARTUUID=`, `UUID=` nem
+`LABEL=`** — isso é recurso do util-linux. A string vai crua para o kernel, que
+responde `ENODEV`. O script montava com:
+
+```sh
+mount -t vfat PARTUUID=47494f43-01 /mnt     # nunca funcionou
+```
+
+O `CONFIG_VFAT_FS` do kernel estava `=y`, então o filesystem nunca foi o
+problema. O log era gravado só em `/var/log/giochi-boot.log`, dentro do rootfs —
+onde o PC não alcança.
+
+Correções aplicadas:
+
+| Antes | Agora |
+| --- | --- |
+| `mount PARTUUID=...` | localiza a partição **pelo conteúdo**: a que tem `extlinux/extlinux.conf` ou `boot.scr` |
+| lista fixa de dispositivos | glob (`/dev/mmcblk*p1`, `/dev/sd*[0-9]`), porque o nome depende de como o driver enumerou |
+| falha se já estiver montada | reaproveita o ponto existente e **não desmonta o que não montou** (medido: com o cartão montado pelo udisks2, o mount falha com "already mounted or mount point busy") |
+| só no fim do boot | **duas fases**: `S10bootlog` grava `dmesg` + DRM logo no início; `S96bootlog` acrescenta rede e selftest |
+
+A fase early existe porque, se um serviço travasse o boot, a fase final nunca
+rodaria — e o diagnóstico seria de novo "não ligou".
+
+`CONFIG_VFAT_FS`, `CONFIG_FAT_FS` e os NLS entraram no `kernel-required.txt`:
+vêm do defconfig arm64, e num aparelho sem console esta é a única saída de
+diagnóstico.
 
 **Para testar:** colocar no X35H e ligar. Não há TTL neste aparelho; o
 diagnóstico sai em `giochi-boot.log`, na partição FAT (`GIOCHI_BOOT`), que

@@ -1121,6 +1121,43 @@ ERRO: pacote(s) removido(s) desde o último build: DROPBEAR
 seguro quando a configuração não mudou de forma que remova coisa.** Acrescentar
 pacote é seguro; remover e renomear, não.
 
+### 12.28 `mount` do busybox não resolve `PARTUUID=`/`UUID=`/`LABEL=`
+
+O `S96bootlog` do X35H montava a partição de boot assim:
+
+```sh
+mount -t vfat PARTUUID=47494f43-01 /mnt
+```
+
+Nunca funcionou, e o sintoma foi **"não tem giochi-boot.log"** — que num
+aparelho sem console serial é indistinguível de "não ligou".
+
+Causa medida no `.config` do busybox da própria imagem:
+
+```text
+# CONFIG_FEATURE_MOUNT_LABEL is not set
+```
+
+Essa opção é o que dá ao `mount` a capacidade de traduzir `PARTUUID=`, `UUID=` e
+`LABEL=` para um dispositivo. Sem ela, a string vai **crua** para o kernel, que
+responde `ENODEV`. É recurso do util-linux, não do kernel.
+
+Detalhe que engana: `CONFIG_VFAT_FS=y` estava certo. O filesystem nunca foi o
+problema — o nome do dispositivo era.
+
+**Regra:** para montar por identificador dentro da imagem, ou ligue
+`CONFIG_FEATURE_MOUNT_LABEL` no fragmento comum de busybox, ou localize a
+partição **pelo conteúdo**. A segunda é melhor quando existe um marcador
+confiável: o `giochi-bootlog` procura a partição que tem
+`extlinux/extlinux.conf` ou `boot.scr`, e isso não depende de applet, de
+util-linux nem do nome que o driver deu ao dispositivo (que muda entre
+`mmcblk0p1`, `mmcblk1p1`, `sda1`…).
+
+Armadilha secundária, também medida: com a partição **já montada** (udisks2 no
+host, ou um serviço antes), o `mount` falha com
+`already mounted or mount point busy` — mensagem que não diz o motivo. O script
+agora reaproveita o ponto existente e **nunca desmonta o que não montou**.
+
 ## 13. Aparelhos
 
 | ID | Pasta | SoC | Arch | Status | Falta |
