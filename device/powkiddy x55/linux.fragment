@@ -52,7 +52,10 @@ CONFIG_MMC_SDHCI_OF_DWCMSHC=y
 # ── entrada: 17 botões + 4 eixos ────────────────────────────
 #
 # NÃO é gpio-keys. Os botões e analógicos passam pelo `rocknix-joypad`
-# (fora da árvore): 17 botões GPIO + 4 eixos por SARADC.
+# (fora da árvore). Conferido no DTS mainline do 6.12: os 16 botões de gamepad
+# JÁ estão em `gpio-keys-control` com códigos BTN_* próprios, e o volume em
+# `gpio-keys-vol`. O `rocknix-joypad` só seria necessário para algo que o DTS
+# não declare — o que falta hoje são os 4 eixos analógicos (`adc-joystick`).
 # Só o volume é gpio-keys mainline.
 CONFIG_INPUT=y
 CONFIG_INPUT_EVDEV=y
@@ -67,9 +70,16 @@ CONFIG_INPUT_JOYSTICK=y
 CONFIG_JOYSTICK_ROCKNIX=y
 CONFIG_KEYBOARD_GPIO=y
 
-# SARADC: os 4 eixos do joypad (io-channels 2,3,0,1 → key-RY/RX/LY/LX).
+# SARADC + adc-joystick: os 4 eixos analógicos do aparelho.
+#
+# `CONFIG_IIO` e `SARADC` sozinhos NÃO bastam: o nó `adc-joystick` do DTS é
+# atendido por drivers/input/joystick/adc-joystick.c. Sem
+# `CONFIG_JOYSTICK_ADC` ele nunca probeia e os 4 eixos não existem — sem
+# nenhuma linha de erro. Medido no X55: /proc/bus/input/devices listava
+# gpio-keys-control, gpio-keys-vol e o codec, e nenhum dispositivo de eixos.
 CONFIG_IIO=y
 CONFIG_ROCKCHIP_SARADC=y
+CONFIG_JOYSTICK_ADC=y
 
 # ── áudio: RK817 em I2S ──────────────────────────────────────
 #

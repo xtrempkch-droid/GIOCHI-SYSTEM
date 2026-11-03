@@ -91,7 +91,8 @@ Evolução medida, mesma máquina, com as correções entrando uma a uma:
 | --- | --- | --- |
 | primeira imagem que bootou | `PASS 15 · WARN 5 · FAIL 1 · SKIP 2` | sem patch de DTS, amplificador `=m` |
 | com `patches/0001-…-dts.patch` e amplificador `=y` | `PASS 17 · WARN 4 · FAIL 0 · SKIP 2` | `hwrng` e placa de som aparecem |
-| com `S15modules` (autoload dos módulos) | **`PASS 18 · WARN 3 · FAIL 0 · SKIP 2`** | `wlan0` sobe no boot |
+| com `S15modules` (autoload dos módulos) | `PASS 18 · WARN 3 · FAIL 0 · SKIP 2` | `wlan0` sobe no boot |
+| com `CONFIG_JOYSTICK_ADC` + patch 0002 (BTN_MODE) | **`PASS 20 · WARN 3 · FAIL 0 · SKIP 2`** | 4 eixos e 17º botão aparecem |
 
 O boot também caiu de **11,7 s para 2,1 s** até o `sshd` subir: com o `&rng
 okay`, o `crng` está pronto quando o userspace começa, e nada espera entropia.
@@ -328,6 +329,75 @@ Resultado: `PASS 18 · FAIL 0` de novo, com `S15modules` e `wlan0` no boot.
 **Regra:** nunca limpar a partição montada em `/`. Para trocar o rootfs, use
 `gzwrite` no U-Boot, a imagem de cartão com o cartão no leitor, ou um segundo
 cartão — nunca a raiz corrente.
+
+## Controles: 17 botões e 4 eixos, sem driver fora da árvore
+
+Correção de um diagnóstico anterior deste repositório. A documentação dizia que
+"16 dos 17 botões não funcionam" e que o `rocknix-joypad` era obrigatório. Ao
+ler o DTS mainline do 6.12 direto na árvore do kernel:
+
+```text
+gpio-keys-control: 16 botões com códigos BTN_* próprios
+   EAST/SOUTH/NORTH/WEST, DPAD-UP/DOWN/LEFT/RIGHT,
+   TL/TR/TL2/TR2, SELECT, START, THUMBL, THUMBR
+gpio-keys-vol: 2 botões (KEY_VOLUMEUP/DOWN)
+```
+
+Os GPIOs conferem com o mapa do projeto (`gpio3 PD3` = EAST, `gpio4 PA0` =
+DPAD-UP, etc.). Ou seja: **16 dos 17 já funcionavam pelo driver mainline**. O
+`rocknix-joypad` só seria necessário para algo que o DTS não declare.
+
+O que realmente faltava eram **duas** coisas, agora medidas no aparelho:
+
+| Falta | Causa | Correção |
+| --- | --- | --- |
+| botão `F` (MODE, `gpio3 PB7`) | o DTS mainline não o declara | `patches/0002-giochi-system-x55-btn-mode.patch` |
+| 4 eixos analógicos | `CONFIG_JOYSTICK_ADC` não estava ligado — o nó `adc-joystick` do DTS ficava sem driver | `=y` no `linux.fragment` e em `kernel-required.txt` |
+
+Prova no aparelho, lendo o bitmap de capacidades do kernel:
+
+```text
+antes:  key 6fdb000000000000 …      → 16 botões
+depois: key 7fdb000000000000 …      → 17 botões (novo bit 0x13c = BTN_MODE)
+
+adc-joystick | abs: 1b              → ABS_X|ABS_Y|ABS_RX|ABS_RY
+```
+
+`giochi-selftest` passou a **contar** em vez de listar nomes:
+
+```text
+  [PASS] botões de gamepad: 17 (gpio-keys-control)
+  [PASS] eixos analógicos: 4 (adc-joystick)
+  [PASS] /etc/giochi/buttons.map (31 entradas)
+```
+
+### Duas armadilhas dentro da correção
+
+1. **`awk` do busybox não tem `strtonum`.** A primeira versão do contador de
+   bits usava `strtonum("0x" $i)`, que é extensão do gawk: no busybox devolve
+   vazio em silêncio e o teste "passa" com contagem zero. A versão que ficou
+   conta dígito a dígito com `index`/`substr`.
+2. **`kernel-required.txt` é separado do fragmento por um motivo.** O
+   `assert-kernel-config` acusou na hora: `CONFIG_JOYSTICK_ADC: pedido =y, ficou
+   is not set`. O `str.replace` do script de edição não aplicou (texto do
+   comentário diferente) e o fragmento ficou sem a linha — o gate pegou o que um
+   build manual não pegaria.
+
+## Wi-Fi conecta sozinho no boot
+
+`config/common/rootfs-overlay/etc/init.d/S40wifi` conecta **se** existir
+`/etc/wpa_supplicant.conf`. O arquivo não vem na imagem: contém a senha da rede
+e senha não se versiona. Provisionamento é um comando só:
+
+```sh
+wpa_passphrase 'MINHA-REDE' 'MINHA-SENHA' > /etc/wpa_supplicant.conf
+chmod 600 /etc/wpa_supplicant.conf
+```
+
+Depois disso, medido após `reboot`: `wlan0` fica `UP 192.168.1.6/24` e o SSH
+responde sem nenhuma intervenção. Sem o arquivo, o script sai em silêncio — a
+maioria dos boots de diagnóstico não tem rede configurada e erro a cada boot
+vira ruído.
 
 ## Wi-Fi com internet (medido)
 

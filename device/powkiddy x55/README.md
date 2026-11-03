@@ -5,9 +5,10 @@ MIPI-DSI **720×1280**. É o único aparelho do projeto que já bootou em hardwa
 real — no antecessor `GIOCHI-KONSOL-OS`. Este diretório traz aquele
 conhecimento para cá.
 
-Status: **draft** — mas **boota em hardware real**: tela 720x1280, áudio, Wi-Fi
-e console. Relatório medido em [`docs/x55-bringup.md`](../../docs/x55-bringup.md).
-Continua draft porque os botões do joypad ainda não existem.
+Status: **draft** — mas **boota em hardware real** com tela 720x1280, áudio,
+Wi-Fi, console, **17 botões de gamepad e 4 eixos analógicos**. Relatório medido
+em [`docs/x55-bringup.md`](../../docs/x55-bringup.md). Continua draft porque falta
+firmware de Bluetooth e a interface de jogos (que é do `Giochi app`).
 
 ## De onde veio cada coisa
 
@@ -68,10 +69,12 @@ copiado sem conferência, e o que não foi verificado está marcado como tal.
 
 Nenhum item é configuração de símbolo — são código e layout:
 
-1. **`rocknix-joypad`** (driver fora da árvore) + o shim `input-polldev.h`, que a
-   API foi removida no Linux 6.12. Sem isso, **nenhum botão funciona** além do
-   volume. O nó precisa ser **filho direto da raiz** do device tree; aninhado, o
-   `platform_driver` não registra.
+1. ~~**`rocknix-joypad`**~~ — **desnecessário para a X55.** Medido no aparelho: o
+   DTS mainline já declara 16 botões em `gpio-keys-control` (com os mesmos
+   códigos `BTN_*` do mapa deste diretório), e o `adc-joystick` cobre os 4 eixos
+   com `CONFIG_JOYSTICK_ADC=y`. O 17º botão (`BTN_MODE`, `gpio3 PB7`) entra pelo
+   patch `patches/0002-giochi-system-x55-btn-mode.patch`. O driver fora da árvore
+   só seria necessário para algo que o DTS não declare.
 2. **Patches de DTS** (receitas F2/F3/F4 da doc de hardware):
    - `&hdmi { status = "disabled" }` e `&hdmi_sound { status = "disabled" }`;
    - `&sdmmc1 { no-mmc; no-sd; sd-uhs-sdr50; }` — sem isso o probe do Wi-Fi falha

@@ -25,6 +25,7 @@
   "bootNotes": "DTS mainline desde a v6.8 (rockchip/rk3566-powkiddy-x55), kernel 6.12, U-Boot mainline 2024.10 (defconfig powkiddy-x55-rk3566), DDR+BL31 do rkbin (rk3566_ddr_1056MHz_v1.18 / rk3568_bl31_v1.43). Console ttyS2 a 1500000n8. Painel HX8394 720x1280 com rotation=270, backlight em pwm4 (25000 ns); o PHY DSI precisa ser =y, nunca =m, senão o painel recebe EPROBE_DEFER e não existe /dev/dri/card0. Áudio RK817 por i2s1_8ch: o Playback Mux tem de ficar em HP, senão o aparelho fica mudo. Os 17 botões dependem do driver FORA DA ÁRVORE rocknix-joypad (nó na raiz do DT, mais o shim input-polldev removido no 6.12); sem ele só o volume funciona. Wi-Fi/BT RTL8821CS integrados: o Bluetooth exige rtl8821cs_config.bin gerado de 25 bytes (o do linux-firmware não serve). Falta para bootar de cartão: genimage/idbloader e os patches de DTS documentados em README.md.",
   "docs": "README.md",
   "kernelPatches": [
-    "patches/0001-giochi-system-x55-dts.patch"
+    "patches/0001-giochi-system-x55-dts.patch",
+    "patches/0002-giochi-system-x55-btn-mode.patch"
   ]
 }

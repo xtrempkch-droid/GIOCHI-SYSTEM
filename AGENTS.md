@@ -99,7 +99,8 @@ giochi-system-x55 login:
 | --- | --- |
 | primeira imagem que bootou | PASS 15 · WARN 5 · **FAIL 1** · SKIP 2 |
 | + patch de DTS + amplificador `=y` | PASS 17 · WARN 4 · **FAIL 0** · SKIP 2 |
-| + `S15modules` (autoload) | **PASS 18 · WARN 3 · FAIL 0 · SKIP 2** |
+| + `S15modules` (autoload) | PASS 18 · WARN 3 · FAIL 0 · SKIP 2 |
+| + `CONFIG_JOYSTICK_ADC` + patch 0002 (BTN_MODE) | **PASS 20 · WARN 3 · FAIL 0 · SKIP 2** |
 
 O que passou e é o que importa para "sair do console":
 
@@ -109,7 +110,9 @@ O que passou e é o que importa para "sair do console":
 - **`wlan0` com MAC real** e `iw scan` devolvendo redes (`Kill.exe`, -24 dBm);
 - áudio: `0 [rk817ext]: simple-card - rk817_ext`;
 - `hwrng: rockchip-rng`;
-- `gpio-keys-vol` e `gpio-keys-control`, `/etc/giochi/buttons.map` (31 linhas);
+- **17 botões de gamepad** (`gpio-keys-control`, inclui BTN_MODE pelo patch 0002);
+- **4 eixos analógicos** (`adc-joystick`, ABS_X/Y/RX/RY) — exige `CONFIG_JOYSTICK_ADC`;
+- `gpio-keys-vol` e `/etc/giochi/buttons.map` (31 linhas);
 - bateria `40C`, UDC `fcc00000.usb`.
 
 As três falhas fechadas, cada uma com causa medida:
@@ -119,6 +122,7 @@ As três falhas fechadas, cada uma com causa medida:
 | `--- no soundcards ---` | card `rk817_ext` usa `aux-devs = <&spk_amp>`; `SND_SOC_SIMPLE_AMPLIFIER` estava `=m` e não carrega sem autoload | `=y` no `linux.fragment` |
 | `sem hwrng` | `rng@fe388000` nasce `disabled` no `rk356x.dtsi` | `&rng { status = "okay" }` no patch de DTS |
 | `nenhuma interface além de lo` | módulos `=m` e o rootfs não tem `/etc/modules` nem `modules-load` | `rootfs-overlay/etc/init.d/S15modules` |
+| sem `adc-joystick` | nó do DTS sem driver: `CONFIG_JOYSTICK_ADC` não estava ligado | `=y` no `linux.fragment` + `kernel-required.txt` |
 
 Ganho colateral medido: boot até o `sshd` caiu de **11,7 s para 2,1 s** com
 entropia disponível desde o começo.
@@ -675,7 +679,18 @@ o rootfs, use uma destas vias:
 Detalhe: o `gzwrite` **não** depende do host depois do envio; parar o container
 não interrompe a gravação.
 
-### 12.14 `BR2_TARGET_GENERIC_GETTY_BAUDRATE_*` reprograma a UART
+### 12.14 `awk` do busybox não tem `strtonum`
+
+O contador de bits do `giochi-selftest` usava `strtonum("0x" $i)`, que é extensão
+do **gawk**. No busybox awk a função não existe e a expressão devolve vazio: o
+teste "passa" com contagem zero, e um zero que parece válido é pior do que erro.
+A versão que ficou conta dígito a dígito com `index`/`substr` e uma tabela de
+pesos — funciona em busybox, gawk e mawk.
+
+Regra ao escrever shell para este rootfs: o alvo é **busybox ash + busybox awk**,
+não bash + gawk.
+
+### 12.15 `BR2_TARGET_GENERIC_GETTY_BAUDRATE_*` reprograma a UART
 
 Um baud explícito no getty faz o getty **reprogramar** a UART para aquela
 velocidade, ignorando o que o kernel configurou. No X55 (console a 1500000), o
@@ -692,7 +707,7 @@ manda no baud é a linha de comando do kernel. Verificado no rootfs do aparelho:
 | ID | Pasta | SoC | Arch | Status | Falta |
 | --- | --- | --- | --- | --- | --- |
 | `qemu-aarch64` | `qemu-aarch64/` | virtual | arm64 | **ready** | nada — é o smoke test do pipeline |
-| `powkiddy-x55` | `powkiddy x55/` | RK3566 | arm64 | draft | **boota com tela, áudio e Wi-Fi**; falta `rocknix-joypad` (botões) e firmware de BT (`rtl8821cs_fw.bin`) |
+| `powkiddy-x55` | `powkiddy x55/` | RK3566 | arm64 | draft | **boota com tela, áudio, Wi-Fi e 17 botões + 4 eixos**; falta firmware de BT (`rtl8821cs_fw.bin`) |
 | `powkiddy-x35s` | `powkiddy x35s/` | RK3326 | arm64 | draft | o mesmo + driver de joypad |
 | `powkiddy-x35h` | `powkiddy x35h/` | RK3326 | arm64 | draft | o mesmo |
 | `r35s` | `r35s/` | RK3326 | arm64 | draft | pipeline RK3326 (BL31/DDR/U-Boot), joypad fora da árvore |
@@ -705,9 +720,9 @@ O R35S é o que está mais avançado nisso: o DTB real está versionado em
 
 ## 14. Próximos passos, por ordem de risco
 
-1. **`rocknix-joypad` + shim `input-polldev`.** Sem ele, 16 dos 17 botões não
-   existem. É o maior buraco funcional: o aparelho boota, tem tela, som e Wi-Fi,
-   e não dá para jogar.
+1. **Interface de jogos (produto, não sistema).** Os controles de hardware estão
+   completos: 17 botões + 4 eixos, medidos no aparelho. O que falta é o launcher,
+   que é do `Giochi app` — este repositório entrega o sistema.
 2. **Firmware de Bluetooth**: `rtl_bt/rtl8821cs_fw.bin` não vem no
    `linux-firmware` (só `rtl8821c_fw.bin`). O `hci_uart` carrega e o chip
    responde, mas o download falha com `-2`. Junto com o `rtl8821cs_config.bin`

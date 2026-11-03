@@ -7,15 +7,17 @@ HX8394 720x1280.
 Device ID: powkiddy-x55
 Console:   ttyS2 @ 1500000 8N1
 
-O que funciona hoje nesta imagem:
-  - boot pelo cartão SD (idbloader + U-Boot + kernel + rootfs ext4)
-  - tela 720x1280 com backlight, render node do panfrost
-  - botões do volume (gpio-keys) e eixos do adc-joystick
-  - USB gadget, rede, ssh, bluetooth (pilha)
+Funcionando nesta imagem:
+  - boot pelo cartão SD, sozinho, em ~2 s
+  - tela 720x1280 com backlight e render node do panfrost
+  - 17 botões de gamepad (gpio-keys-control) + 2 de volume
+  - 4 eixos analógicos (adc-joystick, ABS_X/Y/RX/RY)
+  - áudio pelo codec RK817 (placa rk817_ext)
+  - Wi-Fi RTL8821CS (módulo carregado no boot; configurar com wpa_supplicant)
+  - USB gadget, ssh, entropia por hardware
 
-O que ainda NÃO funciona:
-  - os 17 botões do joypad: dependem do driver rocknix-joypad, fora da árvore
-  - Wi-Fi e Bluetooth RTL8821CS: falta o rtl8821cs_config.bin gerado
-  - áudio do RK817: o amplificador precisa estar embutido no kernel
+Pendente:
+  - Bluetooth: falta o firmware rtl_bt/rtl8821cs_fw.bin
+  - interface de jogos: o launcher é do Giochi app, não deste sistema
 
 Diagnóstico do aparelho:  giochi-selftest

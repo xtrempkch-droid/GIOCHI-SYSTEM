@@ -8,8 +8,12 @@
 # | DTS do **projeto** (ROCKNIX) | **`rocknix-joypad`** (fora da árvore) | SARADC, deadzone 216, escala 2 |
 #
 # Este arquivo serve para os **dois**, porque os códigos evdev dos 17 botões são
-# idênticos — mas só o DTS do projeto tem o botão `F` (MODE). No mainline puro ele
-# não existe.
+# idênticos. O botão `F` (MODE, gpio3 PB7) NÃO existe no DTS mainline puro; o
+# Giochi System o acrescenta pelo patch `patches/0002-giochi-system-x55-btn-mode.patch`.
+#
+# Conferido no aparelho com o patch aplicado:
+#   gpio-keys-control: 17 teclas declaradas, incluindo 0x13c (BTN_MODE)
+#   adc-joystick:      ABS_X|ABS_Y|ABS_RX|ABS_RY (4 eixos)
 #
 # ## O que o build do projeto usa
 #

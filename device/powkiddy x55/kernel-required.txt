@@ -36,6 +36,15 @@ CONFIG_BACKLIGHT_PWM=y
 CONFIG_PWM_ROCKCHIP=y
 CONFIG_DRM_FBDEV_EMULATION=y
 
+# ── controles ────────────────────────────────────────────────
+# Os 16 botões de gamepad vêm de `gpio-keys-control` (gpio-keys) no DTS; os 4
+# eixos analógicos vêm de `adc-joystick`, que precisa deste driver. Sem ele o
+# nó do DTS fica sem driver e os eixos não existem.
+CONFIG_INPUT_EVDEV=y
+CONFIG_INPUT_JOYSTICK=y
+CONFIG_JOYSTICK_ADC=y
+CONFIG_ROCKCHIP_SARADC=y
+
 # ── base do SoC ──────────────────────────────────────────────
 # Reguladores e clock: sem eles o PMIC RK817 não é configurado e o boot trava.
 CONFIG_REGULATOR=y

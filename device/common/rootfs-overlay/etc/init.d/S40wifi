@@ -1,0 +1,64 @@
+#!/bin/sh
+#
+# Conecta o Wi-Fi no boot, SE houver configuracao.
+#
+# O arquivo /etc/wpa_supplicant.conf NAO vem na imagem: ele carrega a senha da
+# rede do usuario, e senha nao se versiona. Quem provisiona o aparelho cria esse
+# arquivo uma vez (wpa_passphrase) e ele persiste no rootfs do cartao.
+#
+# Sem o arquivo, este script nao faz nada e nao reclama: a maioria dos boots de
+# diagnostico nao tem rede configurada, e erro a cada boot vira ruido.
+#
+# A interface e descoberta em vez de fixa: se o driver nao carregou (ou o
+# aparelho nao tem radio), o script sai limpo em vez de falhar.
+
+CONF=/etc/wpa_supplicant.conf
+
+find_iface() {
+    for candidate in /sys/class/net/wlan*; do
+        [ -e "$candidate" ] || continue
+        echo "${candidate##*/}"
+        return 0
+    done
+    return 1
+}
+
+case "$1" in
+  start)
+    [ -r "$CONF" ] || exit 0
+
+    IFACE=$(find_iface) || {
+        echo "wifi: configuracao presente, mas nenhuma interface wlan* — driver nao carregou"
+        exit 0
+    }
+
+    echo "wifi: conectando $IFACE"
+    ip link set "$IFACE" up 2>/dev/null
+    if ! command -v wpa_supplicant >/dev/null 2>&1; then
+        echo "wifi: wpa_supplicant ausente na imagem"
+        exit 0
+    fi
+    wpa_supplicant -B -i "$IFACE" -c "$CONF" -D nl80211 >/dev/null 2>&1
+
+    # udhcpc aplica o lease na interface; sem o script de eventos do BusyBox o
+    # endereco e obtido e nunca aplicado.
+    if command -v udhcpc >/dev/null 2>&1; then
+        udhcpc -i "$IFACE" -b -q -t 8 -n >/dev/null 2>&1
+    fi
+    ;;
+  stop)
+    IFACE=$(find_iface) || exit 0
+    [ -f "/var/run/wpa_supplicant/$IFACE.pid" ] && kill "$(cat "/var/run/wpa_supplicant/$IFACE.pid")" 2>/dev/null
+    [ -f "/var/run/udhcpc.$IFACE.pid" ] && kill "$(cat "/var/run/udhcpc.$IFACE.pid")" 2>/dev/null
+    ;;
+  restart|reload)
+    "$0" stop
+    "$0" start
+    ;;
+  *)
+    echo "Uso: $0 {start|stop|restart}"
+    exit 1
+    ;;
+esac
+
+exit 0
