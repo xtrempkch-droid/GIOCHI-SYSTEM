@@ -55,7 +55,17 @@ Repositório: `https://github.com/xtrempkch-droid/GIOCHI-SYSTEM` — branch `mai
 - Catálogo de 15 aparelhos RK3326 extraído dos DTBs do ROCKNIX
   (`docs/rk3326-catalog.md` + `.json`).
 - `buttons.map` por aparelho, gerado do DTB (`device/*/buttons.map`).
-- Camada de boot inicial no overlay comum: `giochi-init` e `giochi-selftest`.
+- Camada de boot ligada: `scripts/post-build.sh` acrescenta
+  `::respawn:/usr/bin/giochi-init` ao `/etc/inittab` **quando há launcher**
+  (`/opt/giochi/apps/launcher/bin/giochi-launcher`) ou o marcador
+  `/etc/giochi/boot-layer`. Verificado no rootfs real do X35H.
+- **Sistema base** definido: SSH por cabo USB em todos os aparelhos — gadget
+  RNDIS + `udhcpd` (PC recebe `10.55.0.1`, aparelho em `10.55.0.2`), OpenSSH com
+  `PermitRootLogin yes` e `UseDNS no`, `config/common.busybox.fragment` com
+  `udhcpd`/`nc`/`vi`/`ip`/`dmesg`. Ver [`docs/sistema-base.md`](docs/sistema-base.md).
+- **X35H definido**: DTS que herda o da X55, painel ST7703 no driver mainline,
+  sem rádio, `S96bootlog` gravando diagnóstico na FAT do cartão. Compila e gera
+  imagem; **não bootou em hardware**.
 - Documentação em `docs/` (12 páginas) + template de issue para aparelho novo.
 
 ### Verificado nesta sessão de retomada
@@ -1118,7 +1128,7 @@ pacote é seguro; remover e renomear, não.
 | `qemu-aarch64` | `qemu-aarch64/` | virtual | arm64 | **ready** | nada — é o smoke test do pipeline |
 | `powkiddy-x55` | `powkiddy x55/` | RK3566 | arm64 | draft | **boota com tela, áudio, Wi-Fi, BT e 16 botões + 4 eixos**; falta o launcher (do `Giochi app`) |
 | `powkiddy-x35s` | `powkiddy x35s/` | **RK3566** | arm64 | draft | DTS (compartilha com o X35H) e build |
-| `powkiddy-x35h` | `powkiddy x35h/` | **RK3566** | arm64 | draft | definição completa; falta **bootar**: tela ST7703, A/B, eixos |
+| `powkiddy-x35h` | `powkiddy x35h/` | **RK3566** | arm64 | draft | **compila e gera imagem**; falta **bootar**: tela ST7703, A/B, eixos |
 | `r35s` | `r35s/` | RK3326 | arm64 | draft | pipeline RK3326 (BL31/DDR/U-Boot), joypad fora da árvore |
 | `steamdeck` | `steamdeck/` | x86_64 | x86_64 | draft | kernel, firmware, áudio, Wi-Fi, controle |
 
