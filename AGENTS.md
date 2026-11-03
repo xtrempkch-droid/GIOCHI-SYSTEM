@@ -1460,10 +1460,26 @@ padrão de C. Downgrade explícito, também só nos tools de host:
 `-Wno-error=implicit-function-declaration`. Sai da lista quando o libffi for
 atualizado para uma versão que declare a função.
 
-**Por que o CI não reproduz:** o runner do `ubuntu-24.04` traz GCC 13/14, que
-ainda compila em `gnu17`. Verde no CI não prova build limpo em máquina nova — é o
-mesmo raciocínio do §12.32, e os dois juntos são o argumento para o projeto ter
-um `check-host.sh` que olhe versão de GCC e CMake, não só presença de comando.
+#### O que o CI alcança e o que ele não alcança (medido)
+
+Isto ficou claro num único build de CI, e vale como régua:
+
+| Problema | Quebra em | CI pegou? |
+| --- | --- | --- |
+| CMake 4.x × mínimo 3.4 | CMake ≥ 4 | **não** — runner tem CMake 3.x |
+| `[[nodiscard]]` C23 no m4 | GCC ≥ 15 | **não** — passou pelo `host-m4` |
+| declaração implícita no libffi | GCC ≥ 14 | **não** — passou pelo `host-libffi` |
+| `-std=gnu17` em C++ com `-Werror` | **qualquer** GCC | **sim**, em `host-ccache` |
+
+A leitura: o CI parou no `host-ccache`, o que prova que ele **atravessou** o
+`host-m4` e o `host-libffi` sem tropeçar — ou seja, o runner tem GCC antigo o
+bastante para os dois, mas o `-Werror` do ccache vale em qualquer versão. Por isso
+o CI pegou exatamente o único dos quatro que não depende de versão.
+
+Conclusão prática, e é o argumento para o `check-host.sh` olhar **versão** e não
+só presença de comando: **CI verde não prova build limpo em máquina nova.** Só o
+build local do zero prova, e é por isso que estes quatro ficam documentados em
+vez de apenas corrigidos.
 
 ## 13. Aparelhos
 
