@@ -1294,14 +1294,26 @@ X35H, o `rtw88` **fora** do X35H, e o firmware declarado.
 
 ## 12-B. Canal com o `Giochi app`
 
-`docs/mensagem-giochi-system.md` é **correio entre as duas equipes**, não
-documentação: mensagem com data, quem escreveu, e um assunto que precisa de
-resposta. O contrato técnico mora em `docs/launcher.md` e `docs/sistema-base.md`.
+O correio entre as duas equipes **não está no repositório**. Ele mora num arquivo
+local:
 
-Regra ao usar: acrescentar no fim, nunca editar mensagem da outra equipe; quando
-a conversa virar decisão, a decisão vai para o doc de referência e o canal só
-aponta o link. Sem isso o arquivo vira uma segunda fonte da verdade que diverge
-da primeira em silêncio — a mesma classe de problema do §12.1.
+```text
+/home/charles/Giochi/chat_de_equipe.txt        máquina  charles-X99-V9S (192.168.1.5)
+```
+
+`docs/mensagem-giochi-system.md` é só o **ponteiro**: caminho, máquina e regras.
+Não recrie o chat aqui dentro.
+
+Por que saiu do repositório: o arquivo foi trocado de lado três vezes e numa delas
+chegou **truncado** — 14 422 bytes viraram 11 150 e mensagem já escrita se perdeu.
+Um arquivo único, num só lugar, não tem o que sincronizar.
+
+Regra ao usar: **ler antes de responder** (a última mensagem pode ter mudado o que
+se ia dizer — já aconteceu); acrescentar no fim, nunca editar mensagem da outra
+equipe. Quando a conversa virar decisão, a decisão vai para o doc de referência
+(`launcher.md`, `sistema-base.md`, `giochi-init.md`) e o chat só aponta o link. Sem
+isso o arquivo vira uma segunda fonte da verdade que diverge da primeira em
+silêncio — a mesma classe de problema do §12.1.
 
 Leia esse arquivo no início de uma sessão: o que está lá é o estado mais recente
 do que o app espera do sistema, e pode ter mudado depois deste documento.
@@ -1343,6 +1355,54 @@ CMake do host é 4.2 — exportando CMAKE_POLICY_VERSION_MINIMUM=3.5
 Some da lista quando o Buildroot for atualizado para uma versão que declare
 ≥ 3.5. Até lá, build do zero em máquina com CMake 4 exige o export — e o aviso no
 log é o que impede alguém de passar horas procurando o problema no pacote.
+
+### 12.33 GCC 15 compila em C23 e quebra os *host tools* do Buildroot 2024.02
+
+Mesma família do §12.32, e aparece **logo depois** dele num build do zero: o
+GCC 15 passou a usar `-std=gnu23` por padrão, e a árvore de 2024.02 assume
+`gnu17`. O primeiro a quebrar é o `host-m4` 1.4.19 — e a mensagem não fala de
+versão de C nem de GCC:
+
+```text
+gl_oset.h:275:1: warning: 'nodiscard' attribute ignored [-Wattributes]
+  275 | GL_OSET_INLINE _GL_ATTRIBUTE_NODISCARD int
+      | ^~~~~~~~~~~~~~
+gl_oset.h:275:40: error: expected identifier or '(' before 'int'
+make[5]: *** [Makefile:2871: gl_avltree_oset.o] Error 1
+make[1]: *** [package/pkg-generic.mk:283: .../host-m4-1.4.19/.stamp_built] Error 2
+```
+
+**A causa não está no configure, está no `config.h` gerado** — a escolha é feita
+em tempo de compilação:
+
+```c
+#if 201710L < __STDC_VERSION__
+# define _GL_ATTRIBUTE_NODISCARD [[__nodiscard__]]      /* C23 */
+#elif _GL_HAS_ATTRIBUTE (warn_unused_result)
+# define _GL_ATTRIBUTE_NODISCARD __attribute__ ((__warn_unused_result__))
+```
+
+Com `gnu23`, `__STDC_VERSION__` é `202311L`, a comparação passa e ele usa a forma
+C23. Escrita **entre `inline` e `int`**, essa forma é inválida: atributo `[[...]]`
+vai no início da declaração. Com `gnu17` o valor é `201710L`, a comparação falha e
+ele usa `__attribute__`, aceito em qualquer posição. Por isso sempre funcionou.
+
+Correção em `config/package-overrides.mk`:
+
+```make
+HOST_CFLAGS += -std=gnu17
+```
+
+Restrito a **HOST** de propósito: `HOST_CXXFLAGS` é montada com `+=` na linha 252
+de `package/Makefile.in` e não herda o acréscimo, então C++ não muda; e o
+cross-compile do target não é afetado. O arquivo é incluído na linha 528, depois
+de `package/Makefile.in` (507), então o `+=` soma em vez de ser apagado — ao
+contrário do caso do strace (§12.7), que precisa de `override`.
+
+**Por que o CI não reproduz:** o runner do `ubuntu-24.04` traz GCC 13/14, que
+ainda compila em `gnu17`. Verde no CI não prova build limpo em máquina nova — é o
+mesmo raciocínio do §12.32, e os dois juntos são o argumento para o projeto ter
+um `check-host.sh` que olhe versão de GCC e CMake, não só presença de comando.
 
 ## 13. Aparelhos
 

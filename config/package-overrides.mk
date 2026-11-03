@@ -6,6 +6,42 @@
 # Ele existe porque um pacote do Buildroot 2024.02 não compila contra os
 # headers do kernel 6.12 — e a falha aparece longe da causa.
 
+# ── GCC 15 / C23: host tools do Buildroot 2024.02 ────────────
+# O GCC 15 passou a compilar em `-std=gnu23` por padrão. O Buildroot 2024.02 é
+# de fevereiro de 2024 e assume o padrão anterior (`gnu17`), então alguns
+# pacotes de HOST quebram — o primeiro a aparecer num build do zero é o
+# `host-m4` 1.4.19.
+#
+# O erro não fala de versão de C nem de GCC. Ele aponta para um header do
+# gnulib, numa linha que compila em qualquer outra máquina:
+#
+#   gl_oset.h:275:40: error: expected identifier or '(' before 'int'
+#   gl_oset.h:275:1: warning: 'nodiscard' attribute ignored [-Wattributes]
+#         GL_OSET_INLINE _GL_ATTRIBUTE_NODISCARD int
+#
+# Causa: `config.h` do m4 escolhe a forma do atributo em TEMPO DE COMPILAÇÃO,
+# não no configure:
+#
+#   #if 201710L < __STDC_VERSION__
+#   # define _GL_ATTRIBUTE_NODISCARD [[__nodiscard__]]
+#   #elif _GL_HAS_ATTRIBUTE (warn_unused_result)
+#   # define _GL_ATTRIBUTE_NODISCARD __attribute__ ((__warn_unused_result__))
+#
+# Com `gnu23`, `__STDC_VERSION__` é 202311L e ele pega a forma C23
+# `[[__nodiscard__]]`. Escrita DEPOIS de `inline` e ANTES de `int`, essa forma é
+# inválida — atributos `[[...]]` vão no começo da declaração. Com `gnu17` o
+# valor é 201710L, a comparação falha e ele usa `__attribute__`, que é aceito em
+# qualquer posição da declaração. Era por isso que funcionava antes.
+#
+# Correção: compilar os tools de HOST em `gnu17`, que é o que a árvore espera.
+# Restrito a HOST de propósito — `HOST_CXXFLAGS` é montada com `+=` na linha 252
+# de `package/Makefile.in` e não herda este acréscimo, então C++ não muda, e o
+# cross-compile do target não é afetado de forma nenhuma.
+#
+# Se um dia algum pacote de host exigir C23 de verdade, ele falha alto e a
+# exceção entra aqui, com o nome do pacote — não desmonte a linha.
+HOST_CFLAGS += -std=gnu17
+
 # ── strace 6.7 ───────────────────────────────────────────────
 # Com `BR2_KERNEL_HEADERS_AS_KERNEL=y` e kernel 6.12, o strace 6.7 morre numa
 # static assertion do próprio código:

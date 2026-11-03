@@ -7,8 +7,10 @@
 - [Build local](building-locally.md) — como compilar no Linux/WSL2 e quais variáveis usar.
 - [GitHub Actions](github-actions.md) — matriz, entradas, cache, artefatos e segredos.
 - [Gravação e boot](flashing.md) — QEMU, cartão SD, eMMC e primeiros passos.
-- [Canal com o Giochi app](mensagem-giochi-system.md) — correio entre as duas
-  equipes. Contrato técnico fica no `launcher.md`; aqui é o que muda no dia.
+- [Canal com o Giochi app](mensagem-giochi-system.md) — **ponteiro** para o
+  arquivo de conversa, que fica fora do repositório: caminho, máquina e regras de
+  uso. Contrato técnico fica no `launcher.md`; decisão vira documento de
+  referência, nunca fica só no chat.
 - [O launcher: o que o sistema entrega](launcher.md) — SDL2/KMSDRM, stack de texto
   (as duas armadilhas: `SDL2_TTF` é pacote à parte e `DEJAVU=y` sem família instala
   zero fontes), e o que falta para a interface subir.
