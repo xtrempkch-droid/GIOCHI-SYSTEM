@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { loadDevice } from "./lib/devices.mjs";
 
@@ -64,6 +65,28 @@ switch (field) {
   case "docs":
     console.log(path.join(device.directory, device.docs));
     break;
+  case "kernelPatches":
+    for (const patchPath of device.kernelPatches ?? []) {
+      console.log(path.join(device.directory, patchPath));
+    }
+    break;
+  case "dts": {
+    // O nome do DTB vem do defconfig do aparelho, não de um campo extra no
+    // device.json: duas fontes para a mesma informação divergem em silêncio, e
+    // aqui a divergência significa gravar o DTB de outro painel no cartão.
+    const defconfigPath = path.join(device.directory, "defconfig");
+    if (!existsSync(defconfigPath)) {
+      process.exit(2);
+    }
+    const match = readFileSync(defconfigPath, "utf8").match(
+      /^BR2_LINUX_KERNEL_INTREE_DTS_NAME="?([^"\s]+)"?$/m,
+    );
+    if (!match) {
+      process.exit(2);
+    }
+    console.log(path.basename(match[1]));
+    break;
+  }
   default:
     console.error(`Campo desconhecido: ${field}`);
     process.exit(2);

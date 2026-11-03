@@ -27,16 +27,86 @@ qemu-system-aarch64 \
 - Saída do console: `Ctrl+A`, depois `X`.
 - Para acessar a rede do host, adicione `hostfwd` ao `-netdev user`, por exemplo `hostfwd=tcp::2222-:22`, e conecte com `ssh -p 2222 root@127.0.0.1`.
 
-## Powkiddy X55 (draft)
+## Powkiddy X55
 
-A pasta existe, mas a imagem ainda não é inicializável no hardware. Antes de gravar:
+Handheld RK3566. O aparelho **boota pelo cartão SD** — não há eMMC nele: a
+única memória de massa é o cartão.
 
-- kernel, DTB, U-Boot, firmware e layout de partições precisam ser definidos;
-- o `buildrootDefconfig` precisa ser preenchido;
-- `status` deve virar `ready` e `enabled` deve ser `true`;
-- a imagem deve ser testada em hardware real.
+### Layout medido no hardware
 
-Não use a imagem draft em um cartão principal.
+O BootROM do RK3566 não lê tabela de partição: ele busca o firmware em setores
+fixos. Verificado no aparelho pelo console serial:
+
+| Offset | Conteúdo | Evidência |
+| --- | --- | --- |
+| setor 64 (32 KiB) | `idbloader.img` | assinatura `RKNS` lida com `md.b` |
+| setor 16384 (8 MiB) | `u-boot.itb` | cabeçalho FIT `d0 0d fe ed` |
+| 64 MiB | p1 FAT32 `GIOCHI_BOOT` | `Image`, `dtbs/`, `extlinux.conf`, `boot.scr` |
+| 320 MiB | p2 ext4 `GIOCHI` | rootfs |
+
+Um cartão só com `Image` e `rootfs.ext4` — o que o build entrega hoje — não
+boota: falta o firmware nos setores fixos e a partição de boot.
+
+### Gerar a imagem de cartão
+
+```bash
+# monta out/<device>/giochi-system-<device>-sd.img a partir dos artefatos
+bash scripts/build-in-container.sh --sd-image powkiddy-x55
+```
+
+A imagem inclui firmware nos offsets, as duas partições, `extlinux.conf` e
+`boot.scr`. O `boot.scr` não é redundante: o U-Boot que está no aparelho tem
+`bootcmd` que procura `boot.scr` em `mmc 1:1` e `0:1`, e para no prompt quando
+não encontra.
+
+### Gravar
+
+```bash
+# confirme o destino: só discos removíveis são aceitos
+bash scripts/flash-sd.sh --list
+
+# grava e confere o SHA256 relendo o cartão
+sudo bash scripts/flash-sd.sh out/powkiddy-x55/giochi-system-powkiddy-x55-sd.img /dev/sdX
+
+# melhor: passe o tamanho que o U-Boot reporta em `mmc info`
+sudo bash scripts/flash-sd.sh <imagem> /dev/sdX --expect-gib 29
+```
+
+O script recusa disco fixo, partição em vez de disco, destino montado e cartão
+menor que a imagem.
+
+**Dois cartões SD ao mesmo tempo é a armadilha real.** O aparelho pode estar com
+um cartão na gaveta e outro no leitor do computador; os dois aparecem como
+`removable=1` e nada no nome do device distingue um do outro. Já aconteceu nesta
+sessão: o aparelho tinha um `SE32G` de 29,7 GiB e o leitor tinha um cartão de
+116 GiB — a gravação foi para o cartão errado e só o `mmc info` do U-Boot
+revelou. Use `--expect-gib` com a capacidade que o aparelho reporta.
+
+Quando o cartão é de outro tamanho, um `dd` no cartão errado também apaga o que
+havia nele. Nesta sessão o cartão do leitor continha a imagem do antecessor; o
+`extlinux.conf` e os logs de boot foram preservados antes em
+`~/.cache/giochi-system/old-card/`.
+
+### Console serial
+
+O console do X55 é **`ttyS2` a 1500000 8N1** — não 115200. Um adaptador CH341
+(`1a86:5523`) aparece como `/dev/ttyUSB0`; no host, o usuário precisa estar no
+grupo `dialout`, ou use o container:
+
+```bash
+# logger em background, escreve em ~/.cache/giochi-system/serial/boot.log
+docker run -d --name x55-serial --device=/dev/ttyUSB0 \
+  -v "$HOME/.cache/giochi-system/serial:/work/log" giochi-serial:1 \
+  /dev/ttyUSB0 1500000 /work/log/boot.log
+
+# enviar comandos ao U-Boot
+docker run --rm --device=/dev/ttyUSB0 --entrypoint python3 giochi-serial:1 \
+  /work/uboot-serial.py /dev/ttyUSB0 1500000 /dev/null "mmc list"
+```
+
+Sequência de boot observada no aparelho: `U-Boot SPL 2024.10` → `Trying to boot
+from MMC2` → hash dos FIT → `BL31 v2.3` → `U-Boot 2024.10` → `Model: Powkiddy
+x55` / `DRAM: 2 GiB` / `PMIC: RK817` → `bootcmd`.
 
 ## Steam Deck (draft)
 
@@ -55,9 +125,11 @@ lsblk -o NAME,SIZE,MODEL,TRAN
 4. Grave a imagem:
 
 ```bash
-sudo dd if=out/<device>/sdcard.img of=/dev/sdX bs=4M status=progress conv=fsync
+sudo dd if=out/<device>/giochi-system-<device>-sd.img of=/dev/sdX bs=4M status=progress conv=fsync
 sync
 ```
+
+Ou, com as verificações de segurança: `sudo bash scripts/flash-sd.sh <imagem> /dev/sdX`.
 
 5. Ejete com segurança.
 
@@ -76,7 +148,8 @@ Se o build veio do GitHub Actions, baixe o artefato `giochi-system-<device>` e c
 
 ## Primeiro boot
 
-- Conecte o console serial quando disponível (geralmente 115200 8N1).
+- Conecte o console serial. No X55 é `ttyS2` a **1500000 8N1**, não 115200 —
+  em 115200 a saída sai ilegível.
 - Verifique se o kernel encontrou o rootfs e o console correto.
 - Faça login como `root`.
 - Troque a senha imediatamente:

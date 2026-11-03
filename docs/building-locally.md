@@ -11,26 +11,71 @@
 
 > O caminho do repositório pode conter espaços. O script baixa o Buildroot e monta os overlays em `/tmp` por padrão, evitando a limitação de espaços do Buildroot. Ainda assim, caminhos sem espaços são mais seguros.
 
+## Antes de tudo: auditar o host
+
+```bash
+bash scripts/check-host.sh        # ou: make check
+```
+
+O script não instala nada e não precisa de root. Ele confere sistema, bash,
+Node.js, os 36 comandos que o Buildroot usa, os headers de desenvolvimento
+(`libssl`, `ncurses`, `libelf`, `libudev`, `zlib`), `ccache`, espaço em disco,
+o hash fixado do tarball e se o download está alcançável — e imprime o
+`apt-get install` exato que resolve o que falta.
+
+Falha aqui custa dois segundos. A mesma falha descoberta no meio de um build
+custa a compilação inteira: `bison`/`flex`/`gperf` morrem nos host tools, `dtc`
+morre na compilação dos DTBs, `libelf` morre no `objtool` do kernel.
+
 ## Dependências no Ubuntu/WSL
 
 ```bash
 sudo apt-get update
 sudo apt-get install -y --no-install-recommends \
   autoconf automake bc bison build-essential bzip2 ca-certificates \
-  cpio curl device-tree-compiler dosfstools e2fsprogs file flex \
-  gettext gperf git help2man libelf-dev libncurses-dev libssl-dev \
+  ccache cpio curl device-tree-compiler dosfstools e2fsprogs file flex \
+  gawk gettext gperf git help2man libelf-dev libncurses-dev libssl-dev \
   libtool libudev-dev mtools parted patch perl pkg-config python3 \
   python3-dev python3-setuptools rsync swig tar texinfo unzip wget \
-  xz-utils
+  xz-utils zlib1g-dev
 ```
+
+## Sem root: build em container
+
+Se você não pode instalar pacotes no host (ou não tem `sudo`), use o builder:
+
+```bash
+bash scripts/build-in-container.sh --check     # audita dentro do container
+bash scripts/build-in-container.sh qemu-aarch64 # build completo
+bash scripts/build-in-container.sh --shell      # shell para investigar
+```
+
+A imagem `giochi-builder` é definida em
+[`docker/builder.Dockerfile`](../docker/builder.Dockerfile) e traz a mesma lista
+de dependências que `check-host.sh` audita, mais Node.js 24 e `ccache`. O
+container roda com o seu UID/GID, então `out/` e `work/` não ficam com dono
+errado.
+
+| Caminho no host | Dentro do container | Papel |
+| --- | --- | --- |
+| o repositório | `/work` | código e `out/<device>` |
+| `~/.cache/giochi-system` | `/cache` | downloads, `work/`, ccache |
+
+Como o cache fica no host, um rebuild não baixa o Buildroot nem os pacotes de
+novo. Ajuste com `GIOCHI_CONTAINER_CACHE` e a tag com `GIOCHI_BUILDER_IMAGE`.
+
 
 ## Validar
 
 ```bash
 node scripts/validate-devices.mjs
-node tests/devices.test.mjs
+node tests/run-all.mjs        # 38 testes, um processo só
 node scripts/list-devices.mjs
 ```
+
+**Não use `node --test tests/`:** o runner spawna um processo por arquivo e sob
+sandbox falha com `spawn EPERM`. Use `tests/run-all.mjs`, que importa tudo num
+processo só — é o que o `package.json` e os dois workflows usam.
 
 ## Construir
 

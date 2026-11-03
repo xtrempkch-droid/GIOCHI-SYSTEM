@@ -135,8 +135,47 @@ echo "  cache:     $CACHE_ROOT"
 echo "  out:       $OUT_DIR"
 echo
 
-rm -rf "$WORK_DIR" "$OUT_DIR"
+rm -rf "$OUT_DIR"
 mkdir -p "$DOWNLOAD_DIR" "$BUILDROOT_DL_DIR" "$WORK_DIR" "$BUILD_DIR" "$OUT_DIR"
+
+# Patch novo em um build retomado (KEEP_WORK=1) NÃO é aplicado: o Buildroot vê
+# `.stamp_patched` e pula a fase inteira. O sintoma é o pior tipo — build verde,
+# imagem sem a correção, e o log dizendo "patch: ..." como se tivesse entrado.
+# Aqui a comparação é feita e, se o conjunto de patches mudou, o pacote do
+# kernel é limpo para reaplicar.
+PATCH_STATE_FILE="$WORK_DIR/kernel-patches.state"
+CURRENT_PATCHES="$(node "$ROOT/scripts/device-info.mjs" "$DEVICE_ID" kernelPatches 2>/dev/null | xargs -r -d '\n' -I{} sha256sum {} 2>/dev/null | awk '{print $1}' | sort | tr '\n' ' ')"
+PREVIOUS_PATCHES="$(cat "$PATCH_STATE_FILE" 2>/dev/null || true)"
+FORCE_KERNEL_REBUILD=0
+if [[ "$CURRENT_PATCHES" != "$PREVIOUS_PATCHES" ]]; then
+  # `[[ -f "$dir/"* ]]` NÃO expande glob no bash — só `[ ]` e comandos externos
+  # fazem pathname expansion. Usar compgen, senão a detecção nunca dispara.
+  if compgen -G "$BUILD_DIR/build/linux-*/.stamp_patched" >/dev/null; then
+    FORCE_KERNEL_REBUILD=1
+  fi
+  printf '%s' "$CURRENT_PATCHES" >"$PATCH_STATE_FILE" 2>/dev/null || true
+fi
+
+# KEEP_WORK=1 mantém o diretório de build e deixa o Buildroot continuar de onde
+# parou. Sem isso, cada tentativa depois de uma falha recomeça do zero: um erro
+# no busybox na terceira hora custa outras três horas para ser testado. O padrão
+# continua sendo apagar, porque build sujo é a origem de resultado irreproduzível
+# — retomar é escolha explícita de quem está depurando.
+KEEP_WORK="${GIOCHI_SYSTEM_KEEP_WORK:-0}"
+case "${KEEP_WORK,,}" in
+  1|true|yes|on) KEEP_WORK=1 ;;
+  *) KEEP_WORK=0 ;;
+esac
+if ((KEEP_WORK)); then
+  if [[ -f "$BUILD_DIR/.config" ]]; then
+    echo "  retomando: build existente em $BUILD_DIR (GIOCHI_SYSTEM_KEEP_WORK=1)"
+  else
+    echo "  retomando: não há build anterior em $WORK_DIR; começando do zero"
+  fi
+else
+  rm -rf "$WORK_DIR"
+  mkdir -p "$WORK_DIR"
+fi
 
 # Um build Buildroot completo consome ~15 GiB. Sem esta checagem o build roda
 # 1-3 h e morre no meio com erro obscuro quando o disco enche — a causa real
@@ -186,14 +225,43 @@ if [[ ! -s "$TARBALL" ]]; then
   mv "$TARBALL.part" "$TARBALL"
 fi
 
+# Integridade do tarball: o hash fica fixado em buildroot.sha256. Sem isso, um
+# download corrompido ou trocado no cache vira erro de compilação horas depois,
+# sem citar a causa — e ninguém desconfia do arquivo baixado.
+SHA_FILE="$ROOT/buildroot.sha256"
+EXPECTED_SHA=""
+if [[ -f "$SHA_FILE" ]]; then
+  EXPECTED_SHA="$(awk -v want="buildroot-$BUILDROOT_VERSION.tar.gz" '$2 == want { print $1; exit }' "$SHA_FILE")"
+fi
+if [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{64}$ ]]; then
+  ACTUAL_SHA="$(sha256sum "$TARBALL" | awk '{print $1}')"
+  if [[ "$ACTUAL_SHA" != "$EXPECTED_SHA" ]]; then
+    echo "ERRO: SHA256 do tarball do Buildroot não confere." >&2
+    echo "  arquivo:  $TARBALL" >&2
+    echo "  esperado: $EXPECTED_SHA" >&2
+    echo "  obtido:   $ACTUAL_SHA" >&2
+    echo "Apague o arquivo e rode de novo. Se o hash continuar diferente, o" >&2
+    echo "download está sendo alterado no caminho — não continue o build." >&2
+    exit 2
+  fi
+  echo "  sha256:    OK"
+else
+  echo "AVISO: buildroot.sha256 não tem hash para buildroot-$BUILDROOT_VERSION" >&2
+  echo "O tarball segue sem verificação de integridade." >&2
+fi
+
 if ! tar -tzf "$TARBALL" >/dev/null 2>&1; then
   echo "ERRO: tarball do Buildroot inválido: $TARBALL" >&2
   exit 2
 fi
 
-echo "Extraindo Buildroot..."
-tar -xzf "$TARBALL" -C "$WORK_DIR"
 BR2_DIR="$WORK_DIR/buildroot-$BUILDROOT_VERSION"
+if [[ -f "$BR2_DIR/Makefile" ]]; then
+  echo "Buildroot já extraído em $BR2_DIR; reaproveitando."
+else
+  echo "Extraindo Buildroot..."
+  tar -xzf "$TARBALL" -C "$WORK_DIR"
+fi
 if [[ ! -f "$BR2_DIR/Makefile" ]]; then
   echo "ERRO: diretório do Buildroot não encontrado: $BR2_DIR" >&2
   exit 2
@@ -255,11 +323,65 @@ else
 fi
 
 echo "Mesclando configuração comum + device..."
+# O fragmento de kernel também passa pelo staging: Buildroot trata
+# BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES como lista separada por ESPAÇO, e
+# `device/powkiddy x55/linux.fragment` é lido como dois caminhos. O erro que
+# aparece é:
+#
+#   Kconfig file or fragment '/work/device/powkiddy' for 'linux' does not exist
+#
+# que não cita espaço nem aparelho. Mesma armadilha dos overlays.
 KERNEL_FRAGMENT="$DEVICE_DIR/linux.fragment"
 KERNEL_FRAGMENT_ARGS=()
 if [[ -f "$KERNEL_FRAGMENT" ]]; then
-  KERNEL_FRAGMENT_ARGS=(--kernel-fragment "$KERNEL_FRAGMENT")
+  cp -a "$KERNEL_FRAGMENT" "$WORK_DIR/linux.fragment"
+  KERNEL_FRAGMENT_ARGS=(--kernel-fragment "$WORK_DIR/linux.fragment")
 fi
+
+# Patches de kernel (device.json → kernelPatches). Vão para o staging pelo
+# mesmo motivo dos fragmentos: BR2_LINUX_KERNEL_PATCH separa por espaço.
+KERNEL_PATCH_ARGS=()
+mapfile -t KERNEL_PATCHES < <(node "$ROOT/scripts/device-info.mjs" "$DEVICE_ID" kernelPatches)
+if [[ ${#KERNEL_PATCHES[@]} -gt 0 ]]; then
+  mkdir -p "$WORK_DIR/patches"
+  patch_index=0
+  for kernel_patch in "${KERNEL_PATCHES[@]}"; do
+    if [[ ! -e "$kernel_patch" ]]; then
+      echo "ERRO: patch de kernel não encontrado: $kernel_patch" >&2
+      exit 2
+    fi
+    if [[ -d "$kernel_patch" ]]; then
+      cp -a "$kernel_patch/." "$WORK_DIR/patches/"
+      KERNEL_PATCH_ARGS+=(--kernel-patch "$WORK_DIR/patches")
+      echo "  patches:   $(find "$kernel_patch" -name '*.patch' | wc -l) arquivo(s) de $kernel_patch"
+    else
+      patch_index=$((patch_index + 1))
+      cp -a "$kernel_patch" "$WORK_DIR/patches/"
+      KERNEL_PATCH_ARGS+=(--kernel-patch "$WORK_DIR/patches/$(basename "$kernel_patch")")
+      echo "  patch:     $(basename "$kernel_patch")"
+    fi
+  done
+fi
+
+# Fragmento do busybox: fica no staging (caminho sem espaços) e entra por
+# BR2_PACKAGE_BUSYBOX_CONFIG_FRAGMENT_FILES. Serve para desligar applet que não
+# compila contra os headers do kernel do aparelho — o `tc` do busybox usa
+# TCA_CBQ_*, removido no 6.12, e a falha aparece como erro de compilação numa
+# linha do busybox, sem relação óbvia com a versão do kernel.
+BUSYBOX_FRAGMENT="$DEVICE_DIR/busybox.fragment"
+BUSYBOX_FRAGMENT_ARGS=()
+if [[ -f "$BUSYBOX_FRAGMENT" ]]; then
+  cp -a "$BUSYBOX_FRAGMENT" "$WORK_DIR/busybox.fragment"
+  BUSYBOX_FRAGMENT_ARGS=(--busybox-fragment "$WORK_DIR/busybox.fragment")
+  echo "  busybox:   fragmento do aparelho aplicado"
+fi
+
+OVERRIDE_ARGS=()
+if [[ -f "$ROOT/config/package-overrides.mk" ]]; then
+  OVERRIDE_ARGS=(--package-override "$ROOT/config/package-overrides.mk")
+  echo "  overrides: config/package-overrides.mk"
+fi
+
 node "$ROOT/scripts/prepare-config.mjs" \
   --config "$BUILD_DIR/.config" \
   --hostname "$HOSTNAME_VALUE" \
@@ -269,7 +391,10 @@ node "$ROOT/scripts/prepare-config.mjs" \
   --fragment "$ROOT/config/common.fragment" \
   --fragment "$FRAGMENT" \
   --ccache-dir "$CCACHE_ARG" \
-  "${KERNEL_FRAGMENT_ARGS[@]}" \
+  "${KERNEL_FRAGMENT_ARGS[@]+"${KERNEL_FRAGMENT_ARGS[@]}"}" \
+  "${BUSYBOX_FRAGMENT_ARGS[@]+"${BUSYBOX_FRAGMENT_ARGS[@]}"}" \
+  "${KERNEL_PATCH_ARGS[@]+"${KERNEL_PATCH_ARGS[@]}"}" \
+  "${OVERRIDE_ARGS[@]+"${OVERRIDE_ARGS[@]}"}" \
   "${OVERLAY_ARGS[@]}"
 
 make -C "$BR2_DIR" O="$BUILD_DIR" olddefconfig >"$WORK_DIR/olddefconfig.log" 2>&1
@@ -318,6 +443,11 @@ fi
 if ! grep -q "^BR2_ROOTFS_OVERLAY=.*giochi-system-overlays" "$BUILD_DIR/.config"; then
   echo "ERRO: os overlays do Giochi System não entraram em BR2_ROOTFS_OVERLAY." >&2
   exit 1
+fi
+
+if ((FORCE_KERNEL_REBUILD)); then
+  echo "  patches:   conjunto mudou — limpando o pacote linux para reaplicar"
+  make -C "$BR2_DIR" O="$BUILD_DIR" linux-dirclean >/dev/null 2>&1 || true
 fi
 
 echo "Compilando com $JOBS job(s). O log fica em $LOG_FILE..."
@@ -454,19 +584,75 @@ if [[ "$BUILD_STATUS" -ne 0 ]]; then
   exit 1
 fi
 
+# `assert-config` cobriu os símbolos BR2_*. Os CONFIG_* do kernel são outro
+# Kconfig, resolvido por outro `olddefconfig`, e ninguém verificava o resultado:
+# símbolo de painel, MMC ou console ausente gera imagem que não boota com o
+# build verde. Aqui a verificação acontece com o .config que o kernel REALMENTE
+# usou, não com o pedido.
+KERNEL_REQUIRED="$DEVICE_DIR/kernel-required.txt"
+KERNEL_REQUIRED_ARGS=()
+if [[ -f "$KERNEL_REQUIRED" ]]; then
+  KERNEL_REQUIRED_ARGS=(--required "$KERNEL_REQUIRED")
+fi
+
+if [[ -f "$KERNEL_FRAGMENT" || -f "$KERNEL_REQUIRED" ]]; then
+  KERNEL_CONFIG="$(echo "$BUILD_DIR"/build/linux-*/.config | awk '{print $1}')"
+  if [[ -f "$KERNEL_CONFIG" ]]; then
+    KERNEL_FRAGMENT_ARGS_CHECK=()
+    [[ -f "$KERNEL_FRAGMENT" ]] && KERNEL_FRAGMENT_ARGS_CHECK=(--fragment "$KERNEL_FRAGMENT")
+    if ! node "$ROOT/scripts/assert-kernel-config.mjs" \
+      --config "$KERNEL_CONFIG" \
+      "${KERNEL_FRAGMENT_ARGS_CHECK[@]+"${KERNEL_FRAGMENT_ARGS_CHECK[@]}"}" \
+      "${KERNEL_REQUIRED_ARGS[@]+"${KERNEL_REQUIRED_ARGS[@]}"}"; then
+      echo "ERRO: o kernel não usou símbolos pedidos pelo linux.fragment." >&2
+      echo "Configuração do kernel: $KERNEL_CONFIG" >&2
+      exit 1
+    fi
+  else
+    echo "AVISO: .config do kernel não encontrado em $BUILD_DIR/build/linux-*." >&2
+    echo "O fragmento do kernel não pôde ser verificado." >&2
+  fi
+fi
+
 echo "Coletando artefatos..."
 shopt -s nullglob
 copied=0
+# `-L` é obrigatório: o Buildroot entrega `rootfs.ext4` como SYMLINK para
+# `rootfs.ext2`. Com `cp -a` o link é copiado como link, aponta para um arquivo
+# que não existe em out/ e o build "passa" com um rootfs quebrado — o erro só
+# aparece no dd, na hora de gravar o cartão.
 for pattern in "${ARTIFACTS[@]}"; do
   for file in "$BUILD_DIR/images/"$pattern; do
     if [[ -f "$file" ]]; then
-      cp -a "$file" "$OUT_DIR/"
+      cp -aL "$file" "$OUT_DIR/"
       echo "  + $(basename "$file")"
       copied=$((copied + 1))
     fi
   done
 done
 shopt -u nullglob
+
+# U-Boot: o Buildroot 2024.02 publica em `images/` apenas `u-boot.bin` e
+# `u-boot-rockchip.bin`. `idbloader.img` e `u-boot.itb` ficam no diretório de
+# build do pacote — são justamente os dois pedaços que o BootROM do RK3566 lê em
+# setores fixos. Sem eles a imagem de cartão não tem firmware, e um cartão sem
+# firmware não é lido pelo aparelho.
+UBOOT_BUILD_DIR="$(echo "$BUILD_DIR"/build/uboot-*/ | awk '{print $1}')"
+if [[ -d "$UBOOT_BUILD_DIR" ]]; then
+  for uboot_artifact in idbloader.img u-boot.itb; do
+    if [[ -f "$OUT_DIR/$uboot_artifact" ]]; then
+      continue
+    fi
+    if [[ -f "$UBOOT_BUILD_DIR/$uboot_artifact" ]]; then
+      cp -aL "$UBOOT_BUILD_DIR/$uboot_artifact" "$OUT_DIR/"
+      echo "  + $uboot_artifact (do pacote u-boot)"
+      copied=$((copied + 1))
+    else
+      echo "AVISO: $uboot_artifact não encontrado em $UBOOT_BUILD_DIR." >&2
+      echo "Sem ele a imagem de cartão não boota (o RK3566 lê por setor fixo)." >&2
+    fi
+  done
+fi
 
 if [[ "$copied" -eq 0 ]]; then
   echo "ERRO: nenhum artefato encontrado em $BUILD_DIR/images." >&2
@@ -494,9 +680,12 @@ cp -a "$DEVICE_DOCS" "$OUT_DIR/DEVICE.md"
   echo "root_password=definida no build (não registrada)"
 } >"$OUT_DIR/build-info.txt"
 
+# `sha256sum *` quebra em diretório (`dtbs/`) e se inclui no próprio arquivo.
+# A lista precisa ser só de arquivos regulares, sem o SHA256SUMS.
 (
   cd "$OUT_DIR"
-  sha256sum * >SHA256SUMS
+  rm -f SHA256SUMS
+  find . -maxdepth 1 -type f -printf '%P\n' | sort | xargs -r sha256sum >SHA256SUMS
 )
 
 echo

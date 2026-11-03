@@ -52,8 +52,16 @@ BR2_PACKAGE_UTIL_LINUX=y
 #   BR2_PACKAGE_KMSCUBE=y
 # e confirmar que os quatro sobrevivem ao assert-config.
 
-# Console serial legível em placas e handhelds.
-BR2_TARGET_GENERIC_GETTY_BAUDRATE_115200=y
+# Console serial: o getty NÃO define a velocidade, o kernel define.
+#
+# Quem manda no baud é a linha de comando do kernel (`console=ttyS2,1500000n8`
+# no X55, `console=ttyAMA0,115200` no QEMU). Um baud explícito aqui faz o getty
+# REPROGRAMAR a UART — no X55 isso derruba o console de 1500000 para 115200 e a
+# saída vira lixo. Com KEEP, o getty recebe "0" e não mexe no que o kernel
+# configurou.
+#
+# Quem precisa de 115200 (como o QEMU) não faz nada: o kernel já está em 115200.
+BR2_TARGET_GENERIC_GETTY_BAUDRATE_KEEP=y
 
 # Imagem de rootfs em ext4; o tamanho pode ser sobrescrito no
 # fragmento do dispositivo.

@@ -1,8 +1,9 @@
 # AGENTS.md — Giochi System
 
 > Handoff técnico do repositório. Leia antes de continuar o trabalho.
-> Atualizado em: 02/11/2026 (revisão 3 — fim da sessão: X55 implantado, CI com
-> 18 execuções, e a armadilha da entrada booleana do Actions documentada).
+> Atualizado em: 03/11/2026 (revisão 4 — **o X55 bootou**: sistema instalado por
+> serial + U-Boot, login na console, tela 720x1280 ativa. Ver
+> `docs/x55-bringup.md` para o registro medido.)
 
 ---
 
@@ -82,6 +83,44 @@ Repositório: `https://github.com/xtrempkch-droid/GIOCHI-SYSTEM` — branch `mai
 `sh` do Git for Windows é o bash em modo POSIX, **não** o busybox ash da imagem —
 compatibilidade com ash continua não provada. O build de verdade só o CI prova.
 
+### O X55 BOOTOU (03/11/2026)
+
+Primeiro boot real do projeto em hardware. Registro completo com evidências em
+[`docs/x55-bringup.md`](docs/x55-bringup.md). Resumo:
+
+```text
+Giochi System 6.12.0 (/dev/console)
+giochi-system-x55 login:
+```
+
+`giochi-selftest` no aparelho: **PASS 15 · WARN 5 · FAIL 1 · SKIP 2**.
+
+O que passou e é o que importa para "sair do console":
+
+- painel HX8394: `card0-DSI-1: connected 720x1280`, backlight `833/1666`;
+- `/dev/dri/card0` + render node (`panfrost`), driver `rockchip-drm`;
+- rootfs em `/dev/root` no cartão, console `ttyS2`;
+- `gpio-keys-vol` e `gpio-keys-control`, `/etc/giochi/buttons.map` (31 linhas);
+- bateria `36C`, UDC `fcc00000.usb`.
+
+O que falhou: **áudio** — `--- no soundcards ---`. Causa: o card `rk817_ext`
+declara `aux-devs = <&spk_amp>` e `CONFIG_SND_SOC_SIMPLE_AMPLIFIER` estava `=m`,
+que não carrega sem autoload por modalias. Corrigido para `=y`.
+
+### Instalação remota sem tirar o cartão
+
+O cartão do aparelho não estava no leitor do PC. Caminho usado, e que funciona:
+
+1. `loady <addr>` + YMODEM (`docker/ymodem-send.py`) — validado com CRC32
+   conferido dos dois lados;
+2. `mmc write` para o MBR;
+3. `gzwrite mmc 1 <addr> ${filesize} <wbuf> <offset>` para FAT e rootfs em gzip.
+
+Fato que confunde: **parar o container não interrompe a gravação** — quem executa
+`gzwrite` é o U-Boot, não o host.
+
+Tamanhos com `gzip -1`: rootfs 1 GiB → 52 MB; FAT de boot 256 MiB → 17 MB.
+
 ### Pendente de verdade
 
 **Estado do CI no fim desta sessão (18 execuções do build):**
@@ -142,6 +181,7 @@ Chamadas úteis:
 ```text
 Giochi system/
 ├── buildroot.version                  # 2024.02
+├── buildroot.sha256                   # hash do tarball, conferido no build
 ├── config/common.fragment             # pacotes e opções comuns a todos os aparelhos
 ├── device/
 │   ├── devices.json                   # fonte da verdade: id, folder, arch, enabled
@@ -154,6 +194,9 @@ Giochi system/
 │   ├── qemu-aarch64/                  # device de referência (habilitado)
 │   ├── powkiddy x55/                  # RK3566 — draft
 │   │   ├── defconfig                  # base Buildroot (o que bootou no antecessor)
+│   │   ├── patches/                   # DTS: HDMI off, SDIO, uart1 DMA, &rng
+│   │   ├── kernel-required.txt        # símbolos que o kernel PRECISA ter
+│   │   ├── busybox.fragment           # desliga o applet tc (não compila no 6.12)
 │   │   ├── device.json, buildroot.fragment, linux.fragment, buttons.map
 │   │   └── README.md, rootfs-overlay/
 │   ├── powkiddy x35s/                 # RK3326 — draft
@@ -165,6 +208,7 @@ Giochi system/
 ├── docs/
 │   ├── README.md, architecture.md, adding-a-device.md, building-locally.md
 │   ├── github-actions.md, flashing.md, troubleshooting.md, security.md
+│   ├── package-overrides.mk           # override de pacote do Buildroot (strace)
 │   ├── dependencies-manifest.md       # contrato forge.json com o Giochi app
 │   ├── button-maps.md                 # mapa evdev por aparelho, a partir do DTS
 │   ├── rk3326-catalog.md / .json      # 15 aparelhos extraídos de DTB
@@ -175,8 +219,14 @@ Giochi system/
 │   ├── assert-config.mjs              # falha se símbolo pedido sumiu (núcleo em lib/)
 │   ├── validate-devices.mjs, list-devices.mjs, device-info.mjs
 │   ├── dtb-inspect.mjs, dtb-buttons.mjs, dtb-catalog.mjs
-│   └── lib/{devices,assert-config,fdt}.mjs
-├── tests/{devices,assert-config,fdt}.test.mjs + run-all.mjs
+│   ├── check-host.sh                   # pré-voo: dependências, disco, hash
+│   ├── build-in-container.sh           # build sem root no host (docker)
+│   ├── make-sd-image.sh                # imagem de cartão com offsets do RK3566
+│   ├── flash-sd.sh                     # grava com guarda de destino + SHA256
+│   ├── assert-kernel-config.mjs         # CONFIG_* do kernel (o gap do §12.9)
+│   └── lib/{devices,assert-config,assert-kernel-config,fdt}.mjs
+├── docker/{builder,serial,serial-logger}.Dockerfile + scripts de serial
+├── tests/{devices,assert-config,assert-kernel-config,fdt,prepare-config,buildroot-hash}.test.mjs + run-all.mjs
 ├── .github/
 │   ├── workflows/{build-linux-arm64,validate}.yml
 │   └── ISSUE_TEMPLATE/novo-aparelho.yml
@@ -314,6 +364,11 @@ node scripts/device-info.mjs qemu-aarch64 json
 node scripts/dtb-inspect.mjs device/r35s/dts/rk3326-gameconsole-r36s.dtb joypad
 node scripts/dtb-buttons.mjs <arquivo.dtb> --out device/r35s/buttons.map
 node scripts/dtb-catalog.mjs                    # regenera docs/rk3326-catalog.*
+bash scripts/check-host.sh                      # pré-voo, sem root, não instala nada
+bash scripts/build-in-container.sh --check      # o mesmo dentro do container
+bash scripts/build-in-container.sh powkiddy-x55 # build sem dependências no host
+bash scripts/build-in-container.sh --sd-image powkiddy-x55   # imagem de cartão
+bash scripts/flash-sd.sh --list                 # discos removíveis
 bash scripts/build-device.sh qemu-aarch64       # só em Linux/CI
 ALLOW_DRAFT=1 bash scripts/build-device.sh powkiddy-x55   # rascunho, de propósito
 ```
@@ -459,12 +514,127 @@ Duas defesas, as duas aplicadas:
    `build-device.sh`), porque o mesmo valor chega do CI como texto e da mão de
    quem roda local.
 
+### 12.6 Caminho com espaço em lista separada por espaço (o bug do X55)
+
+`BR2_ROOTFS_OVERLAY`, `BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES` e
+`BR2_PACKAGE_BUSYBOX_CONFIG_FRAGMENT_FILES` são **listas separadas por espaço**.
+Um caminho com espaço vira dois caminhos, e a mensagem cita só a primeira
+metade — nunca o espaço:
+
+```text
+Kconfig file or fragment '/work/device/powkiddy' for 'linux' does not exist
+```
+
+Medido no build real do X55: o staging já existia para overlays (§7), mas **não**
+para o fragmento de kernel nem para o de busybox. Corrigido copiando os dois para
+`work/<device>/` antes de chamar o `prepare-config`, e com uma rede de segurança:
+`prepare-config.mjs` **recusa** caminho com espaço em overlay, fragmento de
+kernel e fragmento de busybox, dizendo o motivo. `tests/prepare-config.test.mjs`
+cobre os três.
+
+Regra: qualquer caminho que entre numa variável de lista do Buildroot precisa
+passar por staging. O teste diz se passou.
+
+### 12.7 Pacote do Buildroot que não compila contra o kernel do aparelho
+
+`BR2_KERNEL_HEADERS_AS_KERNEL=y` faz os headers do toolchain serem os do kernel
+escolhido. Com kernel 6.12, **dois pacotes do Buildroot 2024.02 quebram**, e
+nenhuma das mensagens cita a versão do kernel:
+
+| Pacote | Erro | Correção |
+| --- | --- | --- |
+| `busybox` 1.36.1 (`networking/tc.c`) | `TCA_CBQ_MAX undeclared` (parede de ~40 erros) | `# CONFIG_TC is not set` em `device/<pasta>/busybox.fragment` |
+| `strace` 6.7 | `static assertion failed: Unexpected size of sysoff.rsv` | `--enable-bundled=yes` em `config/package-overrides.mk` |
+
+Ambas as correções são de projeto, não contorno: o `tc` do iproute2 (já na
+imagem) cobre o applet desligado, e o strace com headers próprios continua
+funcionando.
+
+**Armadilha do `BR2_PACKAGE_OVERRIDE_FILE`:** o Buildroot inclui esse arquivo
+**antes** de `package/*/*.mk` (`Makefile`, ~linha 530). Um `VAR += opção` ali é
+apagado pela atribuição normal da receita, em silêncio. Use `override VAR = …` e
+repita as opções padrão da receita. Prova:
+`make -p -n | grep STRACE_CONF_OPTS`.
+
+### 12.8 Dois cartões SD removíveis, nenhum aviso
+
+Um aparelho com um cartão dentro e um leitor de cartão no host produzem dois
+`/sys/block/*` com `removable=1`, ambos plausíveis, e nada no nome distingue um
+do outro. Nesta sessão o X55 tinha um **SE32G de 29,7 GiB** e o leitor tinha um
+cartão de **116 GiB**: a gravação foi para o cartão errado e só o `mmc info` do
+U-Boot revelou.
+
+Defesa: `scripts/flash-sd.sh --expect-gib <N>`, com o valor que o aparelho
+reporta. Depois de gravar, o script relê o cartão e compara o SHA256 — cartão
+defeituoso falha ali, não no boot.
+
+### 12.9 O fragmento de kernel é delta e ninguém verificava o resultado
+
+`assert-config` cobre símbolos `BR2_*`. Os `CONFIG_*` do kernel são **outro
+Kconfig**, resolvido por outro `olddefconfig`, e não tinham gate nenhum. Medido
+no primeiro build real do X55: dos 57 símbolos pedidos em `linux.fragment`, dois
+não existem no kernel 6.12 e um caiu para módulo — build verde.
+
+Dois mecanismos, aplicados:
+
+1. `scripts/assert-kernel-config.mjs` compara o `linux.fragment` com o
+   `.config` que o kernel **realmente** usou, e falha o build. Exceção
+   justificada no próprio fragmento:
+   `# giochi-system:allow-drop CONFIG_X motivo`.
+2. `device/<pasta>/kernel-required.txt` lista o que o aparelho **precisa ter**
+   venha de onde vier. O fragmento é delta: `CONFIG_MMC_DW_ROCKCHIP`,
+   `CONFIG_EXT4_FS`, `CONFIG_SERIAL_8250_DW` e o painel vêm do defconfig arm64,
+   não do fragmento — sem esta lista, sumiriam sem aviso e a imagem não chega ao
+   rootfs.
+
+Achados reais que o gate reproduz:
+
+| Símbolo | O que aconteceu |
+| --- | --- |
+| `CONFIG_ARM_ROCKCHIP_CPUFREQ` | removido no 6.12; RK3566 usa `cpufreq-dt` |
+| `CONFIG_JOYSTICK_ROCKNIX` | driver fora da árvore, ainda não empacotado |
+| `CONFIG_BT` | defconfig traz `=m`; exigir `=y` era atrito sem ganho |
+
+### 12.10 `docker` snap tem `/tmp` próprio
+
+Docker instalado por snap roda num namespace com `/tmp` privado: bind-mount de
+`/tmp` aponta para o `/tmp` do daemon, e o arquivo "some" do host embora exista
+dentro do container. Custou um log de serial que parecia vazio. Todo caminho
+montado em container precisa sair de `/tmp` (`build-in-container.sh` recusa).
+
+### 12.11 Patch novo em build retomado NÃO é aplicado
+
+`KEEP_WORK=1` mantém `work/<device>`, e o Buildroot vê `.stamp_patched` e
+**pula a fase de patch inteira**. O sintoma é o pior tipo: build verde, log
+dizendo `patch: 0001-....patch` como se tivesse entrado, e a imagem sem a
+correção. Confirmado com `dtc -I dtb -O dts` no artefato: sem patch.
+
+Defesa em `build-device.sh`: o conjunto de patches é hasheado em
+`work/<device>/kernel-patches.state`; se mudou e existe `.stamp_patched`,
+`linux-dirclean` roda antes do `make`.
+
+**Armadilha dentro da correção:** `[[ -f "$dir/"* ]]` **não expande glob** no
+bash — só `[ ]` e comandos externos fazem pathname expansion. A primeira versão
+da detecção nunca disparava. Use `compgen -G`.
+
+### 12.12 `BR2_TARGET_GENERIC_GETTY_BAUDRATE_*` reprograma a UART
+
+Um baud explícito no getty faz o getty **reprogramar** a UART para aquela
+velocidade, ignorando o que o kernel configurou. No X55 (console a 1500000), o
+`115200` herdado do fragmento comum derrubava a console e a saída virava lixo —
+o sintoma parece "console morto", não "baud errado".
+
+Decisão: `BR2_TARGET_GENERIC_GETTY_BAUDRATE_KEEP=y` no
+`config/common.fragment`. O getty recebe `0` e não mexe na velocidade; quem
+manda no baud é a linha de comando do kernel. Verificado no rootfs do aparelho:
+`console::respawn:/sbin/getty -L  console 0 vt100`.
+
 ## 13. Aparelhos
 
 | ID | Pasta | SoC | Arch | Status | Falta |
 | --- | --- | --- | --- | --- | --- |
 | `qemu-aarch64` | `qemu-aarch64/` | virtual | arm64 | **ready** | nada — é o smoke test do pipeline |
-| `powkiddy-x55` | `powkiddy x55/` | RK3566 | arm64 | draft | `rocknix-joypad`, patches de DTS, `genimage` — defconfig e fragmentos prontos |
+| `powkiddy-x55` | `powkiddy x55/` | RK3566 | arm64 | draft | **boota**; falta `rocknix-joypad` (botões), Wi-Fi/BT e validar o patch de DTS em hardware |
 | `powkiddy-x35s` | `powkiddy x35s/` | RK3326 | arm64 | draft | o mesmo + driver de joypad |
 | `powkiddy-x35h` | `powkiddy x35h/` | RK3326 | arm64 | draft | o mesmo |
 | `r35s` | `r35s/` | RK3326 | arm64 | draft | pipeline RK3326 (BL31/DDR/U-Boot), joypad fora da árvore |
@@ -477,23 +647,27 @@ O R35S é o que está mais avançado nisso: o DTB real está versionado em
 
 ## 14. Próximos passos, por ordem de risco
 
-1. **Rodar o build de novo** para provar que o ccache acerta (o run #15 foi o
-   primeiro com cache salvo; hoje não há prova).
-2. **Ligar a camada de boot** (§11): falta só a linha do `inittab`.
-3. **Reenviar o build do `powkiddy-x55` no CI** — `device: powkiddy-x55` +
-   `allow_draft: true` (agora é lista, não caixa). A tentativa anterior morreu no
-   `discover` por causa do bug do `allow_draft` (§12.5) e **não** testou nada do
-   aparelho. É o primeiro teste real do `defconfig` e do `linux.fragment`: o
-   `assert-config` vai listar qualquer símbolo que não exista no 2024.02.
-4. **`genimage` do X55**: hoje o build entrega `Image`, `rootfs.ext4`,
-   `idbloader.img` e `u-boot.itb` soltos, não uma imagem de cartão.
-5. **`rocknix-joypad` + shim `input-polldev` + patches de DTS** (F2/F3/F4):
-   sem eles o X55 liga sem botões e sem Wi-Fi.
-6. **Validar a imagem do QEMU no qemu-system-aarch64** e rodar
-   `giochi-selftest` dentro dela — é o único jeito de testar o script no ash de
-   verdade.
-7. Fixar SHA256 do tarball do Buildroot.
-8. Release público em vez de artefato de 14 dias.
+1. **Instalar o build com o patch de DTS no aparelho e validar.** O boot
+   validado usou o DTB **sem** `patches/0001-giochi-system-x55-dts.patch`. O
+   patch está compilado e verificado no artefato (`dtc -I dtb -O dts` mostra
+   `no-sd`, `no-mmc`, `sd-uhs-sdr50`, `dma-names = "tx\0rx"`, `&rng okay`,
+   HDMI `disabled`), mas **não rodou em hardware**. Cuidado: o `&rng okay` pode
+   mudar o tempo de boot, e o HDMI off muda o `card1`.
+2. **Validar o áudio com o `SND_SOC_SIMPLE_AMPLIFIER=y`.** É o único FAIL do
+   selftest; a correção está no fragmento e ainda não foi testada no aparelho.
+   Depois de subir, conferir `amixer -c 0 sget "Playback Mux"` = `HP`.
+3. **`rocknix-joypad` + shim `input-polldev`.** Sem ele, 16 dos 17 botões não
+   existem. É o maior buraco funcional: o aparelho boota e não dá para jogar.
+4. **`rtl8821cs_config.bin` gerado (25 bytes)** + validar Wi-Fi (SDIO) e
+   Bluetooth (uart1, 3 fios). O patch de DTS é pré-requisito do Wi-Fi.
+5. **Ligar a camada de boot** (§11): a linha `::respawn:` do `/etc/inittab`.
+6. **`genimage` dentro do Buildroot**, substituindo `make-sd-image.sh` como
+   etapa externa.
+7. **Provar o ccache e o build do QEMU depois das mudanças de fragmento.**
+   `config/common.fragment` mudou (getty KEEP, overrides) e o QEMU foi
+   revalidado só no `assert-config`, não em build completo.
+8. **Fixar SHA256 do U-Boot e do kernel**, como já é feito com o Buildroot.
+9. **Release público** em vez de artefato de 14 dias.
 
 ## 15. Decisões que não devem ser reabertas sem motivo
 

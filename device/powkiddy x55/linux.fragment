@@ -57,6 +57,13 @@ CONFIG_MMC_SDHCI_OF_DWCMSHC=y
 CONFIG_INPUT=y
 CONFIG_INPUT_EVDEV=y
 CONFIG_INPUT_JOYSTICK=y
+# AUSENTE no kernel 6.12 de propósito: `rocknix-joypad` é driver FORA da árvore.
+# O símbolo não existe aqui, então o kernel o descarta. Enquanto o driver não
+# virar pacote/patch, os 17 botões NÃO funcionam (só o volume, por gpio-keys).
+# O assert-kernel-config exige esta linha: sem ela o build falha, porque um
+# símbolo de entrada sumindo em silêncio é exatamente o que ele existe para
+# pegar. Quando o driver entrar, remova o allow-drop.
+# giochi-system:allow-drop CONFIG_JOYSTICK_ROCKNIX driver fora da árvore; botões ainda não suportados
 CONFIG_JOYSTICK_ROCKNIX=y
 CONFIG_KEYBOARD_GPIO=y
 
@@ -82,6 +89,15 @@ CONFIG_SND_SOC_ROCKCHIP_I2S=y
 CONFIG_SND_SOC_ROCKCHIP_I2S_TDM=y
 CONFIG_SND_SOC_RK817=y
 CONFIG_SND_SIMPLE_CARD=y
+# =y, NÃO =m. O card `rk817_ext` declara `aux-devs = <&spk_amp>`, e o amplificador
+# é `simple-audio-amplifier`. Como módulo ele não carrega no boot (o rootfs não
+# tem autoload por modalias com mdev), o card never completa o probe e o
+# resultado no aparelho foi `--- no soundcards ---`, com o dmesg dizendo apenas
+# "platform sound: deferred probe pending: (reason unknown)".
+#
+# Medido no X55 com a imagem instalada: com =m, zero placas de som; o driver
+# precisa estar embutido. Mesma classe de armadilha do PHY DSI (§12.4).
+CONFIG_SND_SOC_SIMPLE_AMPLIFIER=y
 
 # ── USB ──────────────────────────────────────────────────────
 CONFIG_PHY_ROCKCHIP_INNO_USB2=y
@@ -93,7 +109,14 @@ CONFIG_USB_GADGET=y
 CONFIG_USB_CONFIGFS=y
 
 # ── energia / CPU ────────────────────────────────────────────
+# `CONFIG_ARM_ROCKCHIP_CPUFREQ` NÃO EXISTE no 6.12: o driver antigo foi removido
+# e o RK3566 passou a usar o genérico `cpufreq-dt`, ligado pelo defconfig arm64.
+# Pedir o símbolo antigo era erro silencioso — o kernel o descarta sem aviso e
+# ninguém descobre que o escalonamento de frequência veio do defconfig, não do
+# fragmento. Mantido como allow-drop para documentar a correção.
+# giochi-system:allow-drop CONFIG_ARM_ROCKCHIP_CPUFREQ removido no 6.12; RK3566 usa cpufreq-dt
 CONFIG_ARM_ROCKCHIP_CPUFREQ=y
+CONFIG_CPUFREQ_DT=y
 CONFIG_ROCKCHIP_THERMAL=y
 
 # ── entropia ─────────────────────────────────────────────────
@@ -129,7 +152,9 @@ CONFIG_RTW88_8821CS=m
 # Armadilha: o `rtl8821cs_config.bin` do linux-firmware NÃO serve (sem entrada de
 # offset 0x0c). Precisa do arquivo gerado de 25 bytes. Ver
 # `device/powkiddy x55/README.md`.
-CONFIG_BT=y
+# `CONFIG_BT` vem do defconfig arm64 como `=m` (Bluetooth é pilha opcional).
+# Exigir `=y` aqui é atrito sem ganho: os módulos carregam por modalias do DT.
+CONFIG_BT=m
 CONFIG_BT_HCIUART=m
 CONFIG_BT_HCIUART_RTL=y
 CONFIG_BT_HCIUART_3WIRE=y

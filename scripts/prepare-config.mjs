@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 function parseArgs(argv) {
-  const args = { fragments: [], overlays: [], kernelFragments: [] };
+  const args = { fragments: [], overlays: [], kernelFragments: [], busyboxFragments: [], kernelPatches: [] };
   for (let index = 0; index < argv.length; index += 1) {
     const item = argv[index];
     if (item === "--fragment") {
@@ -12,6 +12,10 @@ function parseArgs(argv) {
       args.overlays.push(argv[++index]);
     } else if (item === "--kernel-fragment") {
       args.kernelFragments.push(argv[++index]);
+    } else if (item === "--busybox-fragment") {
+      args.busyboxFragments.push(argv[++index]);
+    } else if (item === "--kernel-patch") {
+      args.kernelPatches.push(argv[++index]);
     } else if (item.startsWith("--")) {
       args[item.slice(2)] = argv[++index];
     } else {
@@ -23,6 +27,22 @@ function parseArgs(argv) {
 
 function quote(value) {
   return `"${String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+// BR2_ROOTFS_OVERLAY, BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES e
+// BR2_PACKAGE_BUSYBOX_CONFIG_FRAGMENT_FILES são listas separadas por espaço.
+// Um caminho com espaço é lido como dois caminhos, e o erro que aparece cita
+// só a primeira metade — nunca o espaço. Quem chama já deve ter feito o
+// staging sem espaços; isto é a rede de segurança.
+function rejectSpaces(label, filePath) {
+  if (String(filePath).includes(" ")) {
+    throw new Error(
+      `${label} com espaço no caminho: ${filePath}\n` +
+        "O Buildroot separa essas listas por espaço e leria dois caminhos.\n" +
+        "Copie o arquivo para um diretório sem espaços (o build-device.sh faz " +
+        "isso em work/<device>/) e passe esse caminho.",
+    );
+  }
 }
 
 function setKey(lines, key, value) {
@@ -66,7 +86,7 @@ const args = parseArgs(process.argv.slice(2));
 
 if (!args.config || !args.hostname) {
   console.error(
-    "Uso: node scripts/prepare-config.mjs --config <arquivo> --hostname <nome> [--fragment ...] [--overlay ...] --dl-dir <dir>",
+    "Uso: node scripts/prepare-config.mjs --config <arquivo> --hostname <nome> [--fragment ...] [--overlay ...] [--kernel-fragment ...] [--busybox-fragment ...] --dl-dir <dir>",
   );
   process.exit(2);
 }
@@ -139,6 +159,7 @@ for (const overlay of args.overlays) {
     throw new Error(`Overlay não encontrado: ${overlay}`);
   }
   const resolved = path.resolve(overlay);
+  rejectSpaces("Overlay", overlay);
   if (!overlays.includes(resolved)) overlays.push(resolved);
 }
 lines = setKey(lines, "BR2_ROOTFS_OVERLAY", quote(overlays.join(" ")));
@@ -156,6 +177,7 @@ for (const kernelFragment of args.kernelFragments) {
   if (!existsSync(kernelFragment)) {
     throw new Error(`Fragmento de kernel não encontrado: ${kernelFragment}`);
   }
+  rejectSpaces("Fragmento de kernel", kernelFragment);
   kernelFragments.push(path.resolve(kernelFragment));
 }
 if (kernelFragments.length > 0) {
@@ -163,6 +185,54 @@ if (kernelFragments.length > 0) {
     lines,
     "BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES",
     quote(kernelFragments.join(" ")),
+  );
+}
+
+// Patches de KERNEL. Mesma regra de espaço dos fragmentos: BR2_LINUX_KERNEL_PATCH
+// é lista separada por espaço.
+const kernelPatches = [];
+for (const kernelPatch of args.kernelPatches) {
+  if (!kernelPatch) continue;
+  if (!existsSync(kernelPatch)) {
+    throw new Error(`Patch de kernel não encontrado: ${kernelPatch}`);
+  }
+  rejectSpaces("Patch de kernel", kernelPatch);
+  kernelPatches.push(path.resolve(kernelPatch));
+}
+if (kernelPatches.length > 0) {
+  lines = setKey(lines, "BR2_LINUX_KERNEL_PATCH", quote(kernelPatches.join(" ")));
+}
+
+// Overrides de pacote: arquivo .mk incluído pelo Buildroot depois das receitas.
+// Serve para acrescentar opção a um pacote sem editar a árvore do Buildroot —
+// caso do strace 6.7, que precisa de `--enable-bundled=yes` para compilar
+// contra os headers do kernel 6.12.
+if (args["package-override"]) {
+  const override = path.resolve(args["package-override"]);
+  if (!existsSync(override)) {
+    throw new Error(`Arquivo de override não encontrado: ${override}`);
+  }
+  lines = setKey(lines, "BR2_PACKAGE_OVERRIDE_FILE", quote(override));
+}
+
+// Fragmentos de BUSYBOX (símbolos `CONFIG_*` do busybox). Mesmo motivo do
+// fragmento de kernel: caminho absoluto. A utilidade prática é desligar applet
+// que não compila contra os headers do kernel escolhido — o `tc` do busybox
+// 1.36.1 usa TCA_CBQ_*, removido no 6.12, e derruba o build inteiro.
+const busyboxFragments = [];
+for (const busyboxFragment of args.busyboxFragments) {
+  if (!busyboxFragment) continue;
+  if (!existsSync(busyboxFragment)) {
+    throw new Error(`Fragmento de busybox não encontrado: ${busyboxFragment}`);
+  }
+  rejectSpaces("Fragmento de busybox", busyboxFragment);
+  busyboxFragments.push(path.resolve(busyboxFragment));
+}
+if (busyboxFragments.length > 0) {
+  lines = setKey(
+    lines,
+    "BR2_PACKAGE_BUSYBOX_CONFIG_FRAGMENT_FILES",
+    quote(busyboxFragments.join(" ")),
   );
 }
 

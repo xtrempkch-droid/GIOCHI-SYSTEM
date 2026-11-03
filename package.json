@@ -8,11 +8,14 @@
     "node": ">=20"
   },
   "scripts": {
+    "check": "bash scripts/check-host.sh",
     "validate": "node scripts/validate-devices.mjs",
     "devices": "node scripts/list-devices.mjs",
     "matrix": "node scripts/list-devices.mjs --github-matrix",
     "test": "node tests/run-all.mjs",
-    "build:qemu": "bash scripts/build-device.sh qemu-aarch64"
+    "build:qemu": "bash scripts/build-device.sh qemu-aarch64",
+    "build:qemu:container": "bash scripts/build-in-container.sh qemu-aarch64",
+    "build:x55": "ALLOW_DRAFT=1 bash scripts/build-in-container.sh powkiddy-x55"
   },
   "keywords": [
     "linux",

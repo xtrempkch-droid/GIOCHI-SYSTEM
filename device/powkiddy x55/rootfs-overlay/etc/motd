@@ -1,8 +1,21 @@
 Giochi System — Powkiddy X55
 ============================
 
-Placeholder de dispositivo. A imagem ainda não inicializa no
-hardware real até que kernel, DTB, U-Boot e genimage do RK3566
-sejam configurados.
+Handheld RK3566 (4x Cortex-A55, Mali-G52, 2 GB) com painel MIPI-DSI
+HX8394 720x1280.
 
 Device ID: powkiddy-x55
+Console:   ttyS2 @ 1500000 8N1
+
+O que funciona hoje nesta imagem:
+  - boot pelo cartão SD (idbloader + U-Boot + kernel + rootfs ext4)
+  - tela 720x1280 com backlight, render node do panfrost
+  - botões do volume (gpio-keys) e eixos do adc-joystick
+  - USB gadget, rede, ssh, bluetooth (pilha)
+
+O que ainda NÃO funciona:
+  - os 17 botões do joypad: dependem do driver rocknix-joypad, fora da árvore
+  - Wi-Fi e Bluetooth RTL8821CS: falta o rtl8821cs_config.bin gerado
+  - áudio do RK817: o amplificador precisa estar embutido no kernel
+
+Diagnóstico do aparelho:  giochi-selftest

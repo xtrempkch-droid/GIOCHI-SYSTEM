@@ -17,6 +17,13 @@
 # Só símbolos `BR2_*` neste arquivo. `CONFIG_*` em `linux.fragment` — misturar
 # os dois faz o `applyFragment` ignorar tudo em silêncio.
 
+# ── console serial ───────────────────────────────────────────
+# O console do aparelho é ttyS2 a **1500000** 8N1 (não 115200). A decisão de
+# deixar o kernel mandar no baud está em `config/common.fragment`
+# (BR2_TARGET_GENERIC_GETTY_BAUDRATE_KEEP), porque vale para todo aparelho.
+# O que é deste aparelho está na linha de comando do kernel, gravada pelo
+# `scripts/make-sd-image.sh`: console=ttyS2,1500000n8.
+
 # ── rootfs ───────────────────────────────────────────────────
 # A base traz ext4 em 1024M; aqui fica explícito porque o tamanho é nosso, não
 # do hardware. O rootfs real medido no antecessor ficou em ~35 MB comprimido,

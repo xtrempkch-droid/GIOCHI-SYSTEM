@@ -239,6 +239,27 @@ export async function validateDevice(device) {
     }
   }
 
+  // kernelPatches: lista de arquivos .patch ou diretórios aplicados ao kernel
+  // antes do `make`. Opcional, mas se declarado precisa existir — patch que
+  // "não foi encontrado" e o build segue entrega imagem sem a correção, que é
+  // exatamente a falha silenciosa que este repositório evita.
+  if (device.kernelPatches !== undefined) {
+    require(Array.isArray(device.kernelPatches), "kernelPatches deve ser um array.");
+    if (Array.isArray(device.kernelPatches)) {
+      for (const patchPath of device.kernelPatches) {
+        try {
+          assertRelativePath(patchPath, "kernelPatches[]");
+          require(
+            await pathExists(path.join(device.directory, patchPath)),
+            `patch de kernel não encontrado: ${patchPath}`,
+          );
+        } catch (error) {
+          errors.push(error.message);
+        }
+      }
+    }
+  }
+
   try {
     assertRelativePath(device.docs, "docs");
     const docsPath = path.join(device.directory, device.docs);

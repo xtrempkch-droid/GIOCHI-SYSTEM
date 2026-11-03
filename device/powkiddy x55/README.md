@@ -39,6 +39,7 @@ copiado sem conferência, e o que não foi verificado está marcado como tal.
 | `defconfig` | base Buildroot (kernel 6.12, U-Boot 2024.10, rkbin, DTS, gráficos, firmware) |
 | `buildroot.fragment` | deltas deste repositório (tamanho do rootfs, e o que ficou fora) |
 | `linux.fragment` | símbolos `CONFIG_*` do kernel — painel, áudio, entrada, rádio |
+| `busybox.fragment` | desliga o applet `tc` do busybox, que não compila contra os headers do 6.12 |
 | `buttons.map` | nome lógico → código evdev (vira `/etc/giochi/buttons.map`) |
 | `rootfs-overlay/` | `motd` e `device-id` |
 
@@ -50,7 +51,13 @@ copiado sem conferência, e o que não foi verificado está marcado como tal.
 2. **`Playback Mux` do RK817 tem de ficar em `HP`.** O amplificador do falante é
    alimentado por `HPOL`/`HPOR`; em `SPK` o aparelho fica **mudo** (o `SPK DAC` é
    o class-D interno do RK817 e não está roteado nesta placa).
-3. **O `olddefconfig` descarta filho de pai unset em silêncio.** Sem
+3. **O `tc` do busybox não compila contra os headers do 6.12.** `TCA_CBQ_*` e
+   `struct tc_cbq_lssopt` foram removidos junto com o qdisc CBQ, e o erro sai
+   como uma parede de "undeclared identifier" em `networking/tc.c` que não cita
+   kernel nem headers. Medido no primeiro build real deste aparelho: parou o
+   rootfs inteiro. Corrigido em `busybox.fragment` (`# CONFIG_TC is not set`);
+   o `tc` do iproute2, que está na imagem, cobre o uso.
+4. **O `olddefconfig` descarta filho de pai unset em silêncio.** Sem
    `CONFIG_SND_SOC_ROCKCHIP`, o `I2S` some e o `simple-audio-card` fica em
    deferred probe para sempre. É exatamente o que o `assert-config` existe para
    pegar.
@@ -88,6 +95,12 @@ O aparelho está `enabled: false`, então o CI não o constrói. Para tentar:
 ```bash
 # local, em Linux/WSL2 com caminho sem espaços
 ALLOW_DRAFT=1 bash scripts/build-device.sh powkiddy-x55
+
+# sem instalar nada no host (imagem giochi-builder)
+ALLOW_DRAFT=1 bash scripts/build-in-container.sh powkiddy-x55
+
+# retomar de onde parou, sem apagar work/
+GIOCHI_SYSTEM_KEEP_WORK=1 ALLOW_DRAFT=1 bash scripts/build-in-container.sh powkiddy-x55
 
 # no CI
 Actions → Build Giochi System ARM64 → Run workflow

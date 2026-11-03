@@ -1,0 +1,34 @@
+# Overrides de pacote do Buildroot (BR2_PACKAGE_OVERRIDE_FILE)
+# ============================================================
+# Este arquivo é incluído depois das receitas de pacote, então dá para
+# acrescentar opções sem editar a árvore do Buildroot nem carregar patch.
+#
+# Ele existe porque um pacote do Buildroot 2024.02 não compila contra os
+# headers do kernel 6.12 — e a falha aparece longe da causa.
+
+# ── strace 6.7 ───────────────────────────────────────────────
+# Com `BR2_KERNEL_HEADERS_AS_KERNEL=y` e kernel 6.12, o strace 6.7 morre numa
+# static assertion do próprio código:
+#
+#   macros.h:141: error: static assertion failed:
+#   "Unexpected size of sysoff.rsv (sizeof(unsigned int) * 3 expected)."
+#
+# A struct `ptp_sys_offset` mudou no 6.11, e a cópia que o strace 6.7 tem dos
+# uapi headers não sabe disso. O próprio upstream aponta a saída:
+# `--enable-bundled=yes` faz o strace usar os headers que ele traz, em vez dos
+# do toolchain.
+#
+# Escolha consciente: manter o kernel e os headers em 6.12 (o aparelho precisa
+# dos headers certos para o próprio kernel) e deixar o strace isolado. A
+# alternativa — rebaixar o toolchain para headers 6.6 — arrasta a toolchain
+# inteira e não resolve a causa, só a esconde.
+#
+# ORDEM DE INCLUSÃO — leia antes de trocar `override` por `+=`:
+# o Buildroot inclui este arquivo ANTES de `package/*/*.mk` (Makefile, ~linha
+# 530). A receita faz `STRACE_CONF_OPTS = --enable-mpers=no` e uma atribuição
+# normal apaga qualquer `+=` feito aqui — sem aviso, e o build volta a falhar
+# igual. `override` protege a variável, ao custo de precisar repetir as opções
+# padrão da receita. Features opcionais (libunwind/libiberty) estão desligadas
+# em todos os devices deste repositório; se um dia ligarem, ajuste aqui.
+override STRACE_CONF_OPTS = --enable-mpers=no --enable-bundled=yes \
+	--without-libunwind --without-libiberty

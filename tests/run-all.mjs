@@ -8,3 +8,6 @@
 import "./devices.test.mjs";
 import "./assert-config.test.mjs";
 import "./fdt.test.mjs";
+import "./buildroot-hash.test.mjs";
+import "./prepare-config.test.mjs";
+import "./assert-kernel-config.test.mjs";

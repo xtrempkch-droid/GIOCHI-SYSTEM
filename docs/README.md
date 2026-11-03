@@ -7,6 +7,8 @@
 - [Build local](building-locally.md) — como compilar no Linux/WSL2 e quais variáveis usar.
 - [GitHub Actions](github-actions.md) — matriz, entradas, cache, artefatos e segredos.
 - [Gravação e boot](flashing.md) — QEMU, cartão SD, eMMC e primeiros passos.
+- [Powkiddy X55: primeiro boot](x55-bringup.md) — registro medido no aparelho:
+  layout do cartão, linha de comando do kernel, o que passou e o que falta.
 - [Solução de problemas](troubleshooting.md) — falhas comuns de build e configuração.
 - [Segurança](security.md) — senha padrão, SSH, cadeia de suprimentos e limitações.
 - [Manifesto de dependências](dependencies-manifest.md) — contrato `forge.json` com o Giochi app.

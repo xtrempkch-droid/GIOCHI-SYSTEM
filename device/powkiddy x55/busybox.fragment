@@ -1,0 +1,18 @@
+# Busybox do Powkiddy X55
+# ============================================================
+# O kernel deste aparelho e 6.12, e `BR2_KERNEL_HEADERS_AS_KERNEL=y` faz os
+# headers do toolchain serem os do 6.12. Nesses headers, `TCA_CBQ_*`,
+# `struct tc_cbq_lssopt` e amigos foram REMOVIDOS junto com o qdisc CBQ.
+#
+# O applet `tc` do busybox 1.36.1 ainda os usa, e a compilacao morre em
+# `networking/tc.c` com uma parede de "undeclared identifier" que nao cita
+# kernel, headers nem busybox. Custo real medido: o build inteiro do rootfs.
+#
+# Desligar o applet e a correcao certa, nao um contorno: `iproute2` ja esta na
+# imagem (BR2_PACKAGE_IPROUTE2=y) e o `tc` dele compila contra os headers
+# atuais. Sem esta linha o build do X55 falha antes de gerar qualquer imagem.
+#
+# NAO troque a sintaxe abaixo: o merge do Buildroot usa kconfig, e so
+# "# CONFIG_X is not set" desliga o simbolo de fato.
+
+# CONFIG_TC is not set
