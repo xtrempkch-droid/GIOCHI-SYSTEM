@@ -51,10 +51,36 @@ if [ -r /proc/device-tree/model ]; then
     MODEL=$(tr -d '\000' </proc/device-tree/model)
 fi
 
-if [ -n "$MODEL" ]; then
-    pass "device tree: $MODEL"
+# O U-Boot SOBRESCREVE /model com o nome da placa DELE. Medido no X35H:
+#
+#   /proc/device-tree/model       -> "RG353M m"      (nome do U-Boot)
+#   /proc/device-tree/compatible  -> "powkiddy,x35h rockchip,rk3566"
+#
+# O DTB é o nosso (o compatible prova), mas quem lê só o `model` conclui que o
+# aparelho é um Anbernic. O `compatible` é a identidade em que se pode confiar,
+# então é ele que vai primeiro — e a divergência é mostrada, porque é o tipo de
+# coisa que confunde o próximo bring-up.
+COMPAT=""
+if [ -r /proc/device-tree/compatible ]; then
+    COMPAT=$(tr '\000' ' ' </proc/device-tree/compatible | sed 's/ *$//')
+fi
+
+if [ -n "$COMPAT" ]; then
+    pass "device tree (compatible): $COMPAT"
+elif [ -n "$MODEL" ]; then
+    warn "só o model disponível: $MODEL"
 else
-    fail "sem /proc/device-tree/model — kernel não carregou DTB?"
+    fail "sem /proc/device-tree — kernel não carregou DTB?"
+fi
+
+if [ -n "$MODEL" ] && [ -n "$COMPAT" ]; then
+    case "$COMPAT" in
+        *"$MODEL"*) ;;
+        *)
+            # Aviso, não falha: o sistema funciona; o rótulo é que mente.
+            warn "model \"$MODEL\" não corresponde ao compatible (U-Boot sobrescreve /model)"
+            ;;
+    esac
 fi
 
 if [ -r /etc/giochi-system-release ]; then
@@ -201,14 +227,24 @@ fi
 # inútil sem freetype, então as duas são reportadas juntas.
 head2 "bibliotecas do launcher"
 
-MISSING_LIB=""
+# ARMADILHA MEDIDA: `ls /usr/lib/x.so* /lib/x.so*` retorna NÃO-ZERO quando o
+# padrão de UM dos diretórios não casa — mesmo que o outro exista. A primeira
+# versão disto deu 5 FAILs falsos num aparelho onde as cinco bibliotecas
+# estavam em /usr/lib. Cada caminho tem de ser testado sozinho.
+lib_existe() {
+    for dir in /usr/lib /lib; do
+        if ls "$dir/$1".so* >/dev/null 2>&1; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 for lib in libasound libfreetype libharfbuzz libSDL2-2.0 libSDL2_ttf; do
-    # O nome real tem versão (libharfbuzz.so.0), então procura o prefixo.
-    if ls /usr/lib/${lib}.so* /lib/${lib}.so* >/dev/null 2>&1; then
+    if lib_existe "$lib"; then
         pass "$lib"
     else
         fail "$lib ausente — o launcher não inicia ou quebra em runtime"
-        MISSING_LIB="$MISSING_LIB $lib"
     fi
 done
 
@@ -413,8 +449,25 @@ fi
 # seção, e não um detalhe no meio de uma lista.
 head2 "rede por USB (canal de acesso padrão)"
 
-if [ -d /sys/class/net/usb0 ]; then
+# ATENÇÃO: `/sys/class/net/usb0` é symlink PENDURADO no kernel 6.12 do X35H —
+# `ls` mostra a entrada, mas `[ -e ]`/`[ -d ]` e a leitura de `operstate` falham
+# (o `net/` do gadget não existe no sysfs, embora o netdev funcione e o SSH
+# responda por ele). A fonte confiável é o `ip`, com o sysfs só como reserva.
+usb0_existe() {
+    if command -v ip >/dev/null 2>&1; then
+        ip -o link show usb0 >/dev/null 2>&1 && return 0
+    fi
+    [ -e /sys/class/net/usb0/operstate ] && return 0
+    return 1
+}
+
+if usb0_existe; then
     USB0_STATE="$(read_or /sys/class/net/usb0/operstate)"
+    [ -n "$USB0_STATE" ] || USB0_STATE="$(ip -o link show usb0 2>/dev/null | sed 's/.*state \([A-Z_]*\).*/\1/' | head -1)"
+    [ -n "$USB0_STATE" ] || USB0_STATE="desconhecido"
+    # `ip` devolve UP em MAIÚSCULAS; sysfs devolve minúsculas. Normalizar evita
+    # o rótulo errado de "cabo desconectado" num link ativo.
+    USB0_STATE=$(printf '%s' "$USB0_STATE" | tr 'A-Z' 'a-z')
     USB0_ADDR=""
     # `ip -4 -o addr show usb0` é a forma estável; ifconfig varia entre applets.
     if command -v ip >/dev/null 2>&1; then
@@ -434,9 +487,12 @@ if [ -d /sys/class/net/usb0 ]; then
         pass "usb0: $USB0_ADDR pronto (link $USB0_STATE — cabo desconectado)"
     fi
 
-    if [ -f /var/run/udhcpd.pid ] && kill -0 "$(cat /var/run/udhcpd.pid 2>/dev/null)" 2>/dev/null; then
+    # `pidof`, não pidfile: medido no X35H, o udhcpd do busybox está rodando
+    # (pid 176) e NÃO deixa /var/run/udhcpd.pid. O pidfile como critério dava
+    # "udhcpd parado" num servidor que havia acabado de dar IP ao PC.
+    if pidof udhcpd >/dev/null 2>&1; then
         LEASES=$(grep -c '^[0-9a-f]' /var/lib/misc/udhcpd.leases 2>/dev/null || echo 0)
-        pass "udhcpd ativo — o PC recebe IP sozinho ($LEASES lease(s))"
+        pass "udhcpd ativo (pid $(pidof udhcpd | cut -d' ' -f1)) — o PC recebe IP sozinho"
     else
         # Sem udhcpd ainda dá para conectar, mas exige IP estático no PC.
         warn "udhcpd parado — o PC precisa de IP estático 10.55.0.1/24"
@@ -446,6 +502,42 @@ else
         fail "sem usb0 apesar de haver UDC — rode 'giochi-usbnet' e veja o erro"
     else
         warn "sem usb0 e sem UDC — o aparelho não está em modo dispositivo"
+    fi
+fi
+
+# Porta USB HOST: é onde o dongle Wi-Fi entra nos aparelhos sem rádio onboard.
+# Sem controlador host em modo "host", o dongle é plugado e nada acontece.
+HOST_USB=0
+for u in /sys/bus/platform/drivers/dwc3/*.usb /sys/bus/platform/drivers/dwc3/*/*.usb; do
+    [ -r "$u/mode" ] || continue
+    [ "$(cat "$u/mode" 2>/dev/null)" = "host" ] && HOST_USB=1
+done
+for u in /sys/bus/usb/devices/usb*; do
+    [ -d "$u" ] && HOST_USB=1
+done
+if [ "$HOST_USB" = "1" ]; then
+    pass "porta USB host disponível (dongle Wi-Fi pode ser plugado)"
+else
+    warn "sem porta USB host — dongle Wi-Fi não teria onde entrar"
+fi
+
+# Dongle plugado? Só reporta o que está lá; não exige nada — num aparelho sem
+# rádio onboard é normal não ter wlan0. O nome que o cfg80211 dá é wlan0/wlan1
+# (o onboard da X55 também é wlan0, então este bloco não distingue os dois).
+if [ -d /sys/class/net/wlan0 ]; then
+    pass "wlan0 presente ($(read_or /sys/class/net/wlan0/address))"
+else
+    skip "sem wlan0 — nenhum dongle plugado (ou sem rádio onboard)"
+fi
+
+# Os módulos de dongle existem na imagem? Sem eles, plugar não faz nada e
+# nenhuma mensagem explica.
+if [ -d /lib/modules ]; then
+    MODS=$(find /lib/modules -name 'rtl8xxxu*' -o -name 'mt7601u*' -o -name 'ath9k_htc*' 2>/dev/null | wc -l)
+    if [ "$MODS" -gt 0 ]; then
+        pass "módulos de dongle Wi-Fi: $MODS arquivo(s) (rtl8xxxu/mt7601u/ath9k_htc)"
+    else
+        fail "sem módulo de dongle Wi-Fi — plugar não tem efeito nenhum"
     fi
 fi
 

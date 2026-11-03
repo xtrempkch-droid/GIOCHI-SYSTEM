@@ -1199,6 +1199,88 @@ listar as cinco bibliotecas do launcher, ele roda `readelf -d` no
 `libSDL2_ttf` e avisa quando o harfbuzz **não** está ligado. É a única forma de
 ver isso no aparelho — a biblioteca presente não prova que alguém a usa.
 
+### 12.30 Três medidas que só o aparelho deu (X35H, primeiro boot com SSH)
+
+O X35H bootou com tela, `usb0` e SSH — e o `giochi-selftest` acusou **6 FAILs
+que eram todos bugs do próprio teste**. Ficam registrados porque os três padrões
+se repetem.
+
+| Sintoma no selftest | Causa real |
+| --- | --- |
+| 5 FAILs "libasound ausente" (etc.) com as cinco em `/usr/lib` | `ls /usr/lib/x.so* /lib/x.so*` retorna **não-zero quando o padrão de UM diretório não casa**, mesmo que o outro exista. Cada caminho tem de ser testado sozinho |
+| `FAIL sem usb0 apesar de haver UDC` na mesma saída em que `PASS interfaces: usb0` | `/sys/class/net/usb0` é **symlink pendurado** neste kernel: `ls` mostra a entrada, mas `[ -e ]`, `[ -d ]` e a leitura de `operstate` falham, enquanto `ip link` e o SSH funcionam. Usar `ip` primeiro, sysfs só como reserva |
+| `WARN udhcpd parado` com o `udhcpd` dando IP ao PC | `BUSYBOX udhcpd` **não grava pidfile** aqui (rodando como pid 176, sem `/var/run/udhcpd.pid`). O critério certo é `pidof udhcpd` |
+
+Padrão comum: **o teste perguntou a coisa errada**. Presença de arquivo não é
+uso; existência de symlink não é existência do alvo; pidfile não é processo.
+A regra que funciona é perguntar pela **consequência** (o `ip` responde? o
+`pidof` vê? o `readelf` mostra `NEEDED`?) e só usar o indireto como reserva.
+
+#### U-Boot sobrescreve `/model` — a identidade real é o `compatible`
+
+Medido no X35H:
+
+```text
+/proc/device-tree/model       -> "RG353M m"      (nome da placa do U-Boot)
+/proc/device-tree/compatible  -> "powkiddy,x35h rockchip,rk3566"
+```
+
+O DTB carregado **é o nosso** — o `compatible` prova. Mas o U-Boot do defconfig
+`anbernic-rgxx3-rk3566` reescreve `/model` com o nome dele, e quem lê só o
+`model` conclui que o aparelho é um Anbernic. Isso engana tanto o operador
+quanto qualquer app que identifique o dispositivo por `/proc/device-tree/model`.
+
+`giochi-selftest` passou a reportar o `compatible` como identidade e a **avisar**
+quando o `model` diverge. Aviso, não falha: o sistema funciona, o rótulo é que
+mente. Antes de confiar em `model` para identificar aparelho, leia `compatible`.
+
+### 12.31 Dongle Wi-Fi: hardware do USUÁRIO ≠ hardware ONBOARD
+
+Eu havia tirado `wpa_supplicant`/`iw`/`wireless-regdb` do X35H argumentando
+"sem rádio onboard, sem pacote". Estava errado, e o usuário corrigiu: **a
+comunidade usa dongle Wi-Fi USB**.
+
+A distinção que passa a valer:
+
+| Tipo de hardware | Ausente | Presente |
+| --- | --- | --- |
+| **ONBOARD** (RTL8821CS na X55) | não empacote — driver/firmware seria código morto | empacote |
+| **FORNECIDO pelo usuário** (dongle, cartão SD) | **empacote mesmo assim** | já está pronto |
+
+Motivo: a imagem é gravada **uma vez** e o hardware chega **depois**. Se o
+suporte não estiver lá, o usuário não tem saída sem recompilar. Já o chip
+onboard ausente nunca vai aparecer — empacotá-lo só gasta espaço.
+
+O X35H tem **duas portas USB independentes**, então gadget e dongle convivem:
+
+```text
+usb@fcc00000  dr_mode=otg   status=okay  → nosso usb0 (SSH)
+usb@fd000000  dr_mode=host  status=okay  → dongle Wi-Fi
+```
+
+Suporte acrescentado (os dois aparelhos, porque não há fragmento comum de
+kernel): `CONFIG_RTL8XXXU=m` + `RTL8XXXU_UNTESTED=y` (cobre 8188CU/EU, 8192CU,
+8723AU e **8188FU**, o dongle barato de hoje), `CONFIG_RTL8192CU=m`,
+`CONFIG_MT7601U=m`, `CONFIG_ATH9K_HTC=m`. Todos `=m`: carregam por modalias
+quando o dongle entra, sem custo se ninguém plugar.
+
+Firmware: `RTL_81XX` e `ATHEROS_9271` têm opção no Buildroot;
+`mediatek/mt7601u.bin` **não tem**, e entra por `LINUX_FIRMWARE_FILES +=` no
+`config/package-overrides.mk`.
+
+**O gate que faltava:** `assert-config` cobre fragmentos `BR2_*`, não o
+`defconfig` — então `BR2_PACKAGE_LINUX_FIRMWARE_RTL_81XX=y` podia ser dropado
+em silêncio. Neste caso não foi (conferido no `.config`), mas o firmware
+**não apareceu** de primeira por outro motivo, o do §12.29: o pacote já estava
+instalado. `rm -rf build/linux-firmware-*` e reconstruir resolveu.
+
+`giochi-selftest` passou a reportar porta USB host, presença de `wlan0` e os
+módulos de dongle — sem isso, plugar um dongle é silêncio absoluto.
+
+`tests/dongle.test.mjs` (7 testes) impede a recaída: exige os drivers nos dois
+aparelhos, `UNTESTED` para o 8188FU, `=m` e não `=y`, userspace de Wi-Fi no
+X35H, o `rtw88` **fora** do X35H, e o firmware declarado.
+
 ## 13. Aparelhos
 
 | ID | Pasta | SoC | Arch | Status | Falta |

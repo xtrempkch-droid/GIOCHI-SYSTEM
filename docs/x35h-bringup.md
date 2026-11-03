@@ -345,6 +345,154 @@ root@10.55.0.2` (senha `giochi-dev`) dá acesso direto, e o `giochi-selftest`
 mostra o bloco "bibliotecas do launcher" com as cinco `.so` e o `readelf -d`
 provando que o `SDL2_ttf` usa harfbuzz.
 
+## 5.5 BOOTOU COM SSH — o primeiro acesso sem serial (03/11/2026)
+
+O aparelho subiu com tela **e** com rede USB. Estado medido via `ssh
+root@10.55.0.2`:
+
+```text
+giochi-system-x35h   kernel 6.12.0   uptime 0 min
+
+PASS 34 · WARN 3 · FAIL 0 · SKIP 3
+```
+
+### O que o `giochi-selftest` confirmou
+
+| Bloco | Medida |
+| --- | --- |
+| display | `card0-DSI-1: connected 640x480`, backlight `833/1666`, `console rotate=0, 80x30` |
+| DRM | `rockchip-drm`, `/dev/dri/card0` + render node |
+| entrada | 5 dispositivos: `gpio-keys-control` (**16 botões**), `adc-joystick` (**4 eixos**), `gpio-keys-vol`, `rk805 pwrkey`, codec |
+| áudio | `rk817ext` + **`Playback Mux = HP`** |
+| energia | bateria **68% (Charging)**, 41 °C |
+| entropia | `hwrng: rockchip-rng` |
+| rede USB | `usb0` em `10.55.0.2`, `udhcpd` dando IP ao PC, `sshd` na 22 |
+| bibliotecas | as cinco do launcher + 21 fontes `.ttf` |
+
+Ou seja: **um aparelho sem Wi-Fi, sem Bluetooth e sem TTL ficou acessível por
+um cabo USB, com endereço automático.** É exatamente o que o
+[`sistema-base.md`](sistema-base.md) prometia, e a primeira vez que o contrato
+foi verificado em hardware.
+
+### A causa do log não chegar ao cartão: DOIS cartões
+
+O kernel do X35H expõe duas mídias:
+
+```text
+mmcblk0   3.7 GiB   eMMC INTERNA, com uma imagem antiga instalada
+                    (mmcblk0p1 monta como vfat e tem um `extlinux/` de outro sistema)
+mmcblk1   29.7 GiB  o cartão SD, que é o que bootou
+```
+
+O script testava `mmcblk0p1` primeiro por ordem alfabética, montava a **eMMC**,
+não encontrava `extlinux.conf` (só o diretório), gastava a tentativa e desistia
+sem nunca olhar o SD.
+
+A correção não foi reordenar a lista na mão — foi **derivar a ordem da
+realidade**: a partição de boot mora no mesmo disco do rootfs em uso. Mas
+`/proc/mounts` responde `/dev/root`, que é **alias**, não o nome real
+(`readlink -f` não resolve, porque não há symlink no devtmpfs). O caminho que
+funcionou foi o major:minor do `/proc/self/mountinfo` casado com
+`/sys/dev/block/<dev>`:
+
+```text
+rootfs em /dev/mmcblk1p2; partição de boot do mesmo disco: /dev/mmcblk1p1
+partição de boot: /dev/mmcblk1p1
+gravado em giochi-boot.log em /mnt/bootlog
+```
+
+Agora o log **chega ao cartão**: `giochi-boot.log` de 26 KB na FAT, legível em
+qualquer PC.
+
+### Três bugs do selftest que o aparelho revelou
+
+Todos da mesma família: **o teste perguntava a coisa errada**.
+
+| Reportado | Realidade | Por que o teste errou |
+| --- | --- | --- |
+| 5× `libasound ausente` | as cinco em `/usr/lib` | `ls dir1/x* dir2/x*` retorna não-zero se **um** dos padrões não casar |
+| `FAIL sem usb0 apesar de haver UDC` | `ip link` mostra `usb0` e o SSH responde por ele | `/sys/class/net/usb0` é **symlink pendurado** neste kernel: `-e`/`-d` falham com o netdev funcionando |
+| `WARN udhcpd parado` | `udhcpd` rodando (pid 176) e servindo IP | o busybox `udhcpd` **não grava pidfile** |
+
+Depois de corrigir, a mesma execução deu `PASS 34 · WARN 3 · FAIL 0`. Os 6 FAILs
+eram todos do teste.
+
+### `model` mente; `compatible` não
+
+```text
+/proc/device-tree/model       -> "RG353M m"
+/proc/device-tree/compatible  -> "powkiddy,x35h rockchip,rk3566"
+```
+
+O DTB carregado **é o nosso** — o `compatible` prova, e o painel confirma. Mas o
+U-Boot do defconfig `anbernic-rgxx3-rk3566` **reescreve `/model`** com o nome da
+placa dele. Quem identifica o aparelho só por `model` conclui que é um Anbernic.
+O `giochi-selftest` passou a reportar o `compatible` e a avisar na divergência.
+
+### O dongle Wi-Fi USB: hardware do usuário, não do aparelho
+
+O X35H **não tem rádio onboard** — nem Wi-Fi, nem Bluetooth. A comunidade
+resolve com **dongle USB**, e isso muda a decisão de empacotamento.
+
+Primeiro fato, medido no DTB: o aparelho tem **duas portas USB independentes**,
+então gadget de rede e dongle convivem:
+
+```text
+usb@fcc00000  dr_mode=otg   status=okay  → usb0 (SSH por cabo)
+usb@fd000000  dr_mode=host  status=okay  → dongle Wi-Fi
+```
+
+Segundo fato: **nenhum driver de dongle estava no kernel**. Plugar um dongle não
+faria nada — sem erro, sem `wlan0`, sem pista.
+
+A decisão que eu havia tomado ("sem rádio onboard, sem pacote de Wi-Fi") estava
+errada, e a correção é conceitual, não pontual:
+
+| Hardware | Como chega | Empacotar? |
+| --- | --- | --- |
+| **onboard** (RTL8821CS na X55) | já está na placa, ou nunca estará | só se existir |
+| **do usuário** (dongle, cartão SD) | **depois** da imagem gravada | **sempre** |
+
+A imagem é gravada uma vez; o dongle chega depois. Sem suporte prévio, o usuário
+não tem saída sem recompilar.
+
+### O que foi acrescentado
+
+Drivers no `linux.fragment` (todos `=m`, carregam por modalias quando o dongle
+entra):
+
+| Símbolo | Cobre |
+| --- | --- |
+| `CONFIG_RTL8XXXU=m` | RTL8188CU/EU, RTL8192CU, RTL8723AU, RTL8188FU |
+| `CONFIG_RTL8XXXU_UNTESTED=y` | **8188FU** — o dongle barato de hoje |
+| `CONFIG_RTL8192CU=m` | driver legado, para revisões que o rtl8xxxu não cobre |
+| `CONFIG_MT7601U=m` | MediaTek mais barato |
+| `CONFIG_ATH9K_HTC=m` | AR9271, o mais estável da lista |
+
+Userspace no `defconfig`: `wpa_supplicant` (+CLI e `passphrase`), `iw`,
+`wireless-regdb` — sem eles o dongle sobe e não conecta.
+
+Firmware: `RTL_81XX` e `ATHEROS_9271` têm opção no Buildroot;
+`mediatek/mt7601u.bin` **não tem** e entra por `LINUX_FIRMWARE_FILES +=` no
+`config/package-overrides.mk`.
+
+O `rtw88` do RTL8821CS **continua fora** — aquele chip é onboard, não existe
+aqui e não pode ser plugado.
+
+### Duas armadilhas no caminho
+
+1. **`assert-config` não cobre o `defconfig`.** Ele valida fragmentos `BR2_*`.
+   Um `BR2_PACKAGE_LINUX_FIRMWARE_RTL_81XX=y` poderia ser descartado em
+   silêncio. Neste caso sobreviveu (conferido no `.config`), mas o gate não
+   garantia nada.
+2. **O firmware não apareceu de primeira** mesmo com os símbolos corretos: o
+   pacote `linux-firmware` já estava instalado e o Buildroot não o reinstala
+   quando a lista de arquivos muda. `rm -rf build/linux-firmware-*` resolveu —
+   a mesma armadilha do harfbuzz (§12.29).
+
+`giochi-selftest` agora reporta porta USB host, `wlan0` e os módulos de dongle:
+plugar um dongle e não ver nada é o pior resultado possível.
+
 ## 6. O que falta, e a ordem
 
 1. **Bootar e ler o log.** Sem isso o resto é especulação.

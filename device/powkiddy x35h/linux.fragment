@@ -159,6 +159,37 @@ CONFIG_ROCKCHIP_THERMAL=y
 CONFIG_HW_RANDOM=y
 CONFIG_HW_RANDOM_ROCKCHIP=y
 
+# ── DONGLE Wi-Fi USB ─────────────────────────────────────────
+#
+# Este aparelho não tem rádio onboard, e a comunidade usa dongle na porta USB
+# HOST (`usb@fd000000`, dr_mode=host, status=okay — a OTG fica para o gadget
+# de rede). Sem estes drivers o dongle é plugado e NADA acontece: nenhum erro,
+# nenhum wlan0, porque o kernel simplesmente não tem com que falar com ele.
+#
+# `CONFIG_MAC80211` e `CONFIG_CFG80211` já vêm =m do defconfig arm64; o que
+# falta é o driver do chip.
+#
+# Cobertura escolhida — os dongles baratos que a comunidade usa:
+#   RTL8XXXU   RTL8188CU/EU, RTL8192CU, RTL8723AU, RTL8188FU. É UM driver para
+#              toda a família 8xxx USB, então cobre a maioria dos dongles de
+#              R$ 20-40.
+#   RTL8XXXU_UNTESTED  inclui os chips que o autor do driver não testou
+#              (8188FU entra aqui). "Untested" significa não validado pelo
+#              autor, não "quebrado" — e sem isso metade dos dongles novos fica
+#              de fora. Se um dongle der problema, é aqui que se desliga.
+#   RTL8192CU  driver legado do 8192CU, ainda necessário em algumas revisões
+#              que o rtl8xxxu não cobre.
+#   MT7601U    o dongle MediaTek mais barato; firmware própria.
+#   ATH9K_HTC  AR9271 (Atheros), o mais estável da lista e comum em kits.
+#
+# Ficam =m: são módulos que carregam por modalias quando o dongle é plugado, e
+# o `S15modules`/kmod já resolve isso. Não custam memória se ninguém plugar nada.
+CONFIG_RTL8XXXU=m
+CONFIG_RTL8XXXU_UNTESTED=y
+CONFIG_RTL8192CU=m
+CONFIG_MT7601U=m
+CONFIG_ATH9K_HTC=m
+
 # ── Wi-Fi: AUSENTE nesta placa ──────────────────────────────
 #
 # A X55 tem RTL8821CS por SDIO; a X35H não tem o chip populado. Sem driver e

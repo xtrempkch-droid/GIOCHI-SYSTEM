@@ -106,16 +106,22 @@ status() {
     fi
 
     echo "== interface =="
-    if [ -d /sys/class/net/usb0 ]; then
-        echo "  usb0: $(cat /sys/class/net/usb0/operstate 2>/dev/null) mac=$(cat /sys/class/net/usb0/address 2>/dev/null)"
+    # `ip` primeiro: neste kernel `/sys/class/net/usb0` pode ser symlink
+    # PENDURADO (o `net/` do gadget não existe no sysfs) mesmo com o netdev
+    # funcionando e o SSH respondendo por ele. Ler o sysfs daria "não existe"
+    # num aparelho perfeitamente acessível.
+    if ip -o link show usb0 >/dev/null 2>&1; then
+        ip -o link show usb0 2>/dev/null | sed 's/^/  /'
         ip -4 addr show usb0 2>/dev/null | sed 's/^/  /'
+    elif [ -e /sys/class/net/usb0 ]; then
+        echo "  usb0 no sysfs, sem ip: $(cat /sys/class/net/usb0/operstate 2>/dev/null)"
     else
         echo "  usb0 NÃO existe"
     fi
 
     echo "== DHCP (o PC pegou IP?) =="
-    if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE" 2>/dev/null)" 2>/dev/null; then
-        echo "  udhcpd rodando (pid $(cat "$PIDFILE"))"
+    if pidof udhcpd >/dev/null 2>&1; then
+        echo "  udhcpd rodando (pid $(pidof udhcpd | cut -d' ' -f1))"
         if [ -s "$LEASE_FILE" ]; then
             echo "  leases:"
             sed 's/^/    /' "$LEASE_FILE"

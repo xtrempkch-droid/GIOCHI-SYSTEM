@@ -17,8 +17,8 @@
 # 2. **Driver do painel**: o painel é um Sitronix **ST7703**, não um HX8394.
 #    Entra pelo driver mainline, com o `compatible` novo de `patches/0002`.
 # 3. **Sem rádio.** A placa não tem RTL8821CS populado: nem Wi-Fi, nem
-#    Bluetooth. Os pacotes de wpa_supplicant/bluez/firmware do RTL saem da
-#    imagem — inclusive o firmware, que só ocuparia espaço.
+#    Bluetooth. O firmware do RTL e a pilha BlueZ saem da imagem.
+#    wpa_supplicant/iw/regdb FICAM: dongle Wi-Fi USB é hardware do usuário.
 # 4. **U-Boot**: o mainline não tem defconfig para X35S/X35H. Usa-se
 #    `anbernic-rgxx3-rk3566`, o mesmo RK3566 genérico de referência que o
 #    antecessor mediu como bootável nesta família.
@@ -156,9 +156,31 @@ BR2_PACKAGE_UTIL_LINUX_BINARIES=y
 BR2_PACKAGE_UTIL_LINUX_PARTX=y
 BR2_PACKAGE_UTIL_LINUX_RFKILL=y
 
-# ── rede e Bluetooth (o rádio é integrado nesta placa) ───────
-# Sem regulatory.db o cfg80211 reclama no boot e o Wi-Fi fica sem tabela de
-# canais — medido na X55.
+# ── rede: USB gadget + DONGLE Wi-Fi ──────────────────────────
+#
+# CORREÇÃO de uma decisão anterior. Eu havia tirado wpa_supplicant/iw/regdb
+# argumentando "sem rádio onboard, sem pacote". Errado por um motivo simples:
+# **dongle Wi-Fi é hardware fornecido pelo usuário**, e a comunidade deste
+# aparelho usa um na porta USB host (que existe: `usb@fd000000`, dr_mode=host).
+# Hardware que o usuário pluga tem de estar suportado ANTES de ele plugar —
+# a imagem é gravada uma vez, o dongle chega depois.
+#
+# A distinção que vale daqui em diante:
+#   hardware ONBOARD ausente   -> NÃO empacote o driver/firmware específico
+#                                 (o `rtw88` do RTL8821CS continua fora)
+#   hardware FORNECIDO pelo    -> empacote, porque não dá para reconstruir a
+#   usuário (dongle, cartão SD)    imagem depois que ele chega
+#
+# Os drivers de dongle ficam no `linux.fragment`; aqui vão os pacotes de
+# userspace, sem os quais o dongle sobe e não conecta.
+BR2_PACKAGE_WPA_SUPPLICANT=y
+BR2_PACKAGE_WPA_SUPPLICANT_CLI=y
+BR2_PACKAGE_WPA_SUPPLICANT_PASSPHRASE=y
+BR2_PACKAGE_IW=y
+# Sem regulatory.db o cfg80211 reclama no boot e o rádio fica sem tabela de
+# canais — medido na X55, vale igual para dongle.
+BR2_PACKAGE_WIRELESS_REGDB=y
+#
 # Sem dropbear: o servidor SSH é o OpenSSH, que vem do
 # `config/common.fragment` como parte do sistema base. Ter os dois instala
 # `S50dropbear` E `S50sshd`, e os dois tentam a porta 22 — o segundo a subir
@@ -171,8 +193,14 @@ BR2_PACKAGE_UTIL_LINUX_RFKILL=y
 # "subsystem request failed" — e o usuário fica sem como copiar um arquivo.
 
 # ── firmware ─────────────────────────────────────────────────
-# Só o essencial: sem os blobs do RTL8821CS, que não têm hardware para atender.
+# Sem os blobs do RTL8821CS (onboard ausente), mas COM os dos dongles USB:
+#   RTL_81XX      rtlwifi/rtl8188efw.bin, rtl8192cufw.bin  (8188/8192 USB)
+#   ATHEROS_9271  AR9271, o dongle Atheros mais comum
+# O firmware do MT7601U não tem opção no Buildroot 2024.02 e entra pelo
+# `config/package-overrides.mk`.
 BR2_PACKAGE_LINUX_FIRMWARE=y
+BR2_PACKAGE_LINUX_FIRMWARE_RTL_81XX=y
+BR2_PACKAGE_LINUX_FIRMWARE_ATHEROS_9271=y
 
 # ── o que NÃO está aqui, de propósito ────────────────────────
 #

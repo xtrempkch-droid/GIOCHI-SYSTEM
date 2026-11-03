@@ -96,13 +96,48 @@ mount_boot() {
 
     mkdir -p "$MNT" 2>/dev/null
 
-    # 2. Glob em vez de lista fixa: o nome depende de como o driver enumerou, e
-    # uma lista fixa erra no aparelho que importa. `mmcblk0p1` (SD/eMMC com
-    # partição nomeada), `mmcblk01` (drivers antigos, sem 'p'), `sdX1` (leitor
-    # USB) e `vdX1` (virt). A validação por conteúdo descarta o que não for a
-    # partição de boot — inclusive o próprio rootfs (ext4, então o mount vfat
-    # nem pega).
-    for dev in /dev/mmcblk*p1 /dev/mmcblk*1 /dev/sd*[0-9] /dev/vd*[0-9]; do
+    # 2. Candidatos. A ORDEM IMPORTA, e a versão anterior estava errada no X35H.
+    #
+    # Medido no aparelho: o kernel expõe DOIS cartões.
+    #
+    #   mmcblk0  3.7 GiB  eMMC interna com uma imagem antiga instalada.
+    #                     mmcblk0p1 monta como vfat e TEM diretório `extlinux/`
+    #                     (de outro sistema). Testá-la primeiro faz o script
+    #                     gastar a tentativa num disco que não é o de boot.
+    #   mmcblk1  29.7 GiB o cartão SD, que é o que bootou.
+    #
+    # Então a ordem é CALCULADA: começa pela partição 1 do disco que contém o
+    # ROOTFS EM USO. `/proc/mounts` diz qual é, e a partição de boot mora no
+    # mesmo disco. Só depois vêm os candidatos genéricos.
+    # ATENÇÃO: `/proc/mounts` diz `/dev/root`, que é ALIAS, não o nome real —
+    # o kernel o cria a partir do `root=` da cmdline. `readlink -f` resolve para
+    # `/dev/mmcblk1p2` (medido no X35H). Sem resolver, nenhum padrão casa, a
+    # ordem preferencial fica vazia e o script cai na lista genérica, que testa
+    # a eMMC primeiro.
+    root_dev=$(awk '$2 == "/" {print $1; exit}' /proc/mounts 2>/dev/null)
+    if [ -n "$root_dev" ] && [ -e "$root_dev" ]; then
+        root_real=$(readlink -f "$root_dev" 2>/dev/null)
+        [ -n "$root_real" ] && root_dev="$root_real"
+    fi
+    # Fallback: o major:minor da raiz em /proc/self/mountinfo casa com o de
+    # /sys/dev/block/<dev>/uevent, que dá o nome real do dispositivo.
+    if [ "$root_dev" = "/dev/root" ] || [ ! -e "$root_dev" ]; then
+        for m in /proc/self/mountinfo; do
+            [ -r "$m" ] || continue
+            mm=$(awk '$5 == "/" {print $3; exit}' "$m" 2>/dev/null)
+            [ -n "$mm" ] || continue
+            nome=$(basename "$(readlink -f "/sys/dev/block/$mm" 2>/dev/null)")
+            [ -n "$nome" ] && root_dev="/dev/$nome"
+        done
+    fi
+    preferido=""
+    case "$root_dev" in
+        /dev/mmcblk*p*) preferido="${root_dev%p*}p1" ;;   # mmcblk1p2 -> mmcblk1p1
+        /dev/sd*[0-9] | /dev/vd*[0-9]) preferido="${root_dev%[0-9]}1" ;;
+    esac
+    [ -n "$preferido" ] && log "rootfs em $root_dev; partição de boot do mesmo disco: $preferido"
+
+    for dev in $preferido /dev/mmcblk*p1 /dev/mmcblk*1 /dev/sd*[0-9] /dev/vd*[0-9]; do
         [ -b "$dev" ] || continue
 
         # `-o ro` no teste: se não for a nossa partição, não mexemos nela.

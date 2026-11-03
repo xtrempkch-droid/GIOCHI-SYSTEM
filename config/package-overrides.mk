@@ -60,3 +60,20 @@ override STRACE_CONF_OPTS = --enable-mpers=no --enable-bundled=yes \
 ifeq ($(BR2_PACKAGE_LINUX_FIRMWARE_RTL_88XX_BT),y)
 LINUX_FIRMWARE_FILES += rtl_bt/rtl8821cs_fw.bin rtl_bt/rtl8821cs_config.bin
 endif
+
+# ── linux-firmware: firmware do dongle MT7601U ──────────────
+# O Buildroot 2024.02 não expõe opção para `mediatek/mt7601u.bin`, mas o
+# arquivo ESTÁ no mesmo tarball (linux-firmware-20240115). Sem ele o driver
+# `mt7601u` carrega, falha ao pedir o firmware e o dongle fica morto:
+#
+#   mt7601u 1-1.1:1.0: Direct firmware load for mediatek/mt7601u.bin failed
+#
+# É o dongle MediaTek mais barato e comum. ~40 KB — cabe em qualquer imagem.
+#
+# CONDICIONAL a existir linux-firmware, não ao aparelho: diferente do RTL8821CS
+# (onboard, só na X55), o dongle é hardware FORNECIDO PELO USUÁRIO. A imagem é
+# gravada uma vez; o dongle chega depois. Se o firmware não estiver lá, o
+# usuário não tem como resolver sem recompilar.
+ifeq ($(BR2_PACKAGE_LINUX_FIRMWARE),y)
+LINUX_FIRMWARE_FILES += mediatek/mt7601u.bin
+endif
