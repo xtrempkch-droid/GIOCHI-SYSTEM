@@ -425,6 +425,7 @@ bash scripts/build-in-container.sh --check      # o mesmo dentro do container
 bash scripts/build-in-container.sh powkiddy-x55 # build sem dependências no host
 bash scripts/build-in-container.sh --sd-image powkiddy-x55   # imagem de cartão
 bash scripts/flash-sd.sh --list                 # discos removíveis
+bash scripts/gles-probe.sh powkiddy-x35h --run   # GLES/EGL reais, sem pacote novo
 bash scripts/build-device.sh qemu-aarch64       # só em Linux/CI
 ALLOW_DRAFT=1 bash scripts/build-device.sh powkiddy-x55   # rascunho, de propósito
 ```
