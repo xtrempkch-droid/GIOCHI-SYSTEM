@@ -29,6 +29,12 @@ BR2_PACKAGE_DOSFSTOOLS=y
 # `giochi-selftest` conta capacidades, mas não vê eventos.
 BR2_PACKAGE_EVTEST=y
 BR2_PACKAGE_E2FSPROGS=y
+# iproute2 é do sistema base, não do aparelho: o `giochi-usbnet` usa
+# `ip link`/`ip addr` e o applet `tc` do busybox está desligado no comum
+# (config/common.busybox.fragment) porque não compila contra o kernel 6.12.
+# O `tc` do iproute2 é o substituto. Sem isto, um aparelho novo perde as duas
+# coisas de uma vez — e o sintoma é "usb0 não sobe".
+BR2_PACKAGE_IPROUTE2=y
 BR2_PACKAGE_HTOP=y
 BR2_PACKAGE_LESS=y
 BR2_PACKAGE_NANO=y

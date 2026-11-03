@@ -45,15 +45,28 @@ test("os applets de diagnóstico do sistema base estão ligados", async () => {
   }
 });
 
-test("o fragmento comum de busybox não desliga nada", async () => {
-  // "# CONFIG_X is not set" é assunto do fragmento DO APARELHO, onde tem um
-  // motivo (o `tc` que não compila contra o kernel 6.12). No comum, um
-  // "is not set" desliga o applet em todos os aparelhos de uma vez, em silêncio.
+test("o comum só desliga applet com motivo de kernel, nunca de gosto", async () => {
+  // Um "# CONFIG_X is not set" no comum desliga o applet em TODOS os aparelhos
+  // de uma vez, em silêncio. Só é aceitável quando o motivo é do projeto
+  // inteiro — hoje, exatamente um: o `tc` do busybox 1.36.1 usa `TCA_CBQ_*`,
+  // removido no kernel 6.12, e todos usam 6.12 (BR2_KERNEL_HEADERS_AS_KERNEL).
   const text = await read(BUSYBOX);
   const desligados = text
     .split("\n")
-    .filter((l) => /^#\s*CONFIG_\w+ is not set/.test(l));
-  assert.deepEqual(desligados, [], `o comum desliga applet: ${desligados.join(", ")}`);
+    .filter((l) => /^#\s*CONFIG_\w+ is not set/.test(l))
+    .map((l) => l.match(/CONFIG_\w+/)[0]);
+  assert.deepEqual(
+    desligados,
+    ["CONFIG_TC"],
+    "applet novo desligado no comum: justifique no arquivo e atualize este teste",
+  );
+});
+
+test("o tc desligado tem substituto na imagem", async () => {
+  // Desligar o applet só é correção porque o iproute2 traz o `tc` que compila
+  // contra os headers do 6.12. Sem ele, o aparelho perde a funcionalidade.
+  const comum = await read(COMMON);
+  assert.match(comum, /^BR2_PACKAGE_IPROUTE2=y$/m);
 });
 
 test("o build mescla o fragmento comum de busybox em todo aparelho", async () => {
@@ -95,12 +108,27 @@ test("o gadget usa RNDIS por padrão, porque o Windows não tem driver de ECM", 
   );
 });
 
-test("o gadget configura os IDs de sistema operacional do RNDIS", async () => {
-  // Sem os_desc, o Windows mostra "dispositivo desconhecido" em vez de instalar
-  // o driver de rede na hora.
+test("o gadget configura o MS OS Descriptor completo, não só o compatible_id", async () => {
+  // ARMADILHA verificada no fonte do kernel 6.12: escrever em
+  // os_desc/interface.rndis/compatible_id NÃO BASTA. O descritor só chega ao
+  // host se o gadget declarar `b_vendor_code` e `qw_sign`, e apontar a
+  // configuração com o symlink `os_desc`. Sem isso, os arquivos existem,
+  // aceitam o valor em silêncio, e o Windows nunca os vê.
   const text = await read(path.join(OVERLAY, "usr/bin/giochi-usbnet"));
   assert.match(text, /compatible_id/);
   assert.match(text, /sub_compatible_id/);
+  assert.match(text, /b_vendor_code/, "sem b_vendor_code o descritor não é enviado");
+  assert.match(text, /qw_sign/);
+  assert.match(text, /ln -s configs\/c\.1 os_desc/, "o symlink os_desc ativa o descritor");
+});
+
+test("o os_desc/interface.rndis existe mesmo no kernel 6.12", async () => {
+  // Este caminho não é invenção: `usb_os_desc_prepare_interf_dir` cria
+  // "interface.%s" com os atributos compatible_id e sub_compatible_id, e
+  // `f_rndis.c` o chama com o nome "rndis". O script testa a existência antes
+  // de escrever, então isto é documentação do contrato, não tautologia.
+  const text = await read(path.join(OVERLAY, "usr/bin/giochi-usbnet"));
+  assert.match(text, /os_desc\/interface\.rndis/);
 });
 
 test("o DHCP serve exatamente um endereço ao PC", async () => {

@@ -135,7 +135,6 @@ BR2_PACKAGE_UTIL_LINUX_RFKILL=y
 # o `scp` moderno (OpenSSH 9+) fala SFTP por padrão, e o dropbear não tem
 # sftp-server. Na prática, `scp` e WinSCP contra dropbear falham com
 # "subsystem request failed" — e o usuário fica sem como copiar um arquivo.
-BR2_PACKAGE_IPROUTE2=y
 
 # ── firmware ─────────────────────────────────────────────────
 # Só o essencial: sem os blobs do RTL8821CS, que não têm hardware para atender.

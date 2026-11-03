@@ -11,6 +11,24 @@
 # Fragmento de busybox usa kconfig: desligar é "# CONFIG_X is not set" e
 # ligar é "CONFIG_X=y". Não existe merge parcial — o valor vale inteiro.
 
+# ── tc: DESLIGADO, e é correção, não contorno ───────────────
+# O applet `tc` do busybox 1.36.1 usa `TCA_CBQ_*` e `struct tc_cbq_*`, que foram
+# REMOVIDOS do kernel junto com o qdisc CBQ (saíram no 6.12). Com
+# `BR2_KERNEL_HEADERS_AS_KERNEL=y` os headers do toolchain são os do kernel
+# escolhido, então a compilação morre em `networking/tc.c` com uma parede de
+# "invalid use of undefined type 'struct tc_cbq_wrropt'" que não cita kernel,
+# headers nem busybox.
+#
+# Isto pertence ao COMUM e não ao fragmento do aparelho: depende da versão do
+# kernel, que é a mesma (6.12) para todos. Estava só na X55 porque ela foi o
+# primeiro aparelho — e o X35H quebrou no `tc` exatamente por isso.
+#
+# Não é perda: `iproute2` está na imagem comum e o `tc` dele compila contra os
+# headers atuais. Quem precisa de shaping usa `/sbin/tc`, não o applet.
+#
+# NÃO troque a sintaxe: só "# CONFIG_X is not set" desliga o símbolo de fato.
+# CONFIG_TC is not set
+
 # ── udhcpd: dá IP ao PC pelo cabo USB ───────────────────────
 # Sem isto, o acesso por SSH sobre USB exige que a pessoa configure IP estático
 # na mão, em cada máquina, e descubra qual endereço usar. Com isto, o PC pluga o

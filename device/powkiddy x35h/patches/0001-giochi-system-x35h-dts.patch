@@ -10,12 +10,12 @@ index 0942307..8d47d53 100644
  dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3566-quartz64-a.dtb
  dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3566-quartz64-b.dtb
  dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3566-radxa-cm3-io.dtb
-diff --git a/b/arch/arm64/boot/dts/rockchip/rk3566-powkiddy-x35h.dts b/arch/arm64/boot/dts/rockchip/rk3566-powkiddy-x35h.dts
+diff --git a/arch/arm64/boot/dts/rockchip/rk3566-powkiddy-x35h.dts b/arch/arm64/boot/dts/rockchip/rk3566-powkiddy-x35h.dts
 new file mode 100644
-index 0000000..0caa913
+index 0000000..e01a9e9
 --- /dev/null
 +++ b/arch/arm64/boot/dts/rockchip/rk3566-powkiddy-x35h.dts
-@@ -0,0 +1,32 @@
+@@ -0,0 +1,72 @@
 +// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
 +/*
 + * Powkiddy X35H (e X35S) — variante de painel menor da Powkiddy X55.
@@ -41,6 +41,46 @@ index 0000000..0caa913
 +
 +&battery {
 +	charge-full-design-microamp-hours = <3000000>;
++};
++
++/*
++ * Os patches do DTS da X55 NAO se aplicam aqui: patch de kernel nao se compoe
++ * entre aparelhos, e este DTS inclui a versao MAINSTREAM do
++ * rk3566-powkiddy-x55.dts. Sem as correcoes abaixo o build fica verde e a
++ * imagem herda defeitos que so aparecem no aparelho.
++ */
++
++/* HDMI nao esta ligado fisicamente. Deixado "okay", o DRM cria um conector
++ * fantasma e o probe do dw-hdmi atrasa o boot sem uso possivel.
++ */
++&hdmi {
++	status = "disabled";
++};
++
++&hdmi_sound {
++	status = "disabled";
++};
++
++/* sdmmc1 e o barramento do RTL8821CS (Wi-Fi/BT) da X55. Esta placa nao tem o
++ * chip: com o no "okay" e `non-removable`, o kernel inicializa um cartao SDIO
++ * que nao existe e falha com -110 repetidamente, atrasando o boot. Nao basta
++ * omitir o patch da X55 — e preciso DESLIGAR o que o DTS da X55 liga.
++ */
++&sdmmc1 {
++	status = "disabled";
++};
++
++/* uart1 e o Bluetooth do mesmo chip, tambem ausente. */
++&uart1 {
++	status = "disabled";
++};
++
++/* TRNG: o rk356x.dtsi deixa "disabled" e o RK3566 nao herda o "okay" do
++ * rk3568.dtsi. Sem entropia o crng demora a inicializar e o getrandom()
++ * bloqueia — inclusive o sshd na primeira conexao.
++ */
++&rng {
++	status = "okay";
 +};
 +
 +&panel {

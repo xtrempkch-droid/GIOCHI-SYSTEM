@@ -191,17 +191,44 @@ start_gadget() {
         # RNDIS: o Windows só aceita um MAC "local administered"; estes já são.
         echo "$DEV_MAC" >functions/rndis.usb0/dev_addr
         echo "$HOST_MAC" >functions/rndis.usb0/host_addr
-        # Estes dois arquivos fazem o Windows casar o driver na hora, em vez de
-        # mostrar "dispositivo desconhecido". Só existem em kernel >= 5.7.
-        echo "RNDIS" >functions/rndis.usb0/os_desc/interface.rndis/compatible_id 2>/dev/null
-        echo "5162001" >functions/rndis.usb0/os_desc/interface.rndis/sub_compatible_id 2>/dev/null
         LABEL="RNDIS"
+
+        # Compatible ID do RNDIS no MS OS Descriptor.
+        #
+        # "RNDIS" + "5162001" é o par que o Windows usa para casar o driver de
+        # rede sem pedir instalacao. O caminho `os_desc/interface.rndis/` é
+        # criado pelo proprio kernel (usb_os_desc_prepare_interf_dir ->
+        # "interface.%s"), com os atributos compatible_id e sub_compatible_id.
+        #
+        # ARMADILHA: escrever nesses dois arquivos NAO BASTA. O descritor so
+        # chega ao host se o gadget declarar b_vendor_code e apontar a config
+        # em os_desc — feito logo abaixo. Sem isso os arquivos existem, aceitam
+        # o valor e o Windows nunca os ve (bind pelo driver in-box, que
+        # funciona, mas com menos determinismo entre versoes).
+        if [ -d functions/rndis.usb0/os_desc/interface.rndis ]; then
+            echo "RNDIS" >functions/rndis.usb0/os_desc/interface.rndis/compatible_id 2>/dev/null
+            echo "5162001" >functions/rndis.usb0/os_desc/interface.rndis/sub_compatible_id 2>/dev/null
+        fi
     fi
 
     mkdir -p configs/c.1/strings/0x409
     echo "$LABEL" >configs/c.1/strings/0x409/configuration
     echo 250 >configs/c.1/MaxPower
     ln -s "functions/$FUNCTION.usb0" configs/c.1/ 2>/dev/null
+
+    # MS OS Descriptor: e isto que faz o Windows reconhecer o aparelho na hora.
+    # b_vendor_code e o valor que o Windows usa nas requisicoes de controle
+    # (0xcd e o convencional); qw_sign identifica o fornecedor da extensao
+    # ("MSFT100"). O symlink os_desc -> config liga o descritor a configuracao.
+    #
+    # Falhar aqui NAO e fatal: RNDIS tem driver in-box e o adaptador aparece
+    # mesmo sem isso.
+    if [ "$FUNCTION" = "rndis" ]; then
+        mkdir -p os_desc
+        echo 0xcd >os_desc/b_vendor_code 2>/dev/null || true
+        echo MSFT100 >os_desc/qw_sign 2>/dev/null || true
+        ln -s configs/c.1 os_desc 2>/dev/null || true
+    fi
 
     echo "$udc" >UDC 2>/dev/null || {
         warn "não consegui fazer bind do gadget em $udc"

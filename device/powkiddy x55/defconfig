@@ -141,7 +141,6 @@ BR2_PACKAGE_WIRELESS_REGDB=y
 # o `scp` moderno (OpenSSH 9+) fala SFTP por padrão, e o dropbear não tem
 # sftp-server. Na prática, `scp` e WinSCP contra dropbear falham com
 # "subsystem request failed" — e o usuário fica sem como copiar um arquivo.
-BR2_PACKAGE_IPROUTE2=y
 
 # ── firmware ─────────────────────────────────────────────────
 # RTL8821CS: Wi-Fi por SDIO (rtw88) e Bluetooth por UART (rtl_bt).

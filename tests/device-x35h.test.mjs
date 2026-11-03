@@ -111,6 +111,42 @@ test("o DTS novo herda o da X55 em vez de duplicar 1000 linhas", async () => {
   );
 });
 
+test("o DTS desliga o que a X55 liga e não existe nesta placa", async () => {
+  // ARMADILHA MEDIDA: patch de kernel NÃO se compõe entre aparelhos. Como o DTS
+  // do X35H inclui o rk3566-powkiddy-x55.dts MAINSTREAM, as correções do patch
+  // 0001 da X55 simplesmente não valem aqui. O resultado é build verde com:
+  //
+  //   rng  = disabled  → sem entropia, getrandom() bloqueia (inclusive no sshd)
+  //   hdmi = okay      → conector fantasma, probe atrasa o boot
+  //   sdmmc1 = okay + non-removable → kernel briga com um cartão SDIO que não
+  //                                   existe (o RTL8821CS da X55) e falha -110
+  //
+  // Verificado no DTB gerado: os três vinham errados antes deste teste existir.
+  const patch = await readFile(
+    path.join(DIR, "patches/0001-giochi-system-x35h-dts.patch"),
+    "utf8",
+  );
+  // Sem o "+" do diff: senão o marcador fica entre as linhas e nenhum regex
+  // multi-linha casa.
+  const adicionadas = patch
+    .split("\n")
+    .filter((l) => l.startsWith("+") && !l.startsWith("+++"))
+    .map((l) => l.slice(1))
+    .join("\n");
+
+  const precisa = [
+    [/#include "rk3566-powkiddy-x55\.dts"/, "precisa herdar o DTS da X55"],
+    [/&rng \{\s*status = "okay"/s, "sem &rng okay não há entropia"],
+    [/&hdmi \{\s*status = "disabled"/s, "HDMI não é ligado nesta placa"],
+    [/&hdmi_sound \{\s*status = "disabled"/s, "hdmi_sound idem"],
+    [/&sdmmc1 \{\s*status = "disabled"/s, "sdmmc1 é o SDIO do RTL8821CS, ausente aqui"],
+    [/&uart1 \{\s*status = "disabled"/s, "uart1 é o Bluetooth do mesmo chip, ausente aqui"],
+  ];
+  for (const [re, motivo] of precisa) {
+    assert.match(adicionadas, re, motivo);
+  }
+});
+
 test("o driver do painel entra por um compatible novo, não por driver externo", async () => {
   const patch = await readFile(
     path.join(DIR, "patches/0002-giochi-system-x35h-panel-st7703.patch"),
