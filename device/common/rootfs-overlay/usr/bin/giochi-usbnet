@@ -1,0 +1,283 @@
+#!/bin/sh
+# ============================================================
+# Giochi System — rede por cabo USB (usb0) + DHCP para o PC
+# ============================================================
+# Por que isto é padrão em TODOS os aparelhos:
+#
+#   a maioria não tem Wi-Fi nem Bluetooth, e console serial (TTL) exige
+#   adaptador, solda ou case aberto — ferramenta que pouca gente tem.
+#
+# O cabo USB é o único canal que sobra: todo mundo tem um, e ele já está
+# conectado para carregar. Com isto, o aparelho atende SSH em 10.55.0.2 sem
+# nenhuma configuração no PC.
+#
+# ## RNDIS, e não ECM
+#
+# ECM é o padrão "correto" e foi o que se testou no bring-up da X55 — mas o
+# **Windows não tem driver de ECM**. O PC cria a interface e não faz nada com
+# ela: sem IP, sem adaptador de rede, sem pista do motivo.
+#
+# RNDIS é o que o Windows reconhece sozinho (instala o driver na hora). Linux
+# também fala RNDIS (`rndis_host`), e o kernel desta árvore já traz as duas
+# funções. Então:
+#
+#   padrão  → rndis   (Windows, e Linux também)
+#   --ecm   → ecm     (macOS, ChromeOS, ou quando o host não tem rndis_host)
+#
+# ## DHCP, e não IP estático
+#
+# Com IP estático o PC precisa ser configurado à mão, em cada máquina, e a
+# pessoa tem de descobrir qual endereço usar. Com `udhcpd` o PC pluga, recebe
+# 10.55.0.1 em ~1 s, e `ssh root@10.55.0.2` simplesmente funciona.
+#
+# Uso:
+#   giochi-usbnet           # sobe o gadget (padrão RNDIS)
+#   giochi-usbnet --ecm     # sobe com ECM (macOS/ChromeOS)
+#   giochi-usbnet --stop    # desmonta o gadget
+#   giochi-usbnet --status  # o que está no ar, e o que o PC está vendo
+
+set -u
+
+GADGET=/sys/kernel/config/usb_gadget/giochi
+CONFIGFS=/sys/kernel/config
+DEV_ADDR=10.55.0.2
+DEV_CIDR=10.55.0.2/24
+HOST_ADDR=10.55.0.1
+HOST_MAC=02:47:49:4f:43:48
+DEV_MAC=02:47:49:4f:43:49
+LEASE_FILE=/var/lib/misc/udhcpd.leases
+PIDFILE=/var/run/udhcpd.pid
+DHCP_CONF=/etc/udhcpd.conf
+
+log() { echo "giochi-usbnet: $*"; }
+warn() { echo "giochi-usbnet: $*" >&2; }
+
+find_udc() {
+    for udc in /sys/class/udc/*; do
+        [ -d "$udc" ] || continue
+        basename "$udc"
+        return 0
+    done
+    return 1
+}
+
+# ---------------------------------------------------------------- stop
+stop_gadget() {
+    if [ -f "$PIDFILE" ]; then
+        kill "$(cat "$PIDFILE" 2>/dev/null)" 2>/dev/null
+        rm -f "$PIDFILE"
+        log "udhcpd parado"
+    fi
+
+    if [ -d "$GADGET" ]; then
+        # Esvaziar UDC primeiro: sem isso o kernel se recusa a remover as
+        # funções ("Device or resource busy") e o gadget fica meio montado.
+        echo "" >"$GADGET/UDC" 2>/dev/null
+        for l in "$GADGET"/configs/*/*; do
+            [ -L "$l" ] && rm -f "$l"
+        done
+        rmdir "$GADGET"/configs/*/strings/0x409 2>/dev/null
+        rmdir "$GADGET"/configs/* 2>/dev/null
+        rmdir "$GADGET"/functions/* 2>/dev/null
+        rmdir "$GADGET"/strings/0x409 2>/dev/null
+        rmdir "$GADGET" 2>/dev/null
+        log "gadget removido"
+    fi
+}
+
+# ---------------------------------------------------------------- status
+status() {
+    echo "== UDC (controlador USB em modo dispositivo) =="
+    find_udc || warn "  NENHUM UDC: o aparelho não está em modo dispositivo ( OTG )"
+    for udc in /sys/class/udc/*; do
+        [ -d "$udc" ] || continue
+        echo "  $(basename "$udc"): state=$(cat "$udc/state" 2>/dev/null) current_speed=$(cat "$udc/current_speed" 2>/dev/null)"
+    done
+
+    echo "== gadget =="
+    if [ -d "$GADGET" ]; then
+        echo "  montado: $(cat "$GADGET/UDC" 2>/dev/null)"
+        for f in "$GADGET"/configs/*/; do
+            [ -d "$f" ] || continue
+            echo "  config $(basename "$f"): $(ls "$f" 2>/dev/null | tr '\n' ' ')"
+        done
+    else
+        echo "  NÃO montado (rode 'giochi-usbnet')"
+    fi
+
+    echo "== interface =="
+    if [ -d /sys/class/net/usb0 ]; then
+        echo "  usb0: $(cat /sys/class/net/usb0/operstate 2>/dev/null) mac=$(cat /sys/class/net/usb0/address 2>/dev/null)"
+        ip -4 addr show usb0 2>/dev/null | sed 's/^/  /'
+    else
+        echo "  usb0 NÃO existe"
+    fi
+
+    echo "== DHCP (o PC pegou IP?) =="
+    if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE" 2>/dev/null)" 2>/dev/null; then
+        echo "  udhcpd rodando (pid $(cat "$PIDFILE"))"
+        if [ -s "$LEASE_FILE" ]; then
+            echo "  leases:"
+            sed 's/^/    /' "$LEASE_FILE"
+        else
+            echo "  nenhum lease ainda — o PC não pediu IP."
+            echo "  No Windows: 'ncpa.cpl' → o adaptador novo tem de aparecer."
+        fi
+    else
+        echo "  udhcpd NÃO está rodando"
+    fi
+
+    echo "== ssh =="
+    if pidof dropbear >/dev/null 2>&1; then
+        echo "  dropbear rodando"
+    else
+        echo "  dropbear NÃO está rodando"
+    fi
+    echo
+    echo "Do PC:  ssh root@$DEV_ADDR"
+}
+
+# ---------------------------------------------------------------- start
+start_gadget() {
+    FUNCTION=${1:-rndis}
+
+    udc="$(find_udc)" || {
+        warn "nenhum UDC encontrado."
+        warn "O aparelho precisa estar em modo dispositivo. Num handheld com"
+        warn "porta OTG, isso normalmente é só conectar ao PC."
+        return 1
+    }
+
+    # configfs é módulo/opcional no Buildroot: montar é idempotente.
+    if ! grep -q " $CONFIGFS " /proc/mounts 2>/dev/null; then
+        mount -t configfs none "$CONFIGFS" 2>/dev/null || {
+            warn "não consegui montar configfs. O kernel tem CONFIG_USB_CONFIGFS=y?"
+            return 1
+        }
+    fi
+
+    # Remontar do zero: sobra de boot anterior deixa o gadget num estado em que
+    # o UDC não aceita bind, e o erro ("Device or resource busy") não diz por quê.
+    if [ -d "$GADGET" ]; then
+        stop_gadget >/dev/null 2>&1
+    fi
+
+    mkdir -p "$GADGET"
+    cd "$GADGET" || return 1
+
+    # IDs: VID 0x1d6b é o Linux Foundation; PID 0x0104 é "Multifunction
+    # Composite Gadget". Genéricos de propósito — não somos um produto USB
+    # registrado, e um VID de terceiro seria mentira.
+    echo 0x1d6b >idVendor
+    echo 0x0104 >idProduct
+    # bcdDevice: identificável no dmesg do PC ("idVendor=1d6b").
+    echo 0x0100 >bcdDevice
+    echo 0x0200 >bcdUSB
+
+    mkdir -p strings/0x409
+    echo "Giochi" >strings/0x409/manufacturer
+    echo "Giochi System" >strings/0x409/product
+    # Serial único por aparelho evita que o Windows reaproveite o driver e o IP
+    # de outro aparelho já plugado.
+    SERIAL="$(cat /etc/hostname 2>/dev/null || echo giochi)-$(cat /sys/class/net/usb0/address 2>/dev/null | tr -d ':' || echo 0000)"
+    echo "${SERIAL:-giochi}" >strings/0x409/serialnumber
+
+    mkdir -p "functions/$FUNCTION.usb0"
+    if [ "$FUNCTION" = "ecm" ]; then
+        echo "$DEV_MAC" >functions/ecm.usb0/dev_addr
+        echo "$HOST_MAC" >functions/ecm.usb0/host_addr
+        LABEL="ECM"
+    else
+        # RNDIS: o Windows só aceita um MAC "local administered"; estes já são.
+        echo "$DEV_MAC" >functions/rndis.usb0/dev_addr
+        echo "$HOST_MAC" >functions/rndis.usb0/host_addr
+        # Estes dois arquivos fazem o Windows casar o driver na hora, em vez de
+        # mostrar "dispositivo desconhecido". Só existem em kernel >= 5.7.
+        echo "RNDIS" >functions/rndis.usb0/os_desc/interface.rndis/compatible_id 2>/dev/null
+        echo "5162001" >functions/rndis.usb0/os_desc/interface.rndis/sub_compatible_id 2>/dev/null
+        LABEL="RNDIS"
+    fi
+
+    mkdir -p configs/c.1/strings/0x409
+    echo "$LABEL" >configs/c.1/strings/0x409/configuration
+    echo 250 >configs/c.1/MaxPower
+    ln -s "functions/$FUNCTION.usb0" configs/c.1/ 2>/dev/null
+
+    echo "$udc" >UDC 2>/dev/null || {
+        warn "não consegui fazer bind do gadget em $udc"
+        return 1
+    }
+    log "gadget $LABEL montado em $udc"
+
+    # A interface pode levar um instante para aparecer depois do bind.
+    i=0
+    while [ ! -d /sys/class/net/usb0 ] && [ "$i" -lt 50 ]; do
+        sleep 0.1
+        i=$((i + 1))
+    done
+    if [ ! -d /sys/class/net/usb0 ]; then
+        warn "usb0 não apareceu após o bind"
+        return 1
+    fi
+
+    ip link set usb0 up 2>/dev/null
+    ip addr add "$DEV_CIDR" dev usb0 2>/dev/null || true
+    log "usb0: $DEV_ADDR (o PC recebe $HOST_ADDR por DHCP)"
+
+    start_dhcp
+}
+
+start_dhcp() {
+    command -v udhcpd >/dev/null 2>&1 || {
+        warn "udhcpd ausente: configure IP estático no PC ($HOST_ADDR/24) e use $DEV_ADDR."
+        warn "O applet vem de CONFIG_UDHCPD no config/common.busybox.fragment."
+        return 0
+    }
+
+    # Faixa de UM endereço: o cabo liga um PC por vez, e uma faixa maior só
+    # aumenta a chance de o host pegar um IP que já foi de outra máquina.
+    mkdir -p "$(dirname "$LEASE_FILE")"
+    cat >"$DHCP_CONF" <<EOF
+# Gerado por giochi-usbnet. Não edite: é reescrito a cada boot.
+start		$HOST_ADDR
+end		$HOST_ADDR
+interface	usb0
+max_leases	1
+lease_file	$LEASE_FILE
+pidfile		$PIDFILE
+option	subnet	255.255.255.0
+option	router	$DEV_ADDR
+option	dns	$DEV_ADDR
+option	domain	giochi.local
+EOF
+
+    # Já rodando? Reiniciar pega lease velho e a interface pode ter mudado.
+    if [ -f "$PIDFILE" ]; then
+        kill "$(cat "$PIDFILE" 2>/dev/null)" 2>/dev/null
+        sleep 0.2
+    fi
+
+    # Sem -f: o applet daemoniza sozinho e grava o pidfile declarado acima.
+    # Falha aqui NÃO é fatal: o SSH continua funcionando com IP estático no PC,
+    # então avisa e segue em vez de derrubar o script.
+    if udhcpd -S "$DHCP_CONF" 2>/dev/null; then
+        log "udhcpd rodando (o PC pega $HOST_ADDR)"
+    else
+        warn "udhcpd não subiu; conecte com IP estático: PC $HOST_ADDR/24, aparelho $DEV_ADDR"
+    fi
+}
+
+# ---------------------------------------------------------------- main
+case "${1:-}" in
+    --stop) stop_gadget ;;
+    --status) status ;;
+    --ecm) start_gadget ecm ;;
+    "" | --rndis) start_gadget rndis ;;
+    -h | --help)
+        sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'
+        ;;
+    *)
+        warn "opção desconhecida: $1"
+        exit 2
+        ;;
+esac

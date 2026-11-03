@@ -1,0 +1,170 @@
+# O sistema base — o que todo aparelho tem, e por quê
+
+Esta página define o **contrato do sistema base**: o conjunto mínimo de software
+que qualquer imagem do Giochi System entrega, independente de SoC, painel ou
+rádio. Não é uma lista de desejos — é o que dá para garantir que existe, porque
+cada item abaixo foi escolhido por **resolver um problema de acesso ou de
+diagnóstico** que já custou tempo neste projeto.
+
+## O princípio: acesso antes de interface
+
+Um aparelho que não responde não pode ser consertado. E os aparelhos desta
+árvore têm um problema de acesso estrutural:
+
+| Canal | Serve para quantos aparelhos |
+| --- | --- |
+| Wi-Fi | só a X55 tem rádio |
+| Bluetooth | só a X55; e BT não é canal de shell |
+| Console serial (TTL) | tecnicamente todos — mas **exige adaptador, solda ou carcaça aberta** |
+| Cabo USB | **todos**, e é o mesmo cabo que carrega |
+
+Ou seja: se o sistema base não oferece shell por USB, a maioria dos aparelhos só
+é acessível abrindo o plástico. Por isso o SSH sobre o cabo USB é **padrão e
+obrigatório**, não um extra do aparelho que tem rádio.
+
+Consequência de projeto: **tudo o que é necessário para esse canal mora no
+overlay comum** (`device/common/rootfs-overlay`), não no overlay do aparelho.
+
+## O que está garantido
+
+### 1. Rede por cabo USB — `S30usbnet` + `giochi-usbnet`
+
+O aparelho sobe um gadget USB e atende em **`10.55.0.2`**. O PC recebe
+`10.55.0.1` por DHCP, sem configuração.
+
+| Peça | Arquivo |
+| --- | --- |
+| Script do gadget | `/usr/bin/giochi-usbnet` |
+| Init | `/etc/init.d/S30usbnet` |
+| Config do DHCP | `/etc/udhcpd.conf` (gerado) |
+| Applet `udhcpd` | `config/common.busybox.fragment` |
+
+**RNDIS, não ECM.** ECM é o padrão tecnicamente correto e foi o que se tentou no
+bring-up da X55 — e o resultado foi "o PC cria a interface e não faz nada com
+ela". O **Windows não tem driver de ECM**. RNDIS o Windows reconhece sozinho.
+Linux também fala RNDIS, então RNDIS é o padrão e ECM é a alternativa
+(`giochi-usbnet --ecm`, para macOS/ChromeOS).
+
+```text
+PC (Windows/Linux/macOS)          aparelho
+   10.55.0.1           ←USB→       10.55.0.2
+   pega IP por DHCP                udhcpd serve o IP
+   ssh root@10.55.0.2              sshd atende na 22
+```
+
+### 2. SSH — OpenSSH, e só ele
+
+| Item | Valor |
+| --- | --- |
+| Pacote | `BR2_PACKAGE_OPENSSH` (em `config/common.fragment`) |
+| Servidor | `/usr/sbin/sshd`, init `/etc/init.d/S50sshd` |
+| Config | `/etc/ssh/sshd_config` — **substituído pelo overlay** |
+
+O `sshd_config` é reescrito de propósito. O padrão do Buildroot tem dois furos
+que quebram exatamente o caso de uso deste projeto:
+
+| Falta | Padrão do Buildroot | Efeito real |
+| --- | --- | --- |
+| `PermitRootLogin` | `prohibit-password` (só chave) | Num aparelho novo não há chave; e instalar a chave exige o acesso que falta. **O primeiro acesso não acontece.** |
+| `UseDNS` | `yes` | O sshd tenta resolver o IP do cliente ao contrário. No link USB não há DNS → **cada conexão trava até o timeout** ("ssh demora 20 s para pedir senha"). |
+
+Por isso: `PermitRootLogin yes`, `PasswordAuthentication yes`, `UseDNS no`.
+
+**Trade-off assumido.** Senha de root habilitada é mais fraco que só chave. É
+aceitável porque o link é um cabo USB ponto a ponto, não uma rede, e a senha é
+definida no build (`ROOT_PASSWORD`; sem ela, `giochi-dev`) — o build **falha** se
+a senha ou chaves de host vazarem para dentro de `target/`. Para produção:
+instalar a chave e trocar para `prohibit-password`.
+
+**Dropbear saiu.** Os dois juntos instalam `S50dropbear` E `S50sshd`, e ambos
+tentam a porta 22: o segundo a subir falha, e o sintoma é "ssh às vezes não
+responde". Medido na imagem da X55: os dois binários estavam no rootfs. Ficou o
+OpenSSH porque o `scp` do OpenSSH 9+ usa SFTP por padrão, e o dropbear não tem
+`sftp-server` — então `scp` e WinSCP contra dropbear falham com
+`subsystem request failed`, e não há como copiar arquivo.
+
+### 3. Diagnosticar sem console
+
+| Ferramenta | Por que |
+| --- | --- |
+| `dmesg` | o `-517`/`-110` que explica tela preta e rádio mudo |
+| `dmesg -c`/`klogd` | log que sobrevive ao boot |
+| `evtest` | base do `giochi-buttons`; sem ele não se prova código evdev |
+| `strace` | o processo que trava antes de logar |
+| `nc` | transferir arquivo sem scp: `nc -l -p 5556 > f` |
+| `vi` | corrigir um arquivo que impede o boot, pelo console |
+| `ip`, `ifconfig`, `route`, `netstat`, `ping`, `wget` | rede |
+| `top`, `free`, `uptime`, `ps`, `iostat` | pressão de memória, processo zumbi |
+| `hexdump`, `strings` | inspecionar blob de firmware |
+| `tar`, `gzip`, `xz`, `unzip` | empacotar sem depender de host |
+| `giochi-selftest` | o veredito resumido (PASS/WARN/FAIL/SKIP) |
+| `giochi-buttons` | botões e eixos, com nome lógico do `buttons.map` |
+| `giochi-usbnet --status` | **por que** o PC não vê o aparelho |
+
+### 4. Log no cartão, quando nem a tela funciona
+
+`S96bootlog` grava `giochi-boot.log` na partição FAT do cartão. Roda só quando o
+aparelho tem o marcador `/etc/giochi/boot-log` — usado nos aparelhos sem console
+exposto (X35H). Ver [`x35h-bringup.md`](x35h-bringup.md).
+
+## Onde cada peça mora
+
+```text
+config/common.fragment              ← pacotes Buildroot do sistema base
+config/common.busybox.fragment      ← applets do busybox (udhcpd, nc, vi, ip)
+device/common/rootfs-overlay/
+├── etc/init.d/S30usbnet            ← sobe a rede USB no boot
+├── etc/init.d/S96bootlog           ← log no cartão (só com marcador)
+├── etc/ssh/sshd_config             ← substitui o do pacote
+└── usr/bin/
+    ├── giochi-usbnet               ← o gadget + DHCP
+    ├── giochi-selftest             ← diagnóstico
+    ├── giochi-buttons              ← botões e eixos
+    └── giochi-init                 ← camada de boot (ainda sem inittab)
+```
+
+A ordem dos `S*` importa: `S30usbnet` sobe a interface **antes** de `S50sshd`,
+para o sshd nascer com socket válido.
+
+## O que um aparelho NÃO pode tirar do sistema base
+
+Um `defconfig` de aparelho pode acrescentar, mas não pode remover:
+
+- `BR2_PACKAGE_OPENSSH` e o `sshd_config` do overlay;
+- o applet `udhcpd` e o `S30usbnet`;
+- `giochi-selftest`, `giochi-buttons`, `giochi-usbnet`.
+
+`tests/base-system.test.mjs` verifica isso — inclusive que **não** voltou um
+segundo servidor SSH.
+
+## O que cada aparelho decide
+
+| Decisão | Onde | Exemplo |
+| --- | --- | --- |
+| Wi-Fi/BT | `defconfig` do aparelho | X55 tem (`wpa_supplicant`, `bluez`); X35H não |
+| Painel | `linux.fragment` + patch | HX8394 na X55, ST7703 na X35H |
+| Console/rotação | `kernelCmdline` no `device.json` | `ttyS2,1500000n8` + `fbconRotate` |
+| Log no cartão | marcador `/etc/giochi/boot-log` | X35H sim; X55 não (tem console) |
+| Controles | `buttons.map` | 16 botões no X35H, 16+1 opcional na X55 |
+
+## Verificação rápida no aparelho
+
+```sh
+giochi-usbnet --status     # UDC, gadget, usb0, leases, sshd
+giochi-selftest            # o bloco "rede por USB" vem antes de "rede"
+```
+
+Se o PC não vê o adaptador:
+
+1. `giochi-usbnet --status` — existe UDC? O gadget está montado?
+2. UDC vazio → a porta não está em modo dispositivo (cabo só de carga, ou hub).
+3. usb0 sem IP → o gadget montou e o `ip addr add` não rodou.
+4. Adaptador aparece no PC mas sem IP → `udhcpd` não está rodando; IP estático
+   `10.55.0.1/24` resolve.
+
+## Ver também
+
+- [`x55-bringup.md`](x55-bringup.md) — o gadget ECM que foi testado primeiro.
+- [`x35h-bringup.md`](x35h-bringup.md) — aparelho sem TTL/Wi-Fi/BT.
+- [`dependencies-manifest.md`](dependencies-manifest.md) — o contrato com o
+  `Giochi app`.

@@ -1,0 +1,56 @@
+# Símbolos que o KERNEL da X35H PRECISA ter, venham de onde vierem.
+# ============================================================================
+# O `linux.fragment` é um DELTA: só lista o que difere do defconfig da
+# arquitetura. Os símbolos abaixo NÃO estão no fragmento porque o defconfig
+# arm64 já os liga — e é exatamente por isso que precisam de checagem própria:
+# se um dia o defconfig mudar, ou o kernel trocar de versão, eles somem sem
+# nenhuma linha de erro, e a imagem resultante não chega ao rootfs ou não acende
+# a tela.
+#
+# Formato: `CONFIG_X=valor`. Verificado por `scripts/assert-kernel-config.mjs`
+# com `--required`. Não use allow-drop aqui: esta lista é o contrato mínimo.
+
+# ── chegar ao rootfs ─────────────────────────────────────────
+# Sem o controlador SD do Rockchip o kernel não encontra a partição do rootfs.
+CONFIG_MMC=y
+CONFIG_MMC_DW=y
+CONFIG_MMC_DW_ROCKCHIP=y
+CONFIG_MMC_BLOCK=y
+CONFIG_EXT4_FS=y
+
+# ── console ──────────────────────────────────────────────────
+# ttyS2 é o console do aparelho; sem 8250_DW não sai uma linha sequer.
+CONFIG_SERIAL_8250=y
+CONFIG_SERIAL_8250_DW=y
+CONFIG_SERIAL_8250_CONSOLE=y
+
+# ── tela ─────────────────────────────────────────────────────
+# DSI + painel HX8394 + backlight. Ausência de qualquer um = tela preta.
+CONFIG_DRM=y
+CONFIG_DRM_ROCKCHIP=y
+CONFIG_DRM_DW_MIPI_DSI=y
+CONFIG_PHY_ROCKCHIP_INNO_DSIDPHY=y
+CONFIG_DRM_PANEL_SITRONIX_ST7703=y
+CONFIG_BACKLIGHT_CLASS_DEVICE=y
+CONFIG_BACKLIGHT_PWM=y
+CONFIG_PWM_ROCKCHIP=y
+CONFIG_DRM_FBDEV_EMULATION=y
+# Rotação do console: sem ela `fbcon=rotate:N` é ignorado em silêncio e o texto
+# sai deitado na orientação nativa do painel.
+CONFIG_FRAMEBUFFER_CONSOLE=y
+CONFIG_FRAMEBUFFER_CONSOLE_ROTATION=y
+
+# ── controles ────────────────────────────────────────────────
+# Os 16 botões de gamepad vêm de `gpio-keys-control` (gpio-keys) no DTS; os 4
+# eixos analógicos vêm de `adc-joystick`, que precisa deste driver. Sem ele o
+# nó do DTS fica sem driver e os eixos não existem.
+CONFIG_INPUT_EVDEV=y
+CONFIG_INPUT_JOYSTICK=y
+CONFIG_JOYSTICK_ADC=y
+CONFIG_ROCKCHIP_SARADC=y
+
+# ── base do SoC ──────────────────────────────────────────────
+# Reguladores e clock: sem eles o PMIC RK817 não é configurado e o boot trava.
+CONFIG_REGULATOR=y
+CONFIG_REGULATOR_RK808=y
+CONFIG_COMMON_CLK_ROCKCHIP=y

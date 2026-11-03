@@ -1,0 +1,107 @@
+diff --git a/drivers/gpu/drm/panel/panel-sitronix-st7703.c b/drivers/gpu/drm/panel/panel-sitronix-st7703.c
+index 67e8e45..c1d3604 100644
+--- a/drivers/gpu/drm/panel/panel-sitronix-st7703.c
++++ b/drivers/gpu/drm/panel/panel-sitronix-st7703.c
+@@ -915,11 +915,102 @@ static void st7703_remove(struct mipi_dsi_device *dsi)
+ 	st7703_debugfs_remove(ctx);
+ }
+ 
++
++static const struct drm_display_mode powkiddy_x35h_panel_mode = {
++	.hdisplay	= 640,
++	.hsync_start	= 640 + 150,
++	.hsync_end	= 640 + 150 + 50,
++	.htotal		= 640 + 150 + 50 + 150,
++	.vdisplay	= 480,
++	.vsync_start	= 480 + 20,
++	.vsync_end	= 480 + 20 + 6,
++	.vtotal		= 480 + 20 + 6 + 12,
++	.clock		= 30000,
++	.flags		= DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_NVSYNC,
++	.width_mm	= 70,
++	.height_mm	= 52,
++};
++
++static void powkiddy_x35h_panel_init_sequence(struct mipi_dsi_multi_context *dsi_ctx)
++{
++	/*
++	 * Powkiddy X35H/X35S. Sequencia medida na ROCKNIX (patch 0016 do DTS do
++	 * X35S) e transcrita sem alteracao. Todos os comandos ja existem neste
++	 * driver; o painel e um Sitronix ST7703, nao o driver fora da arvore
++	 * "rocknix,generic-dsi" que a ROCKNIX usa.
++	 */
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, ST7703_CMD_SETEXTC, 0xf1, 0x12, 0x83);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, ST7703_CMD_SETAPID, 0x00, 0x00, 0x00,
++				     0xda, 0x80);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, ST7703_CMD_SETDISP, 0x00, 0x03, 0x70);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, ST7703_CMD_SETRGBIF, 0x10, 0x10, 0xfc,
++				     0xfc, 0x03, 0xff, 0x00, 0x00, 0x00, 0x00);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, ST7703_CMD_SETCYC, 0x80);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, ST7703_CMD_SETBGP, 0x06, 0x06);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, ST7703_CMD_SETVCOM, 0xa9, 0xa9);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, ST7703_CMD_SETPOWER_EXT, 0x25, 0x62,
++				     0x20, 0x03);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, ST7703_CMD_SETMIPI, 0x33, 0x81, 0x05,
++				     0xf9, 0x0e, 0x0e, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++				     0x44, 0x25, 0x00, 0x90, 0x0a, 0x00, 0x00, 0x01, 0x4f, 0x01, 0x00,
++				     0x00, 0x37);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, ST7703_CMD_SETVDC, 0x47);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, ST7703_CMD_UNKNOWN_BF, 0x02, 0x11,
++				     0x00);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, ST7703_CMD_SETSCR, 0x73, 0x73, 0x50,
++				     0x50, 0x00, 0x00, 0x12, 0x70, 0x00);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, ST7703_CMD_SETPOWER, 0x25, 0xc0, 0x32,
++				     0x32, 0x77, 0xe4, 0xff, 0xff, 0xcc, 0xcc, 0x77, 0x77);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, ST7703_CMD_SETECO, 0x82, 0x00, 0xbf,
++				     0xff, 0x00, 0xff);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, ST7703_CMD_SETIO, 0xb8, 0x00, 0x0a,
++				     0x00, 0x00, 0x00);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, ST7703_CMD_SETCABC, 0x10, 0x40, 0x1e,
++				     0x02);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, ST7703_CMD_SETPANEL, 0x0b);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, ST7703_CMD_SETGAMMA, 0x00, 0x0a, 0x0f,
++				     0x29, 0x3c, 0x3f, 0x41, 0x38, 0x08, 0x0c, 0x0f, 0x12, 0x14, 0x12,
++				     0x13, 0x12, 0x19, 0x00, 0x0a, 0x0f, 0x29, 0x3c, 0x3f, 0x41, 0x38,
++				     0x08, 0x0c, 0x0f, 0x12, 0x14, 0x12, 0x13, 0x12, 0x19);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, ST7703_CMD_SETEQ, 0x07, 0x07, 0x0b,
++				     0x0b, 0x0b, 0x0b, 0x00, 0x00, 0x00, 0x00, 0xff, 0x00, 0xc0, 0x10);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, ST7703_CMD_SETGIP1, 0xc8, 0x10, 0x0a,
++				     0x00, 0x00, 0xf0, 0x81, 0x12, 0x31, 0x23, 0x4f, 0x86, 0xf0, 0x81,
++				     0x47, 0x08, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10,
++				     0x00, 0x00, 0x00, 0x88, 0x88, 0x08, 0xf8, 0xf4, 0x46, 0x60, 0x02,
++				     0x28, 0x88, 0x88, 0x88, 0x88, 0x18, 0xf8, 0xf5, 0x57, 0x71, 0x13,
++				     0x38, 0x88, 0x88, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
++				     0x00, 0x00, 0x00, 0x00, 0x00);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, ST7703_CMD_SETGIP2, 0x00, 0x1a, 0x00,
++				     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x88, 0xf8,
++				     0x18, 0xf8, 0x83, 0x31, 0x17, 0x75, 0x58, 0x88, 0x88, 0x88, 0xf8,
++				     0x08, 0xf8, 0x82, 0x20, 0x06, 0x64, 0x48, 0x88, 0x88, 0x23, 0x00,
++				     0x00, 0x02, 0xfe, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++				     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++				     0x00, 0x00, 0x00);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, ST7703_CMD_UNKNOWN_EF, 0xff, 0xff,
++				     0x01);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, MIPI_DCS_EXIT_SLEEP_MODE);
++	mipi_dsi_msleep(dsi_ctx, 250);
++	mipi_dsi_dcs_write_seq_multi(dsi_ctx, MIPI_DCS_SET_DISPLAY_ON);
++	mipi_dsi_msleep(dsi_ctx, 50);
++}
++
++static const struct st7703_panel_desc powkiddy_x35h_panel_desc = {
++	.mode = &powkiddy_x35h_panel_mode,
++	.lanes = 4,
++	.mode_flags = MIPI_DSI_MODE_VIDEO | MIPI_DSI_MODE_VIDEO_BURST |
++		      MIPI_DSI_MODE_NO_EOT_PACKET | MIPI_DSI_MODE_LPM,
++	.format = MIPI_DSI_FMT_RGB888,
++	.init_sequence = powkiddy_x35h_panel_init_sequence,
++};
++
+ static const struct of_device_id st7703_of_match[] = {
+ 	{ .compatible = "anbernic,rg353v-panel-v2", .data = &rg353v2_desc },
+ 	{ .compatible = "gameforce,chi-panel", .data = &gameforcechi_desc },
+ 	{ .compatible = "powkiddy,rgb10max3-panel", .data = &rgb10max3_panel_desc },
+ 	{ .compatible = "powkiddy,rgb30-panel", .data = &rgb30panel_desc },
++	{ .compatible = "powkiddy,x35h-panel", .data = &powkiddy_x35h_panel_desc },
+ 	{ .compatible = "rocktech,jh057n00900", .data = &jh057n00900_panel_desc },
+ 	{ .compatible = "xingbangda,xbd599", .data = &xbd599_desc },
+ 	{ /* sentinel */ }

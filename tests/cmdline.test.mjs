@@ -47,9 +47,10 @@ test("aparelho usado para gerar imagem precisa declarar kernelCmdline", async ()
 });
 
 test("draft sem kernelCmdline é aceito pelo schema (e recusado na hora da imagem)", async () => {
-  const device = await loadDevice("powkiddy-x35h");
-  // Não é erro da árvore: é uma decisão registrada. O gate real é o
-  // make-sd-image.sh, que falha antes de gravar qualquer byte.
+  // X35S ainda não gerou imagem e a UART dele não foi medida. Não é erro da
+  // árvore: é uma decisão registrada. O gate real é o make-sd-image.sh, que
+  // falha antes de gravar qualquer byte.
+  const device = await loadDevice("powkiddy-x35s");
   assert.equal(device.kernelCmdline, undefined);
 });
 

@@ -1,0 +1,96 @@
+#!/bin/sh
+# ============================================================
+# Giochi System — grava o diagnóstico no cartão (bring-up sem console)
+# ============================================================
+# Quando o aparelho não tem TTL, não tem Wi-Fi e não tem Bluetooth, o único
+# canal de saída é o próprio cartão: ele sai do aparelho e entra no PC, que lê a
+# partição FAT sem precisar de Linux.
+#
+# Isso muda o bring-up de "adivinhação" para "leitura": em vez de tentar
+# deduzir por que a tela não acende, o log diz até onde o kernel chegou.
+#
+# Só roda quando o marcador existe — em aparelhos com console (X55) esse arquivo
+# não está no rootfs e o script sai sem fazer nada. Gravar em toda partição de
+# boot a cada boot seria escrita inútil no cartão.
+#
+# Marcador: /etc/giochi/boot-log
+# Saída:    p1 do cartão → /giochi-boot.log  (FAT, legível no Windows)
+#           rootfs        → /var/log/giochi-boot.log
+
+set -u
+
+MARKER=/etc/giochi/boot-log
+[ -f "$MARKER" ] || exit 0
+
+# PARTUUID fixo do MBR gerado por scripts/make-sd-image.sh (label-id 0x47494f43).
+BOOT_PARTUUID=47494f43-01
+MNT=/mnt/bootlog
+LOG_NAME=giochi-boot.log
+LOCAL_LOG=/var/log/giochi-boot.log
+
+mkdir -p "$MNT" 2>/dev/null
+: >"$LOCAL_LOG" 2>/dev/null
+
+collect() {
+    echo "=== giochi-boot.log — $(date -u '+%Y-%m-%dT%H:%M:%SZ') (UTC) ==="
+    echo
+    echo "## versao"
+    cat /etc/giochi-release 2>/dev/null || uname -a
+    echo
+    echo "## cmdline"
+    cat /proc/cmdline 2>/dev/null
+    echo
+    echo "## uptime / loadavg"
+    cat /proc/uptime 2>/dev/null
+    echo
+    echo "## dmesg (nivel 7)"
+    dmesg 2>/dev/null || echo "(dmesg indisponivel)"
+    echo
+    echo "## dispositivos de entrada"
+    cat /proc/bus/input/devices 2>/dev/null || echo "(sem /proc/bus/input)"
+    echo
+    echo "## DRM / painel"
+    for f in /sys/class/drm/*/status; do
+        [ -r "$f" ] || continue
+        echo "$f: $(cat "$f" 2>/dev/null)"
+    done
+    for f in /sys/class/drm/*/modes; do
+        [ -r "$f" ] || continue
+        echo "$f: $(head -1 "$f" 2>/dev/null)"
+    done
+    ls -l /dev/dri 2>/dev/null || echo "(sem /dev/dri)"
+    for f in /sys/class/backlight/*/brightness; do
+        [ -r "$f" ] || continue
+        echo "backlight $f: $(cat "$f" 2>/dev/null)"
+    done
+    echo
+    echo "## rede"
+    ip -o link show 2>/dev/null || echo "(sem ip)"
+    ip -o addr show 2>/dev/null
+    echo
+    echo "## armazenamento"
+    cat /proc/partitions 2>/dev/null
+    df -h 2>/dev/null
+    echo
+    echo "## selftest"
+    # O selftest já escreve em stdout; aqui só se quer o texto no arquivo.
+    /usr/bin/giochi-selftest 2>&1
+    echo
+    echo "=== fim ==="
+}
+
+collect >"$LOCAL_LOG" 2>&1
+
+# A gravação no FAT é o que sobrevive ao cartão sair do aparelho. Se a montagem
+# falhar (cartão só com rootfs, PARTUUID diferente), o log local continua lá —
+# melhor perder o canal do que abortar o boot.
+if mount -t vfat -o rw,umask=0022 "PARTUUID=$BOOT_PARTUUID" "$MNT" 2>/dev/null; then
+    cp "$LOCAL_LOG" "$MNT/$LOG_NAME" 2>/dev/null
+    # sync antes do umount: o cartão pode ser removido a qualquer momento depois.
+    sync
+    umount "$MNT" 2>/dev/null
+else
+    echo "S96bootlog: nao consegui montar p1 ($BOOT_PARTUUID); log so em $LOCAL_LOG" >&2
+fi
+
+exit 0

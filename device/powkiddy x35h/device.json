@@ -2,20 +2,36 @@
   "schemaVersion": 1,
   "id": "powkiddy-x35h",
   "name": "Powkiddy X35H",
-  "description": "Console portátil Rockchip RK3566, tela 640x480, variante do X35S. Device tree e mapa de botões compartilhados com o X35S.",
+  "description": "Console portátil Rockchip RK3566 (4x Cortex-A55, Mali-G52), painel MIPI-DSI 640x480 Sitronix ST7703. Variante de painel menor da X55, sem rádio: o RTL8821CS não é populado, então não há Wi-Fi nem Bluetooth.",
   "arch": "arm64",
   "hostname": "giochi-system-x35h",
-  "buildrootDefconfig": "",
+  "buildrootDefconfig": "giochi_x35h_defconfig",
   "buildrootFragment": "buildroot.fragment",
   "rootfsOverlays": [
     "rootfs-overlay"
   ],
   "artifacts": [
-    "sdcard.img"
+    "Image",
+    "rootfs.ext4",
+    "idbloader.img",
+    "u-boot.itb",
+    "u-boot-rockchip.bin",
+    "rk3566-powkiddy-x35h.dtb",
+    "dtbs/*.dtb"
   ],
   "runner": "ubuntu-24.04",
   "timeoutMinutes": 300,
   "status": "draft",
-  "bootNotes": "Compartilha DTS e mapa de botões com o X35S (decisão de 02/11/2026). A diferença entre as duas variantes ainda não foi levantada. Sem `kernelCmdline` DE PROPÓSITO: console, baud, earlycon e rotação deste aparelho nunca foram medidos, e adivinhar aqui produz cartão que boota sem console. Ver docs/x35h-bringup.md.",
-  "docs": "README.md"
+  "kernelCmdline": {
+    "console": "ttyS2",
+    "baud": 1500000,
+    "earlycon": "uart8250,mmio32,0xfe660000",
+    "fbconRotate": 0
+  },
+  "bootNotes": "DTS próprio (patch 0001) que HERDA o da X55 e troca só painel e bateria. Painel Sitronix ST7703 640x480: driver mainline panel-sitronix-st7703.c com o compatible novo powkiddy,x35h-panel (patch 0002), sequência medida na ROCKNIX — o driver fora da árvore rocknix,generic-dsi NÃO é necessário. U-Boot: mainline não tem defconfig para X35S/X35H; usa anbernic-rgxx3-rk3566 (mesmo RK3566, medido como bootável na família pelo antecessor). SEM rádio: sem Wi-Fi, sem Bluetooth, sem os pacotes de wpa_supplicant/bluez. NÃO testado em hardware: A/B físicos e inversão dos eixos do analógico são desconhecidos. Sem TTL: o diagnóstico sai no cartão via S96bootlog.",
+  "docs": "README.md",
+  "kernelPatches": [
+    "patches/0001-giochi-system-x35h-dts.patch",
+    "patches/0002-giochi-system-x35h-panel-st7703.patch"
+  ]
 }

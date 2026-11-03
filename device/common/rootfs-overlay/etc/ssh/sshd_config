@@ -1,0 +1,49 @@
+# ============================================================
+# Giochi System — sshd_config do sistema base
+# ============================================================
+# Este arquivo SUBSTITUI o que o Buildroot instala. É intencional: o padrão do
+# pacote é mínimo demais para o caso de uso deste projeto, que é **acessar o
+# aparelho pelo cabo USB**, sem Wi-Fi e sem console serial.
+#
+# O que o padrão do Buildroot deixa faltando (medido na imagem da X55):
+#
+#   1. `PermitRootLogin` não existe → vale `prohibit-password`, ou seja root só
+#      entra com CHAVE. Num aparelho novo não há chave instalada, então o
+#      primeiro acesso simplesmente não acontece. E instalar a chave exige
+#      justamente o acesso que falta.
+#
+#   2. `UseDNS` não existe → vale `yes`. O sshd tenta resolver o IP do cliente
+#      ao contrário; no link usb0 não há DNS, então CADA conexão fica parada
+#      esperando timeout. Era o "ssh demora 20 s para pedir senha".
+#
+# Trade-off assumido em (1): senha de root habilitada é mais fraco que chave.
+# Aceitável porque o link é um cabo USB ponto a ponto, a senha é definida no
+# build (`ROOT_PASSWORD`, senão `giochi-dev`) e o build FALHA se ela vazar para
+# dentro da imagem. Para uso de produção, instalar a chave e trocar para
+# `prohibit-password` — a instrução está no README do aparelho.
+
+AuthorizedKeysFile	.ssh/authorized_keys
+Subsystem	sftp	/usr/libexec/sftp-server
+
+# ── acesso ──────────────────────────────────────────────────
+# Root com senha: só existe o root nesta imagem (não há sistema de usuários
+# além dele), e o primeiro acesso tem de funcionar sem infraestrutura prévia.
+PermitRootLogin		yes
+PasswordAuthentication	yes
+# Chave continua valendo e, quando instalada, dispensa a senha.
+PubkeyAuthentication	yes
+MaxAuthTries		6
+# Sem isso, o sshd tenta resolver o IP do cliente e trava cada conexão quando o
+# link não tem DNS — que é exatamente o caso do cabo USB.
+UseDNS			no
+# Um usuário por vez é o suficiente num handheld; limita força bruta por link.
+MaxStartups		3
+
+# ── sessão ──────────────────────────────────────────────────
+X11Forwarding		no
+# KeepAlive detecta o cabo desconectado em ~1 min em vez de deixar sessão morta.
+ClientAliveInterval	30
+ClientAliveCountMax	3
+# Sem MOTD gigante a cada acesso: o `giochi-selftest` já dá o resumo.
+PrintMotd		no
+PrintLastLog		no

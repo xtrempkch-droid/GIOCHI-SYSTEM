@@ -355,6 +355,66 @@ else
     warn "sem UDC — sem gadget USB (rede por USB/SSH indisponível)"
 fi
 
+# ── rede por cabo USB: o canal de acesso padrão ──────────────
+#
+# Este bloco vem ANTES de "rede" de propósito. Na maioria dos aparelhos não há
+# Wi-Fi nem Bluetooth, e console serial exige hardware que quase ninguém tem.
+# Se o usb0 não subir, o aparelho está inacessível — é o FAIL mais grave desta
+# seção, e não um detalhe no meio de uma lista.
+head2 "rede por USB (canal de acesso padrão)"
+
+if [ -d /sys/class/net/usb0 ]; then
+    USB0_STATE="$(read_or /sys/class/net/usb0/operstate)"
+    USB0_ADDR=""
+    # `ip -4 -o addr show usb0` é a forma estável; ifconfig varia entre applets.
+    if command -v ip >/dev/null 2>&1; then
+        USB0_ADDR="$(ip -4 -o addr show usb0 2>/dev/null | awk '{print $4}' | head -1)"
+    fi
+    if [ -z "$USB0_ADDR" ]; then
+        # Interface existe mas sem IP: o gadget montou e o endereço não entrou.
+        fail "usb0 existe mas SEM IP — o SSH por cabo não atende"
+    elif [ "$USB0_STATE" = "up" ] || [ "$USB0_STATE" = "unknown" ]; then
+        pass "usb0: $USB0_ADDR ($USB0_STATE) — ssh root@${USB0_ADDR%%/*}"
+    else
+        # `down` aqui NAO é defeito: o netdev do gadget é criado no boot e a
+        # operstate só sobe quando um host energiza o barramento. Sem cabo
+        # plugado, `down` é o estado correto — e o aparelho continua bootando
+        # e funcionando. Marcar FAIL aqui seria o vermelho permanente que
+        # esconde defeito real (ver AGENTS §12.22).
+        pass "usb0: $USB0_ADDR pronto (link $USB0_STATE — cabo desconectado)"
+    fi
+
+    if [ -f /var/run/udhcpd.pid ] && kill -0 "$(cat /var/run/udhcpd.pid 2>/dev/null)" 2>/dev/null; then
+        LEASES=$(grep -c '^[0-9a-f]' /var/lib/misc/udhcpd.leases 2>/dev/null || echo 0)
+        pass "udhcpd ativo — o PC recebe IP sozinho ($LEASES lease(s))"
+    else
+        # Sem udhcpd ainda dá para conectar, mas exige IP estático no PC.
+        warn "udhcpd parado — o PC precisa de IP estático 10.55.0.1/24"
+    fi
+else
+    if [ -n "${UDC:-}" ]; then
+        fail "sem usb0 apesar de haver UDC — rode 'giochi-usbnet' e veja o erro"
+    else
+        warn "sem usb0 e sem UDC — o aparelho não está em modo dispositivo"
+    fi
+fi
+
+# Servidor SSH: é o que o usb0 existe para servir.
+if pidof sshd >/dev/null 2>&1; then
+    pass "sshd rodando (porta 22)"
+elif [ -x /usr/sbin/sshd ]; then
+    fail "sshd instalado mas NÃO rodando — o aparelho fica inacessível"
+else
+    fail "sshd ausente da imagem"
+fi
+
+# Dois servidores SSH na mesma porta é um erro que já aconteceu aqui: o
+# dropbear e o openssh vinham juntos, cada um com seu S50*, e o segundo a subir
+# falhava. O sintoma é "ssh às vezes não responde", dependendo da ordem.
+if [ -x /usr/sbin/dropbear ] && [ -x /usr/sbin/sshd ]; then
+    fail "dropbear E openssh na imagem — os dois disputam a porta 22"
+fi
+
 # ── rede ─────────────────────────────────────────────────────
 head2 "rede"
 IFACES=$(ls /sys/class/net 2>/dev/null | grep -v '^lo$' | tr '\n' ' ')

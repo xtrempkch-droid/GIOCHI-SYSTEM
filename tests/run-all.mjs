@@ -14,3 +14,5 @@ import "./assert-kernel-config.test.mjs";
 import "./firmware-required.test.mjs";
 import "./buttons-map.test.mjs";
 import "./cmdline.test.mjs";
+import "./device-x35h.test.mjs";
+import "./base-system.test.mjs";

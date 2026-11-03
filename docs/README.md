@@ -7,8 +7,14 @@
 - [Build local](building-locally.md) — como compilar no Linux/WSL2 e quais variáveis usar.
 - [GitHub Actions](github-actions.md) — matriz, entradas, cache, artefatos e segredos.
 - [Gravação e boot](flashing.md) — QEMU, cartão SD, eMMC e primeiros passos.
+- [O sistema base](sistema-base.md) — o que **todo** aparelho tem e por quê:
+  SSH por cabo USB (RNDIS + DHCP), OpenSSH, e as ferramentas de diagnóstico.
+  Leia antes de criar um aparelho novo.
 - [Powkiddy X55: primeiro boot](x55-bringup.md) — registro medido no aparelho:
   layout do cartão, linha de comando do kernel, o que passou e o que falta.
+- [Powkiddy X35H: definição e limites](x35h-bringup.md) — painel ST7703 deduzido da
+  sequência de init, por que 800×600 não é parâmetro de build, e como diagnosticar
+  um aparelho **sem TTL, sem Wi-Fi e sem Bluetooth**.
 - [Solução de problemas](troubleshooting.md) — falhas comuns de build e configuração.
 - [Segurança](security.md) — senha padrão, SSH, cadeia de suprimentos e limitações.
 - [Manifesto de dependências](dependencies-manifest.md) — contrato `forge.json` com o Giochi app.
@@ -20,8 +26,9 @@
 ## Estado atual
 
 - `qemu-aarch64`: device de referência **habilitado** para validar o pipeline ARM64.
-- Drafts ARM64 **desabilitados**: `powkiddy-x55` (RK3566), `powkiddy-x35s`,
-  `powkiddy-x35h` e `r35s` (RK3326).
+- Drafts ARM64 **desabilitados**: `powkiddy-x55`, `powkiddy-x35s` e
+  `powkiddy-x35h` (todos **RK3566**) e `r35s` (RK3326 — outro SoC, outro
+  pipeline de boot).
 - `steamdeck`: placeholder x86_64 **desabilitado**.
 - Buildroot fixado em `2024.02` no arquivo [`buildroot.version`](../buildroot.version).
 - O workflow principal gera imagens por device e publica artefatos no GitHub Actions.

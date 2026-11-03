@@ -131,8 +131,16 @@ BR2_PACKAGE_BLUEZ5_UTILS_CLIENT=y
 # Sem regulatory.db o cfg80211 reclama no boot e o Wi-Fi fica sem tabela de
 # canais — medido na X55.
 BR2_PACKAGE_WIRELESS_REGDB=y
-BR2_PACKAGE_DROPBEAR=y
-BR2_PACKAGE_DROPBEAR_CLIENT=n
+# Sem dropbear: o servidor SSH é o OpenSSH, que vem do
+# `config/common.fragment` como parte do sistema base. Ter os dois instala
+# `S50dropbear` E `S50sshd`, e os dois tentam a porta 22 — o segundo a subir
+# falha, e o `giochi-selftest` acusava "ssh não rodando" dependendo da ordem.
+# Medido na imagem da X55: os dois binários estavam no rootfs.
+#
+# OpenSSH em vez de dropbear porque o acesso padrão deste projeto é por cabo USB:
+# o `scp` moderno (OpenSSH 9+) fala SFTP por padrão, e o dropbear não tem
+# sftp-server. Na prática, `scp` e WinSCP contra dropbear falham com
+# "subsystem request failed" — e o usuário fica sem como copiar um arquivo.
 BR2_PACKAGE_IPROUTE2=y
 
 # ── firmware ─────────────────────────────────────────────────

@@ -1,4 +1,11 @@
 # Powkiddy X35H — fragmento Buildroot
 #
-# Vazio de propósito. Ver o fragmento do X35S: as duas variantes compartilham
-# DTS e mapa de botões até prova em contrário.
+# Vazio de propósito: o que difere da X55 cabe no `defconfig` (DTS, U-Boot, e a
+# ausência de rádio) e no `linux.fragment` (painel ST7703). Um fragmento aqui
+# seria uma terceira fonte para a mesma decisão, e três fontes divergem.
+#
+# Se um dia precisar de algo que só existe no Buildroot (um pacote, uma opção de
+# rootfs), é aqui que entra — com o motivo escrito.
+
+# Marca o build como derivado da X55 para quem lê o artefato.
+# Nada além disso: ver defconfig e linux.fragment.

@@ -1,0 +1,153 @@
+# ============================================================
+# Powkiddy X35H — defconfig BASE do Buildroot
+# ============================================================
+# Copiado para `buildroot/configs/<buildrootDefconfig>` pelo
+# `scripts/build-device.sh` antes de `make <defconfig>`.
+#
+# ## Proveniência
+#
+# Derivado do defconfig da **X55**, que bootou em hardware real. A decisão é
+# consciente: X35H/X35S são o mesmo RK3566 com painel menor e sem rádio, então
+# divergir do que já funciona só criaria diferença sem motivo.
+#
+# ## O que muda em relação à X55, e por quê
+#
+# 1. **DTS próprio** (`rk3566-powkiddy-x35h`): herda o da X55 e troca painel e
+#    bateria. Ver `patches/0001`.
+# 2. **Driver do painel**: o painel é um Sitronix **ST7703**, não um HX8394.
+#    Entra pelo driver mainline, com o `compatible` novo de `patches/0002`.
+# 3. **Sem rádio.** A placa não tem RTL8821CS populado: nem Wi-Fi, nem
+#    Bluetooth. Os pacotes de wpa_supplicant/bluez/firmware do RTL saem da
+#    imagem — inclusive o firmware, que só ocuparia espaço.
+# 4. **U-Boot**: o mainline não tem defconfig para X35S/X35H. Usa-se
+#    `anbernic-rgxx3-rk3566`, o mesmo RK3566 genérico de referência que o
+#    antecessor mediu como bootável nesta família.
+#
+# Nenhum símbolo abaixo foi verificado por leitura contra a árvore do 2024.02:
+# quem faz isso é o `assert-config`, falhando com o nome na mão.
+
+# ── plataforma ───────────────────────────────────────────────
+# RK3566 = 4× Cortex-A55 (não A53), Mali-G52.
+BR2_aarch64=y
+BR2_cortex_a55=y
+BR2_TOOLCHAIN_BUILDROOT_CXX=y
+BR2_TARGET_OPTIMIZATION="-O3 -pipe"
+
+# ── rootfs ───────────────────────────────────────────────────
+# ext4: o layout de boot documentado do aparelho tem o rootfs em ext4 na
+# partição 2.
+BR2_TARGET_ROOTFS_EXT2=y
+BR2_TARGET_ROOTFS_EXT2_4=y
+BR2_TARGET_ROOTFS_EXT2_SIZE="1024M"
+
+# ── kernel: 6.12 ─────────────────────────────────────────────
+# 6.12 é o mínimo real: o DTS da X55 existe desde a v6.8, e o `input-polldev`
+# usado pelo joypad foi REMOVIDO no 6.12 (por isso existe o shim). Em kernel
+# mais antigo o DTS não existe; em mais novo o shim muda.
+BR2_LINUX_KERNEL=y
+BR2_LINUX_KERNEL_CUSTOM_VERSION=y
+BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE="6.12"
+# arm64 tem UM defconfig no kernel (arch/arm64/configs/defconfig). NÃO usar
+# BR2_LINUX_KERNEL_USE_DEFCONFIG: o Buildroot acrescenta "_defconfig" ao valor
+# e "defconfig" vira "defconfig_defconfig" → "Can't find default configuration".
+BR2_LINUX_KERNEL_USE_ARCH_DEFAULT_CONFIG=y
+BR2_LINUX_KERNEL_IMAGE=y
+BR2_LINUX_KERNEL_DTS_SUPPORT=y
+# DTS mainline, sem patch. O prefixo `rockchip/` é obrigatório: sem ele o
+# Buildroot procura em arch/arm64/boot/dts/ e não em .../dts/rockchip/.
+BR2_LINUX_KERNEL_INTREE_DTS_NAME="rockchip/rk3566-powkiddy-x35h"
+
+# ── U-Boot: mainline 2024.10 ─────────────────────────────────
+# O defconfig `powkiddy-x55-rk3566` só existe a partir da 2024.07. O Buildroot
+# 2024.02 traz a 2024.01 por padrão — sem o pin abaixo, o defconfig não existe
+# e o build para aqui.
+BR2_TARGET_UBOOT=y
+BR2_TARGET_UBOOT_BUILD_SYSTEM_KCONFIG=y
+BR2_TARGET_UBOOT_CUSTOM_VERSION=y
+BR2_TARGET_UBOOT_CUSTOM_VERSION_VALUE="2024.10"
+BR2_TARGET_UBOOT_BOARD_DEFCONFIG="anbernic-rgxx3-rk3566"
+BR2_TARGET_UBOOT_NEEDS_PYTHON3=y
+BR2_TARGET_UBOOT_NEEDS_PYLIBFDT=y
+BR2_TARGET_UBOOT_NEEDS_OPENSSL=y
+BR2_TARGET_UBOOT_NEEDS_PYELFTOOLS=y
+BR2_TARGET_UBOOT_NEEDS_UTIL_LINUX=y
+BR2_TARGET_UBOOT_NEEDS_GNUTLS=y
+# DDR + BL31 vêm do rkbin (blob da Rockchip). Caminhos conferidos em b4558da0.
+BR2_TARGET_UBOOT_NEEDS_ROCKCHIP_RKBIN=y
+BR2_PACKAGE_ROCKCHIP_RKBIN=y
+BR2_PACKAGE_ROCKCHIP_RKBIN_TPL_FILENAME="bin/rk35/rk3566_ddr_1056MHz_v1.18.bin"
+BR2_PACKAGE_ROCKCHIP_RKBIN_BL31_FILENAME="bin/rk35/rk3568_bl31_v1.43.elf"
+
+# ── pilha gráfica ────────────────────────────────────────────
+# O GPU é Mali-G52 e o driver é panfrost (medido no features.txt do Mesa:
+# GL 3.1 / GLES 3.1, sem Vulkan). kmsro fala com o rockchip-drm e delega o
+# render ao panfrost.
+BR2_PACKAGE_MESA3D=y
+BR2_PACKAGE_MESA3D_GALLIUM_DRIVER_PANFROST=y
+# swrast não é luxo: sem ele, se o panfrost não subir, não existe NENHUM
+# caminho de render e o EGL falha com uma mensagem que não aponta a causa.
+# Os dois .so são hardlink da mesma biblioteca, então a imagem quase não cresce.
+BR2_PACKAGE_MESA3D_GALLIUM_DRIVER_SWRAST=y
+BR2_PACKAGE_MESA3D_OPENGL_ES=y
+BR2_PACKAGE_MESA3D_OPENGL_EGL=y
+BR2_PACKAGE_LIBDRM=y
+BR2_PACKAGE_SDL2=y
+# KMSDRM depende de SDL2_OPENGL||SDL2_OPENGLES além de libdrm/gbm/egl. Sem o
+# OPENGLES o Kconfig DESCARTA o KMSDRM em silêncio e o SDL2 fica sem driver de
+# vídeo com /dev/dri/card0 perfeitamente funcional.
+BR2_PACKAGE_SDL2_OPENGLES=y
+BR2_PACKAGE_SDL2_KMSDRM=y
+BR2_PACKAGE_SDL2_IMAGE=y
+
+# ── áudio ────────────────────────────────────────────────────
+BR2_PACKAGE_ALSA_LIB=y
+BR2_PACKAGE_ALSA_UTILS=y
+BR2_PACKAGE_MPG123=y
+BR2_PACKAGE_FLAC=y
+BR2_PACKAGE_LIBVORBIS=y
+
+# ── utilitários base ─────────────────────────────────────────
+# KMOD_TOOLS depende de BUSYBOX_SHOW_OTHERS (ligado no comum). O modprobe do
+# kmod resolve modules.dep.bin/softdeps/blacklist; o do BusyBox não.
+BR2_PACKAGE_KMOD=y
+BR2_PACKAGE_KMOD_TOOLS=y
+BR2_PACKAGE_ZSTD=y
+BR2_PACKAGE_LIBARCHIVE=y
+BR2_PACKAGE_OPENSSL=y
+BR2_PACKAGE_LIBPNG=y
+BR2_PACKAGE_E2FSPROGS=y
+BR2_PACKAGE_E2FSPROGS_RESIZE2FS=y
+BR2_PACKAGE_UTIL_LINUX=y
+BR2_PACKAGE_UTIL_LINUX_BINARIES=y
+BR2_PACKAGE_UTIL_LINUX_PARTX=y
+BR2_PACKAGE_UTIL_LINUX_RFKILL=y
+
+# ── rede e Bluetooth (o rádio é integrado nesta placa) ───────
+# Sem regulatory.db o cfg80211 reclama no boot e o Wi-Fi fica sem tabela de
+# canais — medido na X55.
+# Sem dropbear: o servidor SSH é o OpenSSH, que vem do
+# `config/common.fragment` como parte do sistema base. Ter os dois instala
+# `S50dropbear` E `S50sshd`, e os dois tentam a porta 22 — o segundo a subir
+# falha, e o `giochi-selftest` acusava "ssh não rodando" dependendo da ordem.
+# Medido na imagem da X55: os dois binários estavam no rootfs.
+#
+# OpenSSH em vez de dropbear porque o acesso padrão deste projeto é por cabo USB:
+# o `scp` moderno (OpenSSH 9+) fala SFTP por padrão, e o dropbear não tem
+# sftp-server. Na prática, `scp` e WinSCP contra dropbear falham com
+# "subsystem request failed" — e o usuário fica sem como copiar um arquivo.
+BR2_PACKAGE_IPROUTE2=y
+
+# ── firmware ─────────────────────────────────────────────────
+# Só o essencial: sem os blobs do RTL8821CS, que não têm hardware para atender.
+BR2_PACKAGE_LINUX_FIRMWARE=y
+
+# ── o que NÃO está aqui, de propósito ────────────────────────
+#
+# - `genimage` / imagem de cartão: depende do layout de partições e do
+#   idbloader. É o próximo passo; sem ele os artefatos são Image, rootfs.ext4,
+#   idbloader.img e u-boot.itb.
+# - `rocknix-joypad`: driver fora da árvore. **Não é necessário** aqui: os
+#   botões vêm do `gpio-keys` do DTS (herdado da X55) e os eixos do
+#   `adc-joystick` com `CONFIG_JOYSTICK_ADC=y`.
+# - Patches de DTS e do painel: são patches de kernel, não símbolos de config.
+#   Ver `patches/0001` e `patches/0002`.

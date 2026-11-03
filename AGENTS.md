@@ -226,9 +226,11 @@ Giochi system/
 │   ├── README.md                      # modelo de device e camada de drivers
 │   ├── common/rootfs-overlay/
 │   │   ├── etc/…                      # issue, motd, release, profile.d
+│   │   ├── etc/init.d/S96bootlog      # log no cartão; só roda com marcador
 │   │   └── usr/bin/
 │   │       ├── giochi-init            # mantém o launcher vivo; restaura brilho
-│   │       └── giochi-selftest        # diagnóstico do aparelho até o render 3D
+│   │       ├── giochi-selftest        # diagnóstico do aparelho até o render 3D
+│   │       └── giochi-buttons         # evdev → nome lógico do buttons.map
 │   ├── qemu-aarch64/                  # device de referência (habilitado)
 │   ├── powkiddy x55/                  # RK3566 — draft
 │   │   ├── defconfig                  # base Buildroot (o que bootou no antecessor)
@@ -237,8 +239,11 @@ Giochi system/
 │   │   ├── busybox.fragment           # desliga o applet tc (não compila no 6.12)
 │   │   ├── device.json, buildroot.fragment, linux.fragment, buttons.map
 │   │   └── README.md, rootfs-overlay/
-│   ├── powkiddy x35s/                 # RK3326 — draft
-│   ├── powkiddy x35h/                 # RK3326 — draft
+│   ├── powkiddy x35s/                 # RK3566 — draft (irmão do X35H)
+│   ├── powkiddy x35h/                 # RK3566 — draft, painel 640x480 ST7703
+│   │   ├── patches/0001-…-dts.patch   # DTS que HERDA o da X55
+│   │   ├── patches/0002-…-st7703.patch # painel no driver mainline
+│   │   └── rootfs-overlay/etc/giochi/boot-log  # liga o S96bootlog
 │   ├── r35s/                          # RK3326 — draft, com dts/*.dtb real
 │   │   └── dts/rk3326-gameconsole-r36s.dtb
 │   ├── steamdeck/                     # x86_64 — draft
@@ -424,13 +429,57 @@ Variáveis do build: `BUILDROOT_VERSION`, `ROOT_PASSWORD` (8–128; letras, núm
 
 ## 10. Testes
 
-`node tests/run-all.mjs` → **36/36**:
+`node tests/run-all.mjs` → **87/87**:
 
 | Arquivo | Testes | Cobre |
 | --- | --- | --- |
 | `tests/devices.test.mjs` | 13 | índice, schema, pastas com espaço, matriz, draft habilitado, `allowDraft` por id vs `all`, mensagem de recusa |
 | `tests/assert-config.test.mjs` | 12 | símbolo que sobrevive, desaparece, cai `=y`→`=m`, pedido-desligado-veio-ligado, `allow-drop`, aspas |
 | `tests/fdt.test.mjs` | 11 | parse de DTB, gpio-keys, adc-joystick, `buttons.map`, truncado/ inválido |
+| `tests/cmdline.test.mjs` | 12 | cmdline da X55 idêntica à que bootou, console sem baud, `fbconRotate:0` ≠ ausente, `video=`, recusa de campo desconhecido |
+| `tests/device-x35h.test.mjs` | 10 | identidade do aparelho: DTS próprio, ST7703 e não HX8394, sem rádio, patches existem, DTS herda o da X55, 16 botões sem `BTN_MODE` |
+| `tests/buttons-map.test.mjs` | 6 | mapa parseável, sem duplicata, 16 obrigatórios, exatamente 1 `OPCIONAL` (o `BTN_MODE`) |
+| `tests/prepare-config.test.mjs` | 8 | caminho com espaço recusado, fragmentos anexados, senha |
+| `tests/assert-kernel-config.test.mjs` | 8 | `CONFIG_*` que sobrevive/desaparece/cai para `=m`, `--required` |
+| `tests/firmware-required.test.mjs` | 5 | `rtl8821cs_*` no override, firmware obrigatório presente |
+| `tests/buildroot-hash.test.mjs` | 2 | hash do tarball fixado e usado |
+
+## 10-A. O sistema base — acesso antes de interface
+
+Contrato completo em [`docs/sistema-base.md`](docs/sistema-base.md). O resumo do
+que é **obrigatório em todo aparelho**, porque muda decisões de build:
+
+| Canal | Serve para quantos aparelhos |
+| --- | --- |
+| Wi-Fi | só a X55 |
+| Bluetooth | só a X55; e BT não é canal de shell |
+| Console serial (TTL) | tecnicamente todos — mas exige adaptador, solda ou carcaça aberta |
+| **Cabo USB** | **todos**, e é o mesmo cabo que carrega |
+
+Um aparelho sem shell por USB só é acessível abrindo o plástico. Por isso tudo
+o que sustenta esse canal mora no **overlay comum**, não no do aparelho:
+
+- `S30usbnet` + `giochi-usbnet`: gadget USB com **RNDIS** (o Windows não tem
+  driver de ECM — ECM foi o que se testou primeiro na X55, e o PC criava a
+  interface sem fazer nada com ela) e `udhcpd` servindo `10.55.0.1` ao PC.
+  Aparelho em **`10.55.0.2`**, e `ssh root@10.55.0.2` funciona sem configurar
+  nada no PC.
+- `/etc/ssh/sshd_config` **substituindo** o do pacote: o padrão do Buildroot é
+  `prohibit-password` (root só com chave — e num aparelho novo não há chave, o
+  que torna o primeiro acesso impossível) e `UseDNS yes` (cada conexão trava até
+  o timeout no link USB, que não tem DNS).
+- **OpenSSH, não dropbear.** Os dois juntos instalam `S50dropbear` E `S50sshd`,
+  ambos na porta 22: o segundo a subir falha e o sintoma é "ssh às vezes não
+  responde". Medido na imagem da X55: os dois binários estavam no rootfs. Ficou
+  o OpenSSH porque o `scp` do 9+ usa SFTP por padrão e o dropbear não tem
+  `sftp-server` — `scp` e WinSCP contra dropbear falham em silêncio.
+- `config/common.busybox.fragment` com `udhcpd`, `nc`, `vi`, `ip`, `dmesg`. É a
+  definição do "sistema base" no que depende do busybox. Fragmento do aparelho
+  continua existindo para o que **quebra o build** daquele aparelho (o `tc`).
+
+`tests/base-system.test.mjs` (16 testes) fecha o contrato: `udhcpd` presente,
+comum não desliga applet, RNDIS como padrão, `PermitRootLogin`/`UseDNS`,
+dropbear ausente dos defconfigs, e o selftest tratando `usb0` como canal padrão.
 
 ## 11. A camada de boot — o que falta para o aparelho sair do console
 
@@ -854,16 +903,92 @@ teste em vez de virar um selftest eternamente vermelho.
 Se um dia o marcador for removido sem que o botão exista, o teste não pega — mas
 o `giochi-buttons` volta a mentir. O marcador é a fonte da verdade.
 
+### 12.23 Resolução de painel DSI não é parâmetro de build
+
+Pedido real: "quero uma versão com a resolução em 800x600" para uma placa cujo
+painel é 640x480. Não existe — e insistir teria custado uma tarde.
+
+Resolução de painel MIPI-DSI é **nativa**. Ela vem do modo que o driver do
+painel anuncia (`st7703_get_modes`, `hx8394_get_modes`) e da temporização
+gravada no driver/DTS. O `video=` da linha de comando **escolhe entre os modos
+que o conector já anuncia**; não cria um. Num painel DSI, `video=DSI-1:800x600`
+num painel 640x480 é ignorado — ou aplica um modo inexistente e a tela fica
+preta.
+
+`video=` é útil em HDMI/VGA/virtio-gpu, onde há negociação de modo. Num handheld,
+não. O `scripts/lib/cmdline.mjs` aceita `video` porque existem aparelhos onde ele
+faz sentido (o QEMU), mas nenhum RK3566 desta árvore usa.
+
+Para "interface em 800x600 numa tela de 640x480" o caminho é renderizar maior e
+reduzir na GPU, não mudar o modo do painel.
+
+### 12.24 A cmdline do kernel vazando de um aparelho para outro
+
+`make-sd-image.sh` tinha a cmdline da X55 **cravada no código**:
+
+```bash
+KERNEL_CMDLINE="... console=ttyS2,1500000n8 earlycon=uart8250,mmio32,0xfe660000 fbcon=rotate:3"
+```
+
+Com um aparelho só, inofensivo. No segundo, três parâmetros errados de uma vez,
+e o sintoma é o pior tipo: o cartão **boota**, só não mostra nada. Não há
+mensagem ligando "tela preta" a "UART errada", e a UART errada nem existe no
+aparelho para reclamar.
+
+Correção: a cmdline vem do campo `kernelCmdline` do `device.json`, composta por
+`scripts/lib/cmdline.mjs`, e `tests/cmdline.test.mjs` guarda a string da X55
+**idêntica à que bootou em hardware**. Validação de forma no `validate-devices`,
+e o `make-sd-image.sh` **falha** se o aparelho não declarar — melhor não gerar
+imagem do que gerar uma que não dá para diagnosticar.
+
+Corolário: assim que existir o segundo aparelho, todo literal "do aparelho" que
+estiver num script de propósito geral é uma dívida. Resolução, UART, baud,
+earlycon, rotação e offsets de firmware são todos candidatos.
+
+### 12.25 Editar um script de shell enquanto ele roda
+
+O `bash` **lê o script em blocos**, não de uma vez. Editar `build-device.sh`
+enquanto ele executa faz o interpretador reler bytes deslocados e morrer com um
+erro de sintaxe **numa linha que está correta**:
+
+```text
+scripts/build-device.sh: line 543: syntax error near unexpected token `)'
+```
+
+Medido: a linha 543 é `WATCHDOG_REASON="espaço livre caiu para $((...)) GiB"`,
+e `bash -n` no mesmo arquivo, depois, dá `exit 0`. O erro não está no arquivo —
+está no fato de o arquivo ter mudado no meio da leitura.
+
+O sintoma é traiçoeiro porque:
+
+- `bash -n` **passa** (o arquivo em disco está válido);
+- o erro cita uma linha plausível, então a investigação começa no lugar errado;
+- acontece no meio de um build de 40 min, e parece bug de código.
+
+Regra: **não edite** `scripts/*.sh`, `docker/*.py` nem qualquer script em
+execução. Se precisar mudar algo enquanto um build roda, faça uma cópia
+(`cp build-device.sh /tmp/x.sh`, edite a cópia) ou espere. O mesmo vale para
+editar um arquivo que outro processo está lendo por `getline`/`tail -f`.
+
+Vale também para o container: o repositório é **bind-mount**, então a edição no
+host é vista pelo processo dentro do container no mesmo inode.
+
 ## 13. Aparelhos
 
 | ID | Pasta | SoC | Arch | Status | Falta |
 | --- | --- | --- | --- | --- | --- |
 | `qemu-aarch64` | `qemu-aarch64/` | virtual | arm64 | **ready** | nada — é o smoke test do pipeline |
 | `powkiddy-x55` | `powkiddy x55/` | RK3566 | arm64 | draft | **boota com tela, áudio, Wi-Fi, BT e 16 botões + 4 eixos**; falta o launcher (do `Giochi app`) |
-| `powkiddy-x35s` | `powkiddy x35s/` | RK3326 | arm64 | draft | o mesmo + driver de joypad |
-| `powkiddy-x35h` | `powkiddy x35h/` | RK3326 | arm64 | draft | o mesmo |
+| `powkiddy-x35s` | `powkiddy x35s/` | **RK3566** | arm64 | draft | DTS (compartilha com o X35H) e build |
+| `powkiddy-x35h` | `powkiddy x35h/` | **RK3566** | arm64 | draft | definição completa; falta **bootar**: tela ST7703, A/B, eixos |
 | `r35s` | `r35s/` | RK3326 | arm64 | draft | pipeline RK3326 (BL31/DDR/U-Boot), joypad fora da árvore |
 | `steamdeck` | `steamdeck/` | x86_64 | x86_64 | draft | kernel, firmware, áudio, Wi-Fi, controle |
+
+**X35H e X35S são RK3566** (4× A55, Mali-G52) — não RK3326. O `AGENTS.md`
+dizia o contrário e estava errado; a fonte é o `device.conf` **medido** no
+antecessor (`GIOCHI_SOC=rk3566`). O **R35S/R36S é que é RK3326** (Cortex-A35),
+com pipeline de boot próprio (DDR init, BL31 e U-Boot diferentes). Trocar os dois
+manda o build para o lugar errado e o sintoma é o aparelho não sair do Maskrom.
 
 Mapas de botão: saem do **DTS**, não de banco público (`docs/button-maps.md`).
 O R35S é o que está mais avançado nisso: o DTB real está versionado em

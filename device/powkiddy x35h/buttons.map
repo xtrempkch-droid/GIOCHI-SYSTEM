@@ -1,28 +1,82 @@
-# Mapa de botões — Powkiddy X35H
+# ## Este mapa é o da X55, e isso é de propósito
 #
-# Igual ao do X35S. O antecessor tratava as duas variantes com o mesmo mapa
-# (seção `[x35s]`), e a diferença entre elas nunca foi levantada.
+# O DTS da X35H **herda o da X55** (patch 0001): mesmo SoC, mesmos GPIOs de
+# `gpio-keys`, mesmas faixas de `adc-joystick`. Logo os códigos evdev são os da
+# X55, que foram medidos no aparelho com `giochi-buttons` — não são chute.
 #
-# ATENÇÃO: herdado do antecessor, **não conferido no DTS do ROCKNIX**. Se o
-# hardware divergir, corrigir aqui — não no X35S, para não quebrar o outro.
+# ## O que muda em relação à X55
 #
-# Ver o cabeçalho de `../powkiddy x35s/buttons.map` para o que falta confirmar.
+# - **Sem `home`.** A X55 ganha o `BTN_MODE` pelo patch 0002 dela, ligado a
+#   `gpio3 PB7`; esse patch NÃO é aplicado aqui, então o nó não existe e o mapa
+#   não pode declará-lo. Declarar um botão que o DTS não tem faria
+#   `giochi-buttons` esperar 17 para sempre.
+# - **Sem volume medido.** Na X55 `gpio-keys-vol` está confirmado; aqui o
+#   aparelho tem os mesmos nós (herdados), mas ninguém apertou os botões ainda.
+#
+# ## O que ainda NÃO foi confirmado neste aparelho
+#
+# - se A/B estão na posição física esperada (a ROCKNIX troca os códigos de
+#   A e B no DTS do X35S, o que sugere que o plástico é diferente);
+# - se os eixos do analógico estão invertidos (a ROCKNIX põe `invert-absx` e
+#   `invert-absy` no driver fora da árvore; com `adc-joystick` a inversão vem da
+#   faixa no DTS, e a herdada da X55 pode não servir).
+#
+# Confirmar com `giochi-buttons` e `giochi-buttons --axes` no aparelho.
 
-up      = BTN_DPAD_UP
-down    = BTN_DPAD_DOWN
-left    = BTN_DPAD_LEFT
-right   = BTN_DPAD_RIGHT
+# ── direcional ───────────────────────────────────────────────
+up      = BTN_DPAD_UP        # gpio4 PA0
+down    = BTN_DPAD_DOWN      # gpio4 PA1
+left    = BTN_DPAD_LEFT      # gpio3 PD6
+right   = BTN_DPAD_RIGHT     # gpio3 PD7
 
-a       = BTN_SOUTH
-b       = BTN_EAST
-x       = BTN_NORTH
-y       = BTN_WEST
+# ── face ─────────────────────────────────────────────────────
+# A = EAST (confirmar), B = SOUTH (voltar). Rótulos no plástico: EAST/SOUTH.
+a       = BTN_EAST           # gpio3 PD3
+b       = BTN_SOUTH          # gpio3 PD2
+x       = BTN_NORTH          # gpio3 PD5
+y       = BTN_WEST           # gpio3 PD4
 
-l       = BTN_TL
-r       = BTN_TR
+# ── ombro ────────────────────────────────────────────────────
+l       = BTN_TL             # gpio3 PD0
+r       = BTN_TR             # gpio3 PC6
+l2      = BTN_TL2            # gpio3 PD1
+r2      = BTN_TR2            # gpio3 PC7
 
-start   = BTN_START
-select  = BTN_SELECT
-home    = BTN_MODE
+# ── sistema ──────────────────────────────────────────────────
+start   = BTN_START          # gpio4 PA2
+select  = BTN_SELECT         # gpio4 PA4
 
-# Analógico: faixa desconhecida, não preencher por palpite.
+# ── clique dos analógicos ────────────────────────────────────
+thumbl  = BTN_THUMBL         # gpio4 PA7
+thumbr  = BTN_THUMBR         # gpio4 PB0
+
+# ── volume: gpio-keys mainline, separado do joypad ───────────
+volup   = KEY_VOLUMEUP       # gpio4 PA5
+voldown = KEY_VOLUMEDOWN     # gpio4 PA3
+
+# ── analógico ────────────────────────────────────────────────
+#
+# **Depende do driver**, e isto é a parte que mais confunde:
+#
+# COM `rocknix-joypad` (o DTS do projeto):
+#   io-channels = <&saradc 2>, <&saradc 3>, <&saradc 0>, <&saradc 1>
+#   nomes  key-RY, key-RX, key-LY, key-LX
+#   escala 2 · deadzone 216 · fuzz/flat 54 · tuning ±180 · poll 10 ms
+#   → a normalização é feita pelo próprio driver; não há `abs-range` para ler.
+#
+# COM `adc-joystick` (mainline puro):
+#   ABS_X 15..1023 · ABS_Y 1023..15 (invertido) · ABS_RX · ABS_RY idem
+#   abs-flat 30 · abs-fuzz 20 · poll 60 ms · centro ≈ 519
+#   → normalizar é (valor-519)/504, com inversão nos eixos Y e RY.
+#
+# Os valores abaixo são do **mainline**. Com o driver do projeto eles não se
+# aplicam — o driver entrega o eixo já escalado.
+axis_x_min = 15
+axis_x_max = 1023
+axis_y_min = 1023
+axis_y_max = 15
+axis_rx_min = 15
+axis_rx_max = 1023
+axis_ry_min = 1023
+axis_ry_max = 15
+axis_y_deadzone = 30

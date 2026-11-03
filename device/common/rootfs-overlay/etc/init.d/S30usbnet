@@ -1,0 +1,36 @@
+#!/bin/sh
+# ============================================================
+# S30usbnet — rede por cabo USB no boot
+# ============================================================
+# Sobe o gadget assim que o sistema inicia, antes de qualquer serviço que
+# dependa de rede (dropbear vem em S50). Se falhar, o boot CONTINUA: um aparelho
+# sem rede USB ainda serve para jogar e para o console — derrubar o boot por
+# causa do gadget transformaria um recurso de acesso num defeito.
+#
+# Por que em todos os aparelhos, sem exceção: a maioria não tem Wi-Fi nem
+# Bluetooth, e console serial exige hardware que pouca gente tem. O cabo USB é
+# o único canal universal. Um aparelho sem ele só é acessível abrindo a carcaça.
+
+case "$1" in
+    start)
+        # `giochi-usbnet` já é idempotente e remonta do zero, o que resolve
+        # sobra de um boot anterior interrompido.
+        /usr/bin/giochi-usbnet >/dev/null 2>&1
+        ;;
+    stop)
+        /usr/bin/giochi-usbnet --stop >/dev/null 2>&1
+        ;;
+    restart)
+        /usr/bin/giochi-usbnet --stop >/dev/null 2>&1
+        /usr/bin/giochi-usbnet >/dev/null 2>&1
+        ;;
+    status)
+        /usr/bin/giochi-usbnet --status
+        ;;
+    *)
+        echo "Uso: $0 {start|stop|restart|status}"
+        exit 2
+        ;;
+esac
+
+exit 0

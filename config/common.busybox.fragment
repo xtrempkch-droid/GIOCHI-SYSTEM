@@ -1,0 +1,99 @@
+# ============================================================
+# Giochi System — fragmento COMUM do BusyBox
+# ============================================================
+# Applets que TODO aparelho precisa ter, independente de SoC ou painel. É a
+# definição do "sistema base" no que depende do busybox.
+#
+# Regra que vale aqui: um applet entra nesta lista quando a falta dele impede
+# **diagnosticar ou acessar** o aparelho. Editor de texto e cliente de e-mail não
+# entram; `ip`, `udhcpd` e `nc` entram.
+#
+# Fragmento de busybox usa kconfig: desligar é "# CONFIG_X is not set" e
+# ligar é "CONFIG_X=y". Não existe merge parcial — o valor vale inteiro.
+
+# ── udhcpd: dá IP ao PC pelo cabo USB ───────────────────────
+# Sem isto, o acesso por SSH sobre USB exige que a pessoa configure IP estático
+# na mão, em cada máquina, e descubra qual endereço usar. Com isto, o PC pluga o
+# cabo, recebe 10.55.0.1 por DHCP em ~1 s e o aparelho está acessível.
+#
+# Isto é a diferença entre "funciona" e "funciona depois de 15 minutos de
+# configuração manual no Windows" — e a maioria dos aparelhos desta árvore não
+# tem Wi-Fi, Bluetooth nem TTL.
+CONFIG_UDHCPD=y
+# Lease de 1 hora é o padrão do applet. O host é um só, cabo curto: não há por
+# que mexer.
+CONFIG_UDHCPC=y
+
+# ── rede: diagnóstico ───────────────────────────────────────
+# `ip` já é o do busybox; o iproute2 está na imagem comum e tem precedência no
+# PATH, mas manter os dois evita imagem quebrada se o pacote sair.
+CONFIG_IFCONFIG=y
+CONFIG_FEATURE_IFCONFIG_STATUS=y
+CONFIG_ROUTE=y
+CONFIG_NETSTAT=y
+CONFIG_PING=y
+CONFIG_PING6=y
+CONFIG_TRACEROUTE=y
+CONFIG_FEATURE_TRACEROUTE_VERBOSE=y
+CONFIG_WGET=y
+CONFIG_FEATURE_WGET_HTTPS=y
+CONFIG_TELNET=y
+
+# ── diagnóstico do sistema ──────────────────────────────────
+# `nc` é o canivete para testar porta e transferir arquivo quando não há scp:
+#   nc -l -p 5556 > arquivo            (no aparelho)
+#   nc 10.55.0.2 5556 < arquivo        (no PC)
+# Em bring-up, é o caminho mais curto para tirar um log de dentro do aparelho.
+CONFIG_NC=y
+CONFIG_NC_SERVER=y
+CONFIG_NC_EXTRA=y
+CONFIG_DMESG=y
+CONFIG_FEATURE_DMESG_PRETTY=y
+CONFIG_HEXDUMP=y
+CONFIG_STRINGS=y
+CONFIG_LSOF=y
+CONFIG_FREE=y
+CONFIG_UPTIME=y
+CONFIG_TOP=y
+CONFIG_FEATURE_TOP_CPU_USAGE_PERCENTAGE=y
+CONFIG_IOSTAT=y
+CONFIG_MPSTAT=y
+
+# ── arquivo e transferência ─────────────────────────────────
+# `scp`/`sftp` vêm do dropbear (já na imagem comum). Estes são os que faltam
+# quando é preciso copiar algo rápido sem servidor.
+CONFIG_BASE64=y
+CONFIG_UNZIP=y
+CONFIG_GZIP=y
+CONFIG_TAR=y
+CONFIG_FEATURE_TAR_GZIP=y
+CONFIG_FEATURE_TAR_XZ=y
+CONFIG_FEATURE_TAR_AUTODETECT=y
+CONFIG_FEATURE_SEAMLESS_XZ=y
+CONFIG_DD=y
+CONFIG_SYNC=y
+
+# ── editor mínimo ───────────────────────────────────────────
+# `vi` do busybox é o que sobra quando a única via é o console e um arquivo
+# errado impede o boot. Não é conforto: é o que permite corrigir
+# /etc/wpa_supplicant.conf ou /etc/network/interfaces sem tirar o cartão.
+CONFIG_VI=y
+CONFIG_FEATURE_VI_UNDO=y
+CONFIG_FEATURE_VI_SEARCH=y
+
+# ── processo e serviço ──────────────────────────────────────
+CONFIG_PS=y
+CONFIG_FEATURE_PS_WIDE=y
+CONFIG_KILL=y
+CONFIG_KILLALL=y
+CONFIG_KILLALL5=y
+CONFIG_PGREP=y
+CONFIG_PKILL=y
+CONFIG_CRONTAB=y
+CONFIG_FEATURE_CROND_DIR=y
+
+# ── shell ───────────────────────────────────────────────────
+CONFIG_ASH=y
+CONFIG_ASH_JOB_CONTROL=y
+CONFIG_ASH_ALIAS=y
+CONFIG_ASH_EXPAND_PRMT=y

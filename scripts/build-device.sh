@@ -378,11 +378,24 @@ fi
 # compila contra os headers do kernel do aparelho — o `tc` do busybox usa
 # TCA_CBQ_*, removido no 6.12, e a falha aparece como erro de compilação numa
 # linha do busybox, sem relação óbvia com a versão do kernel.
-BUSYBOX_FRAGMENT="$DEVICE_DIR/busybox.fragment"
+#
+# Dois fragmentos: o COMUM (config/common.busybox.fragment) traz os applets do
+# sistema base — udhcpd, nc, vi, ip — que todo aparelho precisa para ser
+# acessível e diagnosticável. O do APARELHO desliga o que não compila contra o
+# kernel escolhido. A ordem importa: o do aparelho vem DEPOIS, então ele vence
+# num conflito, que é o comportamento desejado (o que quebra o build é
+# específico daquele aparelho).
 BUSYBOX_FRAGMENT_ARGS=()
+if [[ -f "$ROOT/config/common.busybox.fragment" ]]; then
+  cp -a "$ROOT/config/common.busybox.fragment" "$WORK_DIR/busybox-common.fragment"
+  BUSYBOX_FRAGMENT_ARGS+=(--busybox-fragment "$WORK_DIR/busybox-common.fragment")
+  echo "  busybox:   fragmento comum (sistema base) aplicado"
+fi
+
+BUSYBOX_FRAGMENT="$DEVICE_DIR/busybox.fragment"
 if [[ -f "$BUSYBOX_FRAGMENT" ]]; then
   cp -a "$BUSYBOX_FRAGMENT" "$WORK_DIR/busybox.fragment"
-  BUSYBOX_FRAGMENT_ARGS=(--busybox-fragment "$WORK_DIR/busybox.fragment")
+  BUSYBOX_FRAGMENT_ARGS+=(--busybox-fragment "$WORK_DIR/busybox.fragment")
   echo "  busybox:   fragmento do aparelho aplicado"
 fi
 
