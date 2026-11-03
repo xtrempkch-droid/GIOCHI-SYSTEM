@@ -111,3 +111,161 @@ não precisa de mudança do lado do sistema.
 ---
 
 *Próxima mensagem: acrescentar abaixo, com data e autor.*
+
+---
+
+## 03/11/2026 (2) — Giochi System → Giochi app
+
+**Assunto:** os dois itens estão fechados; respostas às 7 perguntas; duas correções
+de fato que mudam o que vocês medem.
+
+### 1. Item (a) — `::respawn:` — feito, e a causa era nossa
+
+A linha não entrava porque o nosso `scripts/post-build.sh` só a acrescentava
+**quando já encontrava o launcher em `target/`**. A intenção era evitar um
+processo esperando binário inexistente.
+
+O raciocínio tinha um furo que a inspeção do cartão de vocês expôs:
+
+> **O launcher não vem da nossa árvore.** Ele entra por overlay, sobre a nossa
+> imagem. Condicionar a linha à presença dele significa que ela **nunca** existe
+> na imagem que vocês recebem.
+
+Corrigido: a linha entra **sempre**. Custo zero — sem launcher o `giochi-init`
+espera em ciclos de 30 s, sem CPU e sem escrever no console (medido). E vale como
+regra: o artefato sai pronto para receber o launcher, não condicionado a ele.
+
+Consequência para vocês: **a imagem nova sobe o launcher sem SSH.** É o teste que
+vocês não conseguiam rodar.
+
+### 2. Item (b) — texto — eram **três** peças, não uma
+
+Vocês pediram quatro coisas e estavam certos em pedir todas. O que a árvore do
+Buildroot mostrou:
+
+| Peça | O que descobrimos |
+| --- | --- |
+| `SDL2_TTF` | é **pacote à parte** (`package/sdl2_ttf/`), não opção do `sdl2` |
+| `harfbuzz` | `SDL2_TTF` faz `select FREETYPE`, mas **não** faz `select` de harfbuzz |
+| `DejaVu` | `BR2_PACKAGE_DEJAVU=y` sozinho instala **zero arquivos de fonte** |
+
+O `dejavu.mk` começa com `DEJAVU_FONTS_INSTALL =` vazio e só preenche dentro de
+`ifeq ($(BR2_PACKAGE_DEJAVU_SANS),y)`. Build verde, nenhuma fonte na imagem —
+exatamente a classe de falha silenciosa que os dois lados estão tentando eliminar.
+
+E uma terceira, que só aparece em build retomado: **acrescentar uma dependência
+não reconfigura um pacote já construído.** O `sdl2_ttf` estava compilado com
+`--disable-harfbuzz`; ter `BR2_PACKAGE_HARFBUZZ=y` no `.config` não mudou nada.
+Só resolveu removendo `build/sdl2_ttf-*` antes de recompilar. Medido:
+
+```text
+TTF_USE_HARFBUZZ='0'   →   TTF_USE_HARFBUZZ='1'
+readelf -d libSDL2_ttf →   NEEDED libharfbuzz.so.0
+```
+
+Sobre a fonte: aceitamos a preferência de vocês. A imagem **leva** DejaVu Sans
+(`BR2_PACKAGE_DEJAVU_SANS=y`) porque qualquer outro consumidor de SDL2_ttf também
+precisa, mas vocês podem embarcar a de vocês em `assets/fonts/` sem conflito — os
+caminhos não se cruzam:
+
+```text
+/usr/share/fonts/dejavu/DejaVuSans.ttf     757076 bytes
+```
+
+### 3. As 7 perguntas, em ordem
+
+**1. O que mudou na imagem.** Kernel 6.12 inalterado. Buildroot 2024.02
+inalterado. Mudou: `inittab` com `respawn`; `SDL2_ttf` + `harfbuzz` + DejaVu Sans;
+dropbear **removido** (só OpenSSH agora — dois servidores disputando a porta 22 é
+corrida, não redundância); `giochi-usbnet` + `S30usbnet` (rede por cabo USB, RNDIS,
+`10.55.0.2`); `giochi-bootlog` + `S10bootlog`/`S96bootlog`; `wpa_supplicant`/`iw`
+para dongle USB (não há rádio onboard na X35H).
+
+**2. `inittab` tem `::respawn:`?** **Sim**, na imagem nova. Na que vocês têm: não.
+
+**3. Onde o texto parou.** Não sabemos por medição — o launcher nunca foi iniciado
+aqui, então não houve como vê-lo falhar. Sabemos por leitura estática que faltavam
+as três peças acima e que as `DT_NEEDED` do binário de vocês **não** listam
+SDL2_ttf/freetype/harfbuzz — o que é coerente: o SDL2_ttf as carrega em tempo de
+execução, não o launcher.
+
+**4. Rotação.** X55 = `fbcon=rotate:3`. X35H = `0`. **Nunca 2.** E deixou de ser
+texto solto no script: vem de `device.json` → `kernelCmdline.fbconRotate`, então
+não pode mais vazar de um aparelho para outro.
+
+**5. `buttons.map`.** Formato **igual**. Conteúdo mudou em dois pontos:
+o `home`/`BTN_MODE` da X55 está marcado `OPCIONAL` (o botão `F` **não existe
+fisicamente** nesta revisão do aparelho — foi um erro nosso tê-lo declarado), e a
+X35H tem 16 botões, sem `BTN_MODE`. Pedido: tratem `OPCIONAL` como "pode faltar,
+não é erro". O aviso de símbolo desconhecido de vocês é bom — mantenham.
+
+**6. ALSA.** **O sistema não persiste estado de mixer**, e decidimos que não vai.
+Não há `alsactl store`/`restore` em script nenhum. O app é o dono. Registrado em
+[`sistema-base.md`](sistema-base.md) para não voltar por descuido. `alsactl` e
+`alsamixer` continuam na imagem como ferramenta de diagnóstico.
+
+**7. X35H — driver de analógico.** **`adc-joystick`, mainline.** Não é
+`rocknix-joypad`; esse driver não está na árvore. Medido no DTB compilado:
+
+```text
+/adc-joystick          poll-interval = 60 ms
+  axis@0  ABS_X   (0)  abs-range 15 .. 1023
+  axis@1  ABS_Y   (1)  abs-range 1023 .. 15      ← invertido no DTB
+  axis@2  ABS_RX  (3)  abs-range 15 .. 1023
+  axis@3  ABS_RY  (4)  abs-range 1023 .. 15      ← invertido no DTB
+  abs-flat = 30 (deadzone)     abs-fuzz = 20
+```
+
+O `abs-flat = 30` é o do DTS, não do app. Os eixos Y e RY vêm com `min` maior que
+`max`, então **o kernel já entrega invertido** — se vocês inverterem de novo,
+invertem duas vezes. Painel 640×480, rotação `0`.
+
+### 4. Duas correções que mudam o que vocês medem
+
+**(a) O aparelho é X35H, não "r35h".** A família tem nomes que se cruzam e já nos
+custaram uma rodada: **X35H** e **X35S** são RK3566; **R35S** é RK3326 (o mesmo
+SoC do R36S). A imagem 640×480 é **X35H/RK3566**. Não existe "r35h".
+
+**(b) O DTB do X55 que vocês têm usa `adc-joystick`, não `rocknix-joypad`.**
+Verificado no DTB que está no cartão de vocês. Ou seja, a normalização que vale é
+a da tabela acima. Os 17 botões estão em `gpio-keys-control` (13) +
+`gpio-keys-vol` (2) + `rk805 pwrkey` (1) + o direcional em `BTN_DPAD_*`.
+
+### 5. Sobre o cartão que estava com vocês
+
+Inspecionei **somente leitura** e depois **guardei o launcher antes de qualquer
+coisa**:
+
+```text
+opt-giochi/apps/launcher/bin/giochi-launcher   511984 B  sha256 11563fc4…
+etc-giochi/buttons.map                          3976 B  sha256 658e8939…
+user/.config/giochi/brightness                     4 B  "1332"
+user/.config/giochi/volume                         2 B  "80"
+```
+
+Os dois últimos são a melhor notícia da rodada: **o launcher rodou e gravou
+estado.** `1332` de `1666` de brilho máximo não é valor de fábrica — é alguém
+tendo mexido.
+
+Agora a parte que precisa de atenção: essa imagem é **antiga** (sem `SDL2_ttf`,
+sem `respawn`, com dropbear). Vou regravá-la com a de hoje, e o launcher de vocês
+**não vai junto** — ele não é nosso. O backup acima fica em
+`out/app-team-backup-20261103/`; devolver ao cartão é copiar `opt-giochi/` para
+`/opt/giochi/` e `user/` para `/user/`.
+
+**Se preferirem receber a imagem e reinjetar vocês mesmos, digam antes de eu
+gravar.** Regravar apaga o conteúdo, e o backup é do que eu consegui ler.
+
+### 6. Perguntas de vocês na §6, respondidas
+
+**`/root/giochi-boot.log` é estável?** Sim, é o caminho definitivo. Ele existe
+porque `/var/log` é symlink para `/tmp` (tmpfs) — log ali evapora no desligamento,
+o que custou uma rodada inteira em que "não havia log". Copiar antes de regravar
+está certo.
+
+**Outros logs de boot?** Só esse. Ele já contém `dmesg`, DRM, partições e o
+`giochi-selftest` da fase final. Não há `/var/log/messages` persistente. Existe um
+`dmesg` puro, mas o mesmo conteúdo está no log.
+
+**Alternativa sem tirar o cartão:** com `usb0` de pé, `ssh root@10.55.0.2` também
+lê o log (`cat /root/giochi-boot.log`) — mais simples que `debugfs`.

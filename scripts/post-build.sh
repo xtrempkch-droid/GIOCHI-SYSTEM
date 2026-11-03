@@ -15,18 +15,31 @@
 # Aqui só se ACRESCENTA uma linha, se ela ainda não estiver lá. Idempotente: se
 # já estiver, não faz nada. Nada do que o Buildroot escreveu é removido.
 #
-# ## Quando a linha entra: só quando há launcher
+# ## Quando a linha entra: SEMPRE
 #
-# Acrescentar `::respawn:/usr/bin/giochi-init` sem launcher deixa o aparelho com
-# um processo esperando por um binário que não existe. Inofensivo (é assim que o
-# `giochi-init` foi feito), mas sem propósito.
+# A primeira versão só punha a linha quando o launcher já estava na imagem. A
+# intenção era não deixar um processo esperando por um binário que não existe.
 #
-# Ligar a linha no momento em que o launcher é EMPACOTADO é melhor do que uma
-# flag de config: não há nada para esquecer, e o comportamento acompanha o
-# artefato. O caminho é o mesmo que o `giochi-init` procura por padrão.
+# Isso estava errado por um motivo que só apareceu ao inspecionar a imagem da
+# equipe do app: **o launcher não vem desta árvore**. Ele é empacotado por eles e
+# entra no rootfs por overlay, sobre uma imagem nossa. Se a linha só existe
+# quando o launcher já está presente, ela nunca existe na imagem que eles
+# recebem — e o sintoma é o pior tipo: o binário está lá, ninguém o chama, e a
+# interface não sobe sem SSH.
 #
-# Para testar o giochi-init sem launcher, crie o marcador no overlay:
-#   device/<pasta>/rootfs-overlay/etc/giochi/boot-layer
+# Do lado do `giochi-init` não há custo: sem launcher ele ESPERA em intervalos de
+# `GIOCHI_LAUNCHER_WAIT` (30 s), sem CPU e sem inundar o console — comportamento
+# medido e testado (§11). E o getty da serial continua vivo: `::sysinit` e as
+# demais linhas geradas pelo Buildroot não são tocadas.
+#
+# Detalhe que engana: com o campo `id` vazio, o busybox init dá ao processo
+# `/dev/console` como stdio — que aqui é a serial (`console=ttyS2`), não a tela.
+# Nada do `giochi-init` depende de stdio: ele fala com o DRM pelo launcher e
+# escreve o diagnóstico em arquivo (§12.19).
+#
+# Regra que fica: o artefato entregue tem de estar pronto para receber o
+# launcher. Não se condiciona a linha à presença de algo que o cliente da imagem
+# é quem instala.
 # ============================================================
 
 set -eu
@@ -39,17 +52,18 @@ fi
 
 INITTAB="$TARGET_DIR/etc/inittab"
 INIT_BIN="$TARGET_DIR/usr/bin/giochi-init"
-LAUNCHER="$TARGET_DIR/opt/giochi/apps/launcher/bin/giochi-launcher"
-FORCE_MARKER="$TARGET_DIR/etc/giochi/boot-layer"
 
 [ -f "$INITTAB" ] || {
     echo "post-build: /etc/inittab não existe — o init não é BusyBox?" >&2
     exit 1
 }
 
-# A linha exata. `::` = roda em /dev/console. `respawn` é o que mantém o
-# launcher vivo quando um jogo termina (o launcher faz exec, não fork, então
-# ninguém sobra para redesenhar).
+# A linha exata. `::` = roda em /dev/console. `respawn` tem dois motivos, e
+# nenhum dos dois depende do launcher fazer exec (ele NÃO faz hoje — quem faz
+# `fork`+`wait` é o `Command::status()` em poweroff/reboot):
+#   1. recupera o launcher se ele morrer;
+#   2. é pré-requisito de o launcher fazer exec no jogo no futuro, para não
+#      haver dois processos disputando o DRM master.
 ENTRADA='::respawn:/usr/bin/giochi-init'
 
 if grep -qxF "$ENTRADA" "$INITTAB" 2>/dev/null; then
@@ -61,12 +75,6 @@ fi
     echo "post-build: giochi-init não está executável — não vou pôr linha que falha" >&2
     exit 1
 }
-
-if [ ! -x "$LAUNCHER" ] && [ ! -f "$FORCE_MARKER" ]; then
-    echo "post-build: sem launcher e sem marcador /etc/giochi/boot-layer"
-    echo "            camada de boot fica desligada (o giochi-init não é chamado)"
-    exit 0
-fi
 
 # Antes do getty: a tela do aparelho é do launcher, e um getty no console
 # roubaria o echo dos primeiros segundos. Vai logo depois do rcS.

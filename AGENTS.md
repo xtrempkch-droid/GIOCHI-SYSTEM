@@ -497,12 +497,23 @@ dropbear ausente dos defconfigs, e o selftest tratando `usb0` como canal padrão
 
 ## 11. A camada de boot — o que falta para o aparelho sair do console
 
-O launcher **não faz `fork`**: faz `exec` para abrir um jogo, para nunca haver
-dois processos disputando o DRM. Quem o reinicia quando o jogo termina é o
-`giochi-init`.
+O `respawn` do `/etc/inittab` mantém o launcher vivo. São dois motivos, e o
+primeiro já vale hoje:
+
+1. **recuperação** — se o launcher morrer, a tela congelaria até alguém entrar por
+   SSH;
+2. **pré-requisito do `exec` futuro** — o plano do app é o launcher fazer `exec`
+   no jogo, substituindo o próprio processo, para nunca haver dois disputando o
+   DRM master.
+
+> **Correção de fato (03/11/2026, apontada pela equipe do app):** o launcher
+> **não** faz `exec` hoje. O único uso de processo é `Command::status()` em
+> `poweroff`/`reboot` (`fork` + `wait`). O `exec` está registrado no
+> `docs/integracao.md` deles como decisão futura. O argumento era certo; o tempo
+> verbal não — e este documento repetia o erro em três lugares.
 
 ```text
-giochi-init ──▶ launcher ──exec──▶ jogo
+giochi-init ──▶ launcher ──exec──▶ jogo        (exec: ainda NÃO implementado)
      ▲                              │
      └────────── jogo termina ──────┘
 ```
@@ -1294,6 +1305,44 @@ da primeira em silêncio — a mesma classe de problema do §12.1.
 
 Leia esse arquivo no início de uma sessão: o que está lá é o estado mais recente
 do que o app espera do sistema, e pode ter mudado depois deste documento.
+
+### 12.32 CMake 4.x recusa pacote do Buildroot 2024.02 (só em build do zero)
+
+Buildroot 2024.02 é de fevereiro de 2024, e vários pacotes dela ainda declaram
+`cmake_minimum_required(VERSION 3.4)`. O **CMake 4.0 removeu a compatibilidade com
+versões anteriores a 3.5**. A mensagem cita política, nunca versão de CMake, então
+o sintoma não aponta para causa nenhuma:
+
+```text
+CMake Error at CMakeLists.txt:1 (CMAKE_MINIMUM_REQUIRED):
+  Compatibility with CMake < 3.5 has been removed from CMake.
+  ...
+  Or, add -DCMAKE_POLICY_VERSION_MINIMUM=3.5 to try configuring anyway.
+make[1]: *** [package/pkg-generic.mk:273: .../host-hiredis-1.2.0/.stamp_configured] Error 1
+```
+
+Medido nesta máquina (**CMake 4.2.3**) no primeiro pacote de host do build: o
+`host-hiredis` 1.2.0. **O CI não reproduz** porque o runner tem CMake 3.x.
+
+**Por que passa despercebido:** só acontece com `work/` vazio. Com a árvore já
+populada os pacotes de host estão construídos e nada é reconfigurado — foi por
+isso que builds anteriores aqui funcionaram e este, depois de o `/tmp` ser limpo,
+morreu.
+
+Correção (a que o próprio CMake sugere): exportar
+`CMAKE_POLICY_VERSION_MINIMUM=3.5`. O CMake 4 lê essa variável **do ambiente**
+para inicializar o cache de árvores novas
+(`/usr/share/cmake-4.2/Help/envvar/CMAKE_POLICY_VERSION_MINIMUM.rst`), e ela não
+sobrepõe projetos que já declaram mínimo maior. `build-device.sh` exporta
+automaticamente quando detecta CMake ≥ 4 e avisa no log:
+
+```text
+CMake do host é 4.2 — exportando CMAKE_POLICY_VERSION_MINIMUM=3.5
+```
+
+Some da lista quando o Buildroot for atualizado para uma versão que declare
+≥ 3.5. Até lá, build do zero em máquina com CMake 4 exige o export — e o aviso no
+log é o que impede alguém de passar horas procurando o problema no pacote.
 
 ## 13. Aparelhos
 

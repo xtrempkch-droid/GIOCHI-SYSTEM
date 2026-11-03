@@ -542,6 +542,33 @@ fi
 echo "Compilando com $JOBS job(s). O log fica em $LOG_FILE..."
 
 # ---------------------------------------------------------------
+# CMake 4.x não configura projeto que declara mínimo anterior a 3.5.
+#
+# Buildroot 2024.02 é de fevereiro de 2024; muitos pacotes dela ainda declaram
+# `cmake_minimum_required(VERSION 3.4)` (o `host-hiredis` 1.2.0 é o primeiro a
+# aparecer num build do zero). O CMake 4.0 REMOVEU a compatibilidade com < 3.5,
+# então o build morre no `Configuring` com uma mensagem que fala de política,
+# não de versão de CMake:
+#
+#   Compatibility with CMake < 3.5 has been removed from CMake.
+#
+# Isso não aparece no CI porque o runner tem CMake 3.x. É falha de AMBIENTE, não
+# do projeto — e é do tipo que só aparece em build do zero: com `work/` já
+# populado, os pacotes de host estão construídos e ninguém vê.
+#
+# A correção é a que o próprio CMake recomenda: o env var
+# `CMAKE_POLICY_VERSION_MINIMUM` inicializa o cache dos projetos novos. Some da
+# lista quando o Buildroot for atualizado para uma versão que declare >= 3.5.
+# ---------------------------------------------------------------
+if command -v cmake >/dev/null 2>&1; then
+  CMAKE_HOST_VERSION="$(cmake --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+' | head -1)"
+  if [[ "${CMAKE_HOST_VERSION%%.*}" -ge 4 ]] 2>/dev/null; then
+    export CMAKE_POLICY_VERSION_MINIMUM=3.5
+    echo "CMake do host é $CMAKE_HOST_VERSION — exportando CMAKE_POLICY_VERSION_MINIMUM=3.5" >&2
+  fi
+fi
+
+# ---------------------------------------------------------------
 # Monitor de disco durante o build.
 #
 # A falha que originou isto: uma pasta copiava o repositório inteiro para

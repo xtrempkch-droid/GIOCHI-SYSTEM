@@ -161,10 +161,24 @@ Caminho combinado para o binário (usado pelo `giochi-init` e pelo `post-build`)
 /opt/giochi/apps/launcher/bin/giochi-launcher
 ```
 
-**No dia em que esse arquivo estiver na imagem, o `giochi-init` é chamado
-sozinho** — `scripts/post-build.sh` acrescenta `::respawn:/usr/bin/giochi-init`
-ao `/etc/inittab` quando encontra o launcher. Não há flag de configuração para
-lembrar.
+**O `giochi-init` é chamado sozinho, sempre** — `scripts/post-build.sh`
+acrescenta `::respawn:/usr/bin/giochi-init` ao `/etc/inittab` em toda imagem. Não
+há flag de configuração, e a linha **não** depende de o launcher estar presente.
+
+A primeira versão condicionava a linha à existência do launcher, para não deixar
+um processo esperando binário inexistente. Estava errado por um motivo que só
+apareceu ao inspecionar a imagem que a equipe do app tinha em mãos:
+
+> **O launcher não vem desta árvore.** Ele é empacotado pela equipe do app e
+> entra no rootfs por overlay, **sobre uma imagem nossa**. Se a linha só existe
+> quando o launcher já está lá, ela nunca existe na imagem entregue — e o binário
+> fica no disco sem ninguém para chamar.
+
+Sem launcher o custo é zero: o `giochi-init` espera em intervalos de
+`GIOCHI_LAUNCHER_WAIT` (30 s), sem CPU e sem inundar o console (§11 do AGENTS).
+
+Regra que fica: **não condicione o artefato entregue à presença de algo que o
+cliente da imagem é quem instala.**
 
 ## Coisas que vão morder, em ordem de probabilidade
 
@@ -203,8 +217,8 @@ TTF_Init()                       // falha = freetype ou fonte ausente
 ## Quando o launcher entrar
 
 1. Copiar o binário para `/opt/giochi/apps/launcher/bin/giochi-launcher`.
-2. Buildar. O `post-build` liga o `respawn` sozinho (o log mostra
-   `post-build: inittab agora respawna giochi-init`).
+2. Buildar (ou, se a imagem já foi entregue, copiar o binário e reiniciar — a
+   linha do `inittab` já está lá de qualquer forma).
 3. No aparelho: `giochi-selftest` deve dizer `inittab chama giochi-init` e
    `launcher: /opt/giochi/apps/launcher/bin/giochi-launcher`.
 

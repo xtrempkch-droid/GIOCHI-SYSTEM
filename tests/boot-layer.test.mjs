@@ -43,22 +43,25 @@ async function fakeRoot({ launcher = false, marker = false, inittab = INITTAB_BA
 const runPostBuild = (dir) =>
   run("sh", [POST_BUILD], { env: { ...process.env, TARGET_DIR: dir } });
 
-test("sem launcher e sem marcador, o inittab não muda", async () => {
-  // Pôr a linha sem launcher deixa um processo esperando binário que não
-  // existe. Inofensivo, mas sem propósito — e um rootfs que muda sem motivo é
-  // ruído em diff de artefato.
+test("sem launcher, a linha entra assim mesmo", async () => {
+  // A versão anterior não punha a linha sem launcher. Errado por um motivo que
+  // só apareceu ao inspecionar a imagem da equipe do app: o launcher NÃO vem
+  // desta árvore — ele entra por overlay, sobre uma imagem nossa. Se a linha
+  // depende do launcher já estar presente, ela nunca existe na imagem entregue.
+  // Sem launcher, o `giochi-init` espera em vez de sair (§11).
   const dir = await fakeRoot();
   try {
     await runPostBuild(dir);
-    assert.equal(await readFile(path.join(dir, "etc/inittab"), "utf8"), INITTAB_BASE);
+    const texto = await readFile(path.join(dir, "etc/inittab"), "utf8");
+    assert.match(texto, /^::respawn:\/usr\/bin\/giochi-init$/m);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
 });
 
 test("com launcher, a linha entra logo depois do rcS e antes do getty", async () => {
-  // `respawn` é o que mantém o launcher vivo: ele faz exec no jogo, então
-  // ninguém sobra para redesenhar quando o jogo termina.
+  // `respawn` recupera o launcher se ele morrer, e é pré-requisito do `exec`
+  // futuro no jogo (o launcher NÃO faz exec hoje: usa fork+wait em poweroff).
   const dir = await fakeRoot({ launcher: true });
   try {
     await runPostBuild(dir);
@@ -87,13 +90,14 @@ test("rodar duas vezes não duplica a linha", async () => {
   }
 });
 
-test("o marcador /etc/giochi/boot-layer liga a linha sem launcher", async () => {
-  // Permite testar o giochi-init num aparelho antes de o launcher existir.
+test("o marcador /etc/giochi/boot-layer não duplica a linha", async () => {
+  // O marcador existia para ligar a linha sem launcher. Agora a linha entra
+  // sempre; o marcador tem de continuar sendo inofensivo.
   const dir = await fakeRoot({ marker: true });
   try {
     await runPostBuild(dir);
     const texto = await readFile(path.join(dir, "etc/inittab"), "utf8");
-    assert.match(texto, /^::respawn:\/usr\/bin\/giochi-init$/m);
+    assert.equal(texto.split("/usr/bin/giochi-init").length - 1, 1);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

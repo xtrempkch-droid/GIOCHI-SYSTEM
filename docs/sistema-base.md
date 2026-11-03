@@ -109,9 +109,16 @@ exposto (X35H). Ver [`x35h-bringup.md`](x35h-bringup.md).
 
 ## A camada de boot: quem chama o `giochi-init`
 
-O `giochi-init` mantém o launcher vivo (o launcher faz `exec` no jogo, então
-ninguém sobra para redesenhar quando o jogo termina). Ele está na imagem e
-precisa ser chamado por alguém — a linha de `/etc/inittab`:
+O `giochi-init` mantém o launcher vivo. `respawn` tem dois motivos, e nenhum
+depende de o launcher fazer `exec` (ele **não** faz hoje: o único uso de processo
+é `fork`+`wait` em `poweroff`/`reboot`; o `exec` é decisão do app para quando o
+lançamento de jogos entrar):
+
+1. recupera o launcher se ele morrer;
+2. é pré-requisito do `exec` futuro, para não haver dois processos disputando o
+   DRM master.
+
+Ele está na imagem e precisa ser chamado por alguém — a linha de `/etc/inittab`:
 
 ```text
 ::sysinit:/etc/init.d/rcS
@@ -210,6 +217,26 @@ segundo servidor SSH.
 | Console/rotação | `kernelCmdline` no `device.json` | `ttyS2,1500000n8` + `fbconRotate` |
 | Log no cartão | marcador `/etc/giochi/boot-log` | X35H sim; X55 não (tem console) |
 | Controles | `buttons.map` | 16 botões no X35H, 16+1 opcional na X55 |
+
+## Estado do mixer ALSA: o app é o dono
+
+O sistema **não persiste** estado de ALSA. Não há `alsactl store` no desligamento
+nem `alsactl restore` no boot, e não deve haver.
+
+Motivo: o launcher grava a intenção do usuário em `/user/.config/giochi/volume` e
+aplica no mixer ele mesmo. Se o sistema também salvasse e restaurasse o mixer, os
+dois escreveriam sem saber um do outro, e o volume "voltaria sozinho" no boot
+seguinte — sintoma que ninguém ligaria à causa.
+
+Consequência prática: num aparelho sem launcher, o volume volta ao padrão do
+driver a cada boot. É aceitável, e é o preço de não ter dois donos.
+
+`alsa-utils` (`alsactl`, `alsamixer`) continua na imagem — é ferramenta de
+diagnóstico e o `giochi-selftest` depende dele para conferir o *Playback Mux*.
+
+**Se algum dia o sistema precisar restaurar o mixer**, a decisão tem de ser
+combinada antes: ou o sistema guarda e o app só lê, ou o contrário. O que não
+funciona é os dois escreverem.
 
 ## Verificação rápida no aparelho
 

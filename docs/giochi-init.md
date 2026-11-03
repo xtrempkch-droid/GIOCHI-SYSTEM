@@ -7,15 +7,22 @@ Arquivo: `device/common/rootfs-overlay/usr/bin/giochi-init`
 
 ## Por que ele é obrigatório
 
-O launcher **não faz `fork`** para abrir um jogo — faz `exec`, substituindo o
-próprio processo. Isso evita dois processos disputando o DRM: quando o jogo assume
-a tela, o launcher deixa de existir.
+Há **dois** motivos, e o primeiro já vale hoje:
 
-O efeito colateral é que, quando o jogo termina, **não sobra ninguém** para
-desenhar o launcher. Quem reinicia é este script.
+1. **Recuperação.** O launcher pode morrer por qualquer motivo (driver, OOM, bug).
+   Sem `respawn`, a tela fica congelada e só volta com SSH.
+2. **Pré-requisito do `exec` futuro.** O plano do app é o launcher fazer `exec` no
+   jogo, substituindo o próprio processo, para nunca haver dois processos
+   disputando o DRM master. Quando isso entrar, ninguém sobra para redesenhar a
+   interface quando o jogo termina — e quem reinicia é este script.
+
+> **Correção de fato (03/11/2026).** Este documento afirmava que o launcher **já**
+> fazia `exec`. Não faz: o único uso de processo no launcher hoje é
+> `Command::status()` em `poweroff`/`reboot`, que cria filho e espera. Quem
+> corrigiu foi a equipe do app. O argumento continua válido; o tempo verbal não.
 
 ```text
-giochi-init ──▶ launcher ──exec──▶ jogo
+giochi-init ──▶ launcher ──exec──▶ jogo        (exec: ainda NÃO implementado)
      ▲                              │
      └────────── jogo termina ──────┘
 ```
