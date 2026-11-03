@@ -107,11 +107,52 @@ OpenSSH porque o `scp` do OpenSSH 9+ usa SFTP por padrão, e o dropbear não tem
 aparelho tem o marcador `/etc/giochi/boot-log` — usado nos aparelhos sem console
 exposto (X35H). Ver [`x35h-bringup.md`](x35h-bringup.md).
 
+## A camada de boot: quem chama o `giochi-init`
+
+O `giochi-init` mantém o launcher vivo (o launcher faz `exec` no jogo, então
+ninguém sobra para redesenhar quando o jogo termina). Ele está na imagem e
+precisa ser chamado por alguém — a linha de `/etc/inittab`:
+
+```text
+::sysinit:/etc/init.d/rcS
+::respawn:/usr/bin/giochi-init          ← acrescentada pelo post-build
+console::respawn:/sbin/getty -L console 0 vt100
+```
+
+Quem acrescenta é `scripts/post-build.sh`, e o `prepare-config` **soma** esse
+script ao `BR2_ROOTFS_POST_BUILD_SCRIPT` que o defconfig já tinha. Duas decisões
+que custaram para ser tomadas:
+
+| Alternativa | Por que não |
+| --- | --- |
+| `/etc/inittab` no overlay comum | substituiria o arquivo gerado, e defconfig de placa real pode depender das linhas dele (getty, shutdown, ctrlaltdel) |
+| sobrescrever `BR2_ROOTFS_POST_BUILD_SCRIPT` | perderia em silêncio o post-build do aparelho |
+
+**A linha só entra quando há launcher** — ou o marcador `/etc/giochi/boot-layer`,
+para testar antes:
+
+```text
+/opt/giochi/apps/launcher/bin/giochi-launcher   existe?
+/etc/giochi/boot-layer                          existe?
+        │
+        ├── não, não → inittab fica como está (comportamento anterior)
+        └── sim      → acrescenta ::respawn:/usr/bin/giochi-init
+```
+
+Sem flag de configuração para esquecer: o comportamento acompanha o artefato. No
+dia em que o launcher for empacotado, ele sobe sozinho.
+
+O script é idempotente (rodar duas vezes não duplica a entrada — duplicar seria
+dois `giochi-init` disputando o DRM) e **falha o build** se o `giochi-init`
+estiver sem bit de execução: uma linha de inittab apontando para arquivo sem `+x`
+gera erro a cada respawn, e o build teria ficado verde.
+
 ## Onde cada peça mora
 
 ```text
 config/common.fragment              ← pacotes Buildroot do sistema base
 config/common.busybox.fragment      ← applets do busybox (udhcpd, nc, vi, ip)
+scripts/post-build.sh               ← liga o giochi-init no /etc/inittab
 device/common/rootfs-overlay/
 ├── etc/init.d/S30usbnet            ← sobe a rede USB no boot
 ├── etc/init.d/S96bootlog           ← log no cartão (só com marcador)

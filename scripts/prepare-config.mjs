@@ -3,7 +3,14 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 function parseArgs(argv) {
-  const args = { fragments: [], overlays: [], kernelFragments: [], busyboxFragments: [], kernelPatches: [] };
+  const args = {
+  fragments: [],
+  overlays: [],
+  kernelFragments: [],
+  busyboxFragments: [],
+  kernelPatches: [],
+  postBuildScripts: [],
+};
   for (let index = 0; index < argv.length; index += 1) {
     const item = argv[index];
     if (item === "--fragment") {
@@ -14,6 +21,8 @@ function parseArgs(argv) {
       args.kernelFragments.push(argv[++index]);
     } else if (item === "--busybox-fragment") {
       args.busyboxFragments.push(argv[++index]);
+    } else if (item === "--post-build") {
+      args.postBuildScripts.push(argv[++index]);
     } else if (item === "--kernel-patch") {
       args.kernelPatches.push(argv[++index]);
     } else if (item.startsWith("--")) {
@@ -86,7 +95,7 @@ const args = parseArgs(process.argv.slice(2));
 
 if (!args.config || !args.hostname) {
   console.error(
-    "Uso: node scripts/prepare-config.mjs --config <arquivo> --hostname <nome> [--fragment ...] [--overlay ...] [--kernel-fragment ...] [--busybox-fragment ...] --dl-dir <dir>",
+    "Uso: node scripts/prepare-config.mjs --config <arquivo> --hostname <nome> [--fragment ...] [--overlay ...] [--kernel-fragment ...] [--busybox-fragment ...] [--post-build ...] --dl-dir <dir>",
   );
   process.exit(2);
 }
@@ -163,6 +172,35 @@ for (const overlay of args.overlays) {
   if (!overlays.includes(resolved)) overlays.push(resolved);
 }
 lines = setKey(lines, "BR2_ROOTFS_OVERLAY", quote(overlays.join(" ")));
+
+// Scripts de POST-BUILD: ACRESCENTA aos que já existem, nunca substitui.
+//
+// Defconfigs de placa real podem depender do próprio post-build (gerar dtb,
+// copiar firmware, ajustar permissão). Sobrescrever `BR2_ROOTFS_POST_BUILD_SCRIPT`
+// quebra esses aparelhos em silêncio — o build passa e o artefato da placa sai
+// sem o que o post-build dela fazia. É o mesmo motivo do §7 do AGENTS sobre não
+// sobrescrever post-build/post-image.
+if (args.postBuildScripts.length > 0) {
+  const linha = lines.find((item) => item.startsWith("BR2_ROOTFS_POST_BUILD_SCRIPT="));
+  let existentes = [];
+  if (linha) {
+    let valor = linha.slice("BR2_ROOTFS_POST_BUILD_SCRIPT=".length).trim();
+    if (valor.startsWith('"') && valor.endsWith('"')) valor = valor.slice(1, -1);
+    existentes = valor.split(/\s+/).filter(Boolean);
+  }
+  for (const script of args.postBuildScripts) {
+    if (!script) continue;
+    if (!existsSync(script)) {
+      throw new Error(`Script de post-build não encontrado: ${script}`);
+    }
+    // O Buildroot roda o post-build com shell; caminho com espaço vira dois
+    // comandos. Mesma armadilha dos overlays (§12.6).
+    rejectSpaces("Script de post-build", script);
+    const resolvido = path.resolve(script);
+    if (!existentes.includes(resolvido)) existentes.push(resolvido);
+  }
+  lines = setKey(lines, "BR2_ROOTFS_POST_BUILD_SCRIPT", quote(existentes.join(" ")));
+}
 
 // Fragmentos de KERNEL (símbolos `CONFIG_*`). O Buildroot exige caminho
 // ABSOLUTO aqui, então a resolução acontece neste ponto — o fragmento do

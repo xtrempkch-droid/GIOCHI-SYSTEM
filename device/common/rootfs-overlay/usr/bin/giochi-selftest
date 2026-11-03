@@ -445,12 +445,30 @@ done
 # ── camada Giochi ────────────────────────────────────────────
 head2 "camada Giochi"
 
-if [ "$(cat /proc/1/comm 2>/dev/null)" = "giochi-init" ]; then
-    pass "PID 1 é giochi-init"
-elif [ -x /usr/bin/giochi-init ]; then
-    warn "giochi-init existe mas não é o PID 1 ($(cat /proc/1/comm 2>/dev/null))"
+# Quem chama o giochi-init é o /etc/inittab, por `respawn` — ele nunca é PID 1
+# (PID 1 é o init do busybox). A pergunta certa é "existe a linha?", não
+# "é PID 1?", que nunca seria verdade e daria WARN eterno.
+LAUNCHER=/opt/giochi/apps/launcher/bin/giochi-launcher
+if [ -x /usr/bin/giochi-init ]; then
+    if grep -q '^::respawn:/usr/bin/giochi-init$' /etc/inittab 2>/dev/null; then
+        pass "inittab chama giochi-init (respawn)"
+    elif [ -x "$LAUNCHER" ] || [ -f /etc/giochi/boot-layer ]; then
+        # O launcher (ou o marcador) pede a camada de boot e ela não está ligada:
+        # o launcher nunca subiria, e nada no boot diria por quê.
+        fail "inittab NÃO chama giochi-init — o launcher não sobe"
+    else
+        # Sem launcher, é o estado correto: a linha só entra quando há o que
+        # iniciar. Não é falha.
+        pass "giochi-init pronto (sem launcher: camada de boot desligada)"
+    fi
 else
     fail "giochi-init ausente"
+fi
+
+if [ -x "$LAUNCHER" ]; then
+    pass "launcher: $LAUNCHER"
+else
+    skip "sem launcher empacotado (/opt/giochi/apps/launcher)"
 fi
 
 if [ -r /opt/giochi/apps/index.json ]; then

@@ -16,3 +16,4 @@ import "./buttons-map.test.mjs";
 import "./cmdline.test.mjs";
 import "./device-x35h.test.mjs";
 import "./base-system.test.mjs";
+import "./boot-layer.test.mjs";

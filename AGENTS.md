@@ -345,8 +345,11 @@ precisam de `chmod` em post-build.
 ### Por que não sobrescrever `post-build`/`post-image`
 
 Defconfigs de placas reais podem depender dos scripts de pós-build do Buildroot.
-`prepare-config` só mexe em hostname/issue/senha/DL_DIR/OVERLAY/ccache. Isso é o
-que torna a instalação do `/etc/inittab` uma decisão em aberto (§11).
+`prepare-config` só mexe em hostname/issue/senha/DL_DIR/OVERLAY/ccache — e em
+`BR2_ROOTFS_POST_BUILD_SCRIPT` **ACRESCENTA** o nosso `scripts/post-build.sh` à
+lista existente, nunca substitui. O script, por sua vez, só ACRESCENTA uma linha
+ao `/etc/inittab` (§11); nada do que o Buildroot gerou é removido. Foi assim que
+a ligação do `giochi-init` passou a existir sem reabrir esta decisão.
 
 ## 8. Workflow e o histórico real do CI
 
@@ -498,14 +501,28 @@ O script existe, está executável no índice do Git, tem o limite de 5 reiníci
 60 s **testado** (§3) e um comportamento de desistência correto: para de
 reiniciar mas continua vivo, porque matar o PID 1 derruba o kernel.
 
-**Uma ligação falta; as outras duas já estão feitas e testadas:**
+**As três ligações estão feitas e testadas:**
 
-1. **`/etc/inittab` sem a linha `::respawn:/usr/bin/giochi-init`.** Sem ela, o
-   `giochi-init` está na imagem e ninguém o chama.
-   O caminho óbvio (`BR2_ROOTFS_POST_BUILD_SCRIPT`) é justamente o que a §7 evita
-   sobrescrever. As opções são: (a) assumir a autoria completa do `/etc/inittab`
-   no overlay comum; (b) usar post-build e aceitar o acoplamento com defconfigs
-   de placa. **É uma decisão em aberto, não um bug.**
+1. **`/etc/inittab` com a linha `::respawn:/usr/bin/giochi-init`** — RESOLVIDO
+   por `scripts/post-build.sh`, sem as duas opções ruins que estavam na mesa.
+   Não se assume a autoria do `/etc/inittab` (defconfig de placa real pode
+   depender do que o Buildroot gerou) e não se sobrescreve
+   `BR2_ROOTFS_POST_BUILD_SCRIPT` (perderia o post-build do aparelho): o
+   `prepare-config` **acrescenta** o nosso script à lista existente, e o script
+   **insere** a linha depois do `rcS`, preservando todo o resto.
+   ```
+   ::sysinit:/etc/init.d/rcS
+   ::respawn:/usr/bin/giochi-init        ← acrescentada, não substitui nada
+   console::respawn:/sbin/getty -L console 0 vt100
+   ```
+   **Só entra quando há launcher** (`/opt/giochi/apps/launcher/bin/giochi-launcher`)
+   ou o marcador `/etc/giochi/boot-layer`. Assim não há flag para esquecer: o
+   comportamento acompanha o artefato. Enquanto o launcher não é empacotado, a
+   imagem fica exatamente como antes.
+   Idempotente (rodar duas vezes não duplica), e falha o build se o
+   `giochi-init` não estiver executável — linha de inittab apontando para arquivo
+   sem `+x` gera erro a cada respawn e o build teria ficado verde.
+   `tests/boot-layer.test.mjs` cobre os cinco cenários.
 2. **`buttons.map` chega ao rootfs** (feito). O staging copia
    `device/<pasta>/buttons.map` para `etc/giochi/buttons.map` e avisa quando o
    aparelho não tem mapa.
@@ -513,6 +530,9 @@ reiniciar mas continua vivo, porque matar o PID 1 derruba o kernel.
    quando o launcher não existia — e com `::respawn:` isso vira ~10 reinícios por
    segundo inundando o console. Agora espera em intervalos de
    `GIOCHI_LAUNCHER_WAIT` (30 s), sem CPU e sem ruído.
+
+Ou seja: **no dia em que o launcher entrar na imagem, ele sobe sozinho** — sem
+mexer em configuração deste repositório.
 
 Fora do escopo daqui: `giochi-controllers` (configurador de controles) não
 existe. Ele precisa ser **binário separado, iniciado antes do launcher** — se o

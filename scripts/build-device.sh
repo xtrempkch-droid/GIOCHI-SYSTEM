@@ -414,6 +414,15 @@ if [[ -f "$BUSYBOX_FRAGMENT" ]]; then
   echo "  busybox:   fragmento do aparelho aplicado"
 fi
 
+# Post-build: ACRESCENTA ao que o defconfig já tiver. Hoje faz uma coisa só —
+# põe `::respawn:/usr/bin/giochi-init` no /etc/inittab, e só quando existe
+# launcher (ou o marcador /etc/giochi/boot-layer). Ver scripts/post-build.sh.
+POST_BUILD_ARGS=()
+if [[ -f "$ROOT/scripts/post-build.sh" ]]; then
+  POST_BUILD_ARGS=(--post-build "$ROOT/scripts/post-build.sh")
+  echo "  post-build: scripts/post-build.sh (ligação do giochi-init)"
+fi
+
 OVERRIDE_ARGS=()
 if [[ -f "$ROOT/config/package-overrides.mk" ]]; then
   OVERRIDE_ARGS=(--package-override "$ROOT/config/package-overrides.mk")
@@ -431,6 +440,7 @@ node "$ROOT/scripts/prepare-config.mjs" \
   --ccache-dir "$CCACHE_ARG" \
   "${KERNEL_FRAGMENT_ARGS[@]+"${KERNEL_FRAGMENT_ARGS[@]}"}" \
   "${BUSYBOX_FRAGMENT_ARGS[@]+"${BUSYBOX_FRAGMENT_ARGS[@]}"}" \
+  "${POST_BUILD_ARGS[@]+"${POST_BUILD_ARGS[@]}"}" \
   "${KERNEL_PATCH_ARGS[@]+"${KERNEL_PATCH_ARGS[@]}"}" \
   "${OVERRIDE_ARGS[@]+"${OVERRIDE_ARGS[@]}"}" \
   "${OVERLAY_ARGS[@]}"
