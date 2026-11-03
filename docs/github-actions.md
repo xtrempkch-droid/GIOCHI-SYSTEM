@@ -18,6 +18,20 @@ Entradas manuais:
 | `device` | `all` | ID do device ou `all`. |
 | `arch` | `arm64` | `arm64`, `x86_64` ou `arm`. |
 | `buildroot_version` | vazio | Sobrescreve `buildroot.version` para um teste pontual. |
+| `allow_draft` | `false` | Constrói um **rascunho** que já declare `buildrootDefconfig`. Só vale junto com `device=<id>`; `device=all` nunca puxa rascunho. |
+
+### Rascunhos: por que existe `allow_draft`
+
+Aparelho em `draft` fica `enabled: false` e não entra na matriz — é o que impede
+publicar imagem que não boota. Mas é preciso poder **tentar** o build antes de
+declarar o aparelho pronto, senão a única opção seria mentir no `devices.json`.
+
+`allow_draft: true` + `device=powkiddy-x55` inclui aquele rascunho específico,
+desde que ele declare `buildrootDefconfig`. Sem defconfig o job falharia antes de
+começar, então ele simplesmente não entra.
+
+Localmente o equivalente é `ALLOW_DRAFT=1 bash scripts/build-device.sh <id>`, e a
+matriz responde a `--allow-draft`.
 
 Etapas:
 
@@ -79,7 +93,37 @@ O workflow usa `actions/cache` para:
 - `.cache/downloads` — tarball do Buildroot;
 - `.cache/buildroot-dl` — fontes e pacotes baixados pelo Buildroot.
 
-A chave inclui device, versão do Buildroot e hash de `device/`, `config/` e `buildroot.version`. O primeiro build de cada combinação ainda baixa e compila tudo.
+A chave é **estável** — `giochi-system-<device>-<versão>` —, sem `hashFiles`.
+
+A versão anterior usava hash de `device/`, `config/` e `buildroot.version`. O
+efeito era o oposto do desejado: toda alteração de fragmento trocava a chave, o
+cache nunca era restaurado, e **todo** build era frio — baixando o Buildroot e os
+tarballs de novo. Cache do Actions é imutável: chave estável restaura sempre e só
+salva na primeira vez.
+
+O ccache usa o mesmo princípio, e depende de `BR2_CCACHE_USE_BASEDIR=y` para o
+cache não amarrar no caminho absoluto do workspace.
+
+## Armadilhas já pagas neste workflow
+
+| Sintoma | Causa | Correção |
+| --- | --- | --- |
+| `discover` falha em 1 s com `Dispositivo desabilitado` | entrada `boolean` chega como **string**, e `'true' == true` é falso em expressão do Actions → `ALLOW_DRAFT=0` | entrada virou `choice false/true`; quem lê aceita `1/true/yes/on` |
+| todo build baixa tudo de novo | chave de cache com `hashFiles` | chave estável por device + versão |
+| build morre no meio por disco cheio | runner traz ~20–25 GB de SDKs que o build não usa | passo *Free disk space* |
+| push novo mata o build em andamento | `cancel-in-progress: true` | de propósito: sem isso a fila nunca esvazia |
+
+## Histórico de execuções (02/11/2026)
+
+| Run | Evento | Resultado |
+| --- | --- | --- |
+| #14 | push | falhou — *Build image* morreu em 3 s (causa não diagnosticada; o log exige token) |
+| #15 | push | **sucesso** — 22 min 45 s, artefato `giochi-system-qemu-aarch64` |
+| #17 | dispatch `powkiddy-x55` | falhou em 1 s — armadilha do `allow_draft` acima |
+
+O log de um job **não é público**: `GET /repos/{owner}/{repo}/actions/jobs/{id}/logs`
+devolve 403 sem autenticação. Para ler de fora do navegador: `gh run view
+--log-failed`.
 
 ## Segredos
 

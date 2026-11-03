@@ -1,7 +1,8 @@
 # AGENTS.md — Giochi System
 
 > Handoff técnico do repositório. Leia antes de continuar o trabalho.
-> Atualizado em: 02/11/2026 (revisão 2 — reescrito sobre fatos verificados).
+> Atualizado em: 02/11/2026 (revisão 3 — fim da sessão: X55 implantado, CI com
+> 18 execuções, e a armadilha da entrada booleana do Actions documentada).
 
 ---
 
@@ -60,17 +61,22 @@ Repositório: `https://github.com/xtrempkch-droid/GIOCHI-SYSTEM` — branch `mai
 
 | Verificação | Resultado |
 | --- | --- |
-| `node tests/run-all.mjs` | **33/33** (10 devices + 12 assert-config + 11 fdt) |
+| `node tests/run-all.mjs` | **36/36** (13 devices + 12 assert-config + 11 fdt) |
 | `node scripts/validate-devices.mjs` | OK — 6 devices, 1 habilitado |
 | `node scripts/list-devices.mjs --github-matrix` | matriz com `qemu-aarch64` |
+| matriz com `--device powkiddy-x55 --allow-draft` | devolve **só** o X55 |
+| matriz com `device=all --allow-draft` | **não** puxa rascunho (só `qemu-aarch64`) |
 | `bash -n scripts/build-device.sh` | **exit 0** (primeira vez que rodou) |
 | `bash -n` em `Giochi app/scripts/migrar-do-antecessor.sh` | exit 0 |
 | `sh -n` em `giochi-init`, `giochi-selftest`, `profile.d/giochi-system.sh` | exit 0 |
 | Final de linha dos 5 scripts | LF puro, zero CRLF |
-| `prepare-config.mjs` com `.config` falso + fragmentos reais | OK: hostname, issue, senha, `BR2_DL_DIR`, `BR2_CCACHE*`, `EXT2_SIZE=512M`, `HOST_QEMU` desligado, overlays anexados ao existente |
+| `prepare-config.mjs` com `.config` falso + fragmentos reais | OK: hostname, issue, senha, `BR2_DL_DIR`, `BR2_CCACHE*`, `EXT2_SIZE`, `HOST_QEMU` desligado, overlays anexados ao existente |
+| `prepare-config.mjs --kernel-fragment` | emite `BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES` com caminho absoluto |
 | `assert-config.mjs` sobre o mesmo par | OK — 21 símbolos de 2 fragmentos |
 | `giochi-selftest` executado num `sh` real | roda de ponta a ponta: PASS 2 · WARN 10 · FAIL 7 · SKIP 3, exit 1 |
 | `giochi-init` com launcher falso (sai 7) | 6 reinícios e para, como desenhado |
+| `giochi-init` com launcher ausente | espera em vez de sair (antes saía em 99 ms) |
+| Workflows YAML | válidos (parse com PyYAML) |
 
 **O que isso NÃO prova:** `bash -n` valida sintaxe, não comportamento. O
 `sh` do Git for Windows é o bash em modo POSIX, **não** o busybox ash da imagem —
@@ -78,13 +84,23 @@ compatibilidade com ash continua não provada. O build de verdade só o CI prova
 
 ### Pendente de verdade
 
-- **O primeiro build completo do `qemu-aarch64` passou em 02/11/2026** (run #15,
-  22 min 45 s de compilação, artefato publicado). O que falta é o segundo, para
-  provar o ccache.
-- **O X55 tem defconfig e fragmentos prontos, mas nunca compilou.** O que falta
-  é código e layout, não configuração: `rocknix-joypad` (driver fora da árvore),
-  os patches de DTS, o `rtl8821cs_config.bin` de 25 bytes e o `genimage` da
-  imagem de cartão. Ver `device/powkiddy x55/README.md`.
+**Estado do CI no fim desta sessão (18 execuções do build):**
+
+| Run | O quê | Resultado |
+| --- | --- | --- |
+| #15 | push, `qemu-aarch64` | **sucesso** — 22 min 45 s, artefato publicado |
+| #16 | push, `qemu-aarch64` | **cancelado** pelo push seguinte (rodava com cache quente) |
+| #17 | dispatch, `powkiddy-x55` | **falhou em 1 s** no `discover` — bug do `allow_draft`, corrigido em `d9e81aa` (§12.5) |
+| #18 | push `d9e81aa`, `qemu-aarch64` | em andamento no fim da sessão |
+
+- **X55 nunca compilou.** A primeira tentativa morreu antes de compilar (bug do
+  `allow_draft`, não do aparelho). Falta reenviar o dispatch com
+  `device=powkiddy-x55` e `allow_draft=true`.
+- **ccache ainda sem prova de acerto**: o run #15 salvou o cache pela primeira
+  vez, e o #16 — que provaria — foi cancelado. O #18 repete o teste.
+- **O X55 ainda não tem `rocknix-joypad`, patches de DTS, `rtl8821cs_config.bin`
+  nem `genimage`.** É código e layout, não configuração. Ver
+  `device/powkiddy x55/README.md`.
 - `/etc/inittab` **não** tem a linha de `respawn` do `giochi-init`: o script está
   no rootfs e ninguém o chama (§11).
 - `giochi-controllers` (configurador de controles) não existe: só o desenho, em
@@ -137,6 +153,7 @@ Giochi system/
 │   │       └── giochi-selftest        # diagnóstico do aparelho até o render 3D
 │   ├── qemu-aarch64/                  # device de referência (habilitado)
 │   ├── powkiddy x55/                  # RK3566 — draft
+│   │   ├── defconfig                  # base Buildroot (o que bootou no antecessor)
 │   │   ├── device.json, buildroot.fragment, linux.fragment, buttons.map
 │   │   └── README.md, rootfs-overlay/
 │   ├── powkiddy x35s/                 # RK3326 — draft
@@ -258,21 +275,22 @@ que torna a instalação do `/etc/inittab` uma decisão em aberto (§11).
   desenvolvimento.
 - Artefatos: 14 dias.
 
-### Histórico (02/11/2026)
+### Histórico (02/11/2026 — 00h10 UTC de 03/11)
 
-Havia **15 execuções** do build. As relevantes:
+**18 execuções** do build. As relevantes:
 
-| Run | Commit | Resultado |
-| --- | --- | --- |
-| 13 | `5d1a1c0` selftest | **cancelado** (push novo) |
-| 14 | `55d4345` perf/cache | **falhou** — passo *Build image* morreu em **3 s** |
-| 15 | `80e58ee` sem KMSCUBE | **sucesso** — 22 min 45 s de compilação, artefato `giochi-system-qemu-aarch64` publicado |
+| Run | Commit | Evento | Resultado |
+| --- | --- | --- | --- |
+| 13 | `5d1a1c0` selftest | push | **cancelado** (push novo) |
+| 14 | `55d4345` perf/cache | push | **falhou** — *Build image* morreu em **3 s** |
+| 15 | `80e58ee` sem KMSCUBE | push | **sucesso** — 22 min 45 s, artefato publicado |
+| 16 | `e980699` X55 | push | **cancelado** pelo push seguinte (rodava com cache quente) |
+| 17 | `e980699` X55 | **dispatch** | **falhou em 1 s** — `discover`, bug do `allow_draft` (§12.5) |
+| 18 | `d9e81aa` fix | push | em andamento no fim da sessão |
 
-O primeiro build completo do pipeline **passou**. O que ele provou: Buildroot
-2024.02 baixa, extrai, aplica defconfig, `prepare-config` mescla, `olddefconfig`
-roda, `assert-config` aprova, o `make` compila e os artefatos com `SHA256SUMS`
-sobem. Continua sem prova o **ccache acertar na segunda vez** (o run 15 foi o
-primeiro com cache salvo).
+O build do run 15 **passou** e provou o pipeline inteiro: Buildroot 2024.02
+baixa, extrai, aplica defconfig, `prepare-config` mescla, `olddefconfig` roda,
+`assert-config` aprova, o `make` compila e os artefatos com `SHA256SUMS` sobem.
 
 **A falha de 3 s do run 14 não foi diagnosticada.** Um build que morre em 3 s não
 chegou a compilar: os candidatos são a checagem de espaço livre, um `curl` que
@@ -288,14 +306,16 @@ si (§12.4), mas provavelmente **não** era a causa dos 3 s.
 
 ```bash
 node scripts/validate-devices.mjs
-node tests/run-all.mjs                          # 33 testes
+node tests/run-all.mjs                          # 36 testes
 node scripts/list-devices.mjs
 node scripts/list-devices.mjs --github-matrix
+node scripts/list-devices.mjs --github-matrix --device powkiddy-x55 --allow-draft
 node scripts/device-info.mjs qemu-aarch64 json
 node scripts/dtb-inspect.mjs device/r35s/dts/rk3326-gameconsole-r36s.dtb joypad
 node scripts/dtb-buttons.mjs <arquivo.dtb> --out device/r35s/buttons.map
 node scripts/dtb-catalog.mjs                    # regenera docs/rk3326-catalog.*
 bash scripts/build-device.sh qemu-aarch64       # só em Linux/CI
+ALLOW_DRAFT=1 bash scripts/build-device.sh powkiddy-x55   # rascunho, de propósito
 ```
 
 **Não use `node --test tests/`:** o runner spawna um processo por arquivo e sob
@@ -311,11 +331,11 @@ Variáveis do build: `BUILDROOT_VERSION`, `ROOT_PASSWORD` (8–128; letras, núm
 
 ## 10. Testes
 
-`node tests/run-all.mjs` → **33/33**:
+`node tests/run-all.mjs` → **36/36**:
 
 | Arquivo | Testes | Cobre |
 | --- | --- | --- |
-| `tests/devices.test.mjs` | 10 | índice, schema, pastas com espaço, matriz, draft habilitado |
+| `tests/devices.test.mjs` | 13 | índice, schema, pastas com espaço, matriz, draft habilitado, `allowDraft` por id vs `all`, mensagem de recusa |
 | `tests/assert-config.test.mjs` | 12 | símbolo que sobrevive, desaparece, cai `=y`→`=m`, pedido-desligado-veio-ligado, `allow-drop`, aspas |
 | `tests/fdt.test.mjs` | 11 | parse de DTB, gpio-keys, adc-joystick, `buttons.map`, truncado/ inválido |
 
@@ -415,6 +435,30 @@ depende de mesa3d (GBM + OpenGL ES + libdrm). Ficou fora do fragmento comum, e o
 assumir que funciona. Provar 3D exige ligar a pilha no fragmento **do aparelho**
 (virtio-gpu no QEMU, panfrost no RK3566, Mali-G31 no RK3326).
 
+### 12.5 Entrada `boolean` do Actions chega como string
+
+`workflow_dispatch` com `type: boolean` entrega `github.event.inputs.*` como
+**string**. E em expressão do Actions, comparar tipos diferentes faz coerção
+numérica — então:
+
+```yaml
+# ERRADO: dá false mesmo com a caixa marcada
+ALLOW_DRAFT: ${{ github.event.inputs.allow_draft == 'true' && '1' || '0' }}
+```
+
+Resultado medido no run #17: `ALLOW_DRAFT=0` sempre, o `discover` recusou
+`powkiddy-x55` como desabilitado e o build morreu em **1 s**, antes de compilar
+qualquer coisa. O sintoma (`Dispositivo desabilitado`) aponta para o aparelho e a
+causa estava no YAML.
+
+Duas defesas, as duas aplicadas:
+
+1. Entrada que vale como flag usa **`type: choice`** com `false`/`true` — string
+   de verdade, e aparece como lista em vez de caixa que passa despercebida.
+2. Quem **lê** a variável normaliza `1|true|yes|on` (`list-devices.mjs` e
+   `build-device.sh`), porque o mesmo valor chega do CI como texto e da mão de
+   quem roda local.
+
 ## 13. Aparelhos
 
 | ID | Pasta | SoC | Arch | Status | Falta |
@@ -436,10 +480,11 @@ O R35S é o que está mais avançado nisso: o DTB real está versionado em
 1. **Rodar o build de novo** para provar que o ccache acerta (o run #15 foi o
    primeiro com cache salvo; hoje não há prova).
 2. **Ligar a camada de boot** (§11): falta só a linha do `inittab`.
-3. **Tentar o build do `powkiddy-x55` no CI** — `device: powkiddy-x55` +
-   `allow_draft: true`. É o primeiro teste real do `defconfig` e do fragmento de
-   kernel: o `assert-config` vai listar qualquer símbolo que não exista no
-   2024.02.
+3. **Reenviar o build do `powkiddy-x55` no CI** — `device: powkiddy-x55` +
+   `allow_draft: true` (agora é lista, não caixa). A tentativa anterior morreu no
+   `discover` por causa do bug do `allow_draft` (§12.5) e **não** testou nada do
+   aparelho. É o primeiro teste real do `defconfig` e do `linux.fragment`: o
+   `assert-config` vai listar qualquer símbolo que não exista no 2024.02.
 4. **`genimage` do X55**: hoje o build entrega `Image`, `rootfs.ext4`,
    `idbloader.img` e `u-boot.itb` soltos, não uma imagem de cartão.
 5. **`rocknix-joypad` + shim `input-polldev` + patches de DTS** (F2/F3/F4):
@@ -493,18 +538,36 @@ tem precedência histórica e a divergência precisa ser resolvida explicitament
 
 ## 18. Como retomar
 
+Ordem sugerida para a próxima sessão:
+
 ```bash
 cd "C:\Users\Jussara dias\Desktop\plataforma sistema\Giochi system"
-node scripts/validate-devices.mjs
-node tests/run-all.mjs
+node scripts/validate-devices.mjs      # 6 devices, 1 habilitado
+node tests/run-all.mjs                 # 36/36
 node scripts/list-devices.mjs --github-matrix
 ```
 
-Estado do Git (nesta revisão): `main` limpo, sincronizado com `origin/main`,
-remoto `https://github.com/xtrempkch-droid/GIOCHI-SYSTEM.git`.
+Depois, no GitHub (não há como disparar dispatch sem token daqui):
 
-Build real: só em Linux/WSL2 com caminho sem espaços, ou pelo GitHub Actions
-(Actions → *Build Giochi System ARM64* → `device=qemu-aarch64`, `arch=arm64`).
+1. Actions → *Build Giochi System ARM64* → Run workflow
+2. `device: powkiddy-x55`, `allow_draft: true`
+3. Se falhar, o passo que interessa é o **Build image**, e a mensagem do
+   `assert-config` vem com o nome do símbolo. Sem token, `GET
+   /actions/jobs/<id>/logs` devolve 403 — leia pela interface.
+
+Estado do Git nesta revisão: `main` limpo, sincronizado com `origin/main`
+(`d9e81aa`), remoto `https://github.com/xtrempkch-droid/GIOCHI-SYSTEM.git`.
+
+Build real: só em Linux/WSL2 com caminho sem espaços (o script recusa caminho
+com espaço), ou pelo GitHub Actions.
+
+### O que NÃO fazer sem pensar
+
+- **Não empurre em `device/**` ou `scripts/**` com build rodando:** o
+  `cancel-in-progress` mata o build em andamento.
+- **Não silencie `assert-config` com `allow-drop`** sem escrever o motivo.
+- **Não marque um aparelho como `ready`/`enabled`** antes de a imagem ter
+  bootado num aparelho de verdade.
 
 ## 19. O que não deve ser commitado
 
