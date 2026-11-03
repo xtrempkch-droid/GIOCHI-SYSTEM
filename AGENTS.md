@@ -1281,6 +1281,20 @@ módulos de dongle — sem isso, plugar um dongle é silêncio absoluto.
 aparelhos, `UNTESTED` para o 8188FU, `=m` e não `=y`, userspace de Wi-Fi no
 X35H, o `rtw88` **fora** do X35H, e o firmware declarado.
 
+## 12-B. Canal com o `Giochi app`
+
+`docs/mensagem-giochi-system.md` é **correio entre as duas equipes**, não
+documentação: mensagem com data, quem escreveu, e um assunto que precisa de
+resposta. O contrato técnico mora em `docs/launcher.md` e `docs/sistema-base.md`.
+
+Regra ao usar: acrescentar no fim, nunca editar mensagem da outra equipe; quando
+a conversa virar decisão, a decisão vai para o doc de referência e o canal só
+aponta o link. Sem isso o arquivo vira uma segunda fonte da verdade que diverge
+da primeira em silêncio — a mesma classe de problema do §12.1.
+
+Leia esse arquivo no início de uma sessão: o que está lá é o estado mais recente
+do que o app espera do sistema, e pode ter mudado depois deste documento.
+
 ## 13. Aparelhos
 
 | ID | Pasta | SoC | Arch | Status | Falta |
