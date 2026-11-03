@@ -29,7 +29,42 @@ test("GCC 15/C23: os host tools compilam em gnu17", async () => {
   //
   // Sem esta linha, build do zero quebra no primeiro pacote de host.
   const texto = await readFile(OVERRIDES, "utf8");
-  assert.match(texto, /^HOST_CFLAGS \+= -std=gnu17$/m);
+  assert.match(texto, /^HOST_CFLAGS \+= -std=gnu17\b/m);
+});
+
+test("as flags de C não vazam para o C++", async () => {
+  // ESTE é o teste que faltava, e a falha dele quebrou o CI.
+  //
+  // `HOST_CXXFLAGS += $(HOST_CFLAGS)` (package/Makefile.in:252) é expansão
+  // RECURSIVA: avalia no uso, depois do override. Então o `-std=gnu17` chegava
+  // no g++, que avisa "valid for C/ObjC but not for C++". Com `-Werror` — e o
+  // host-ccache compila assim — o aviso vira erro e o build morre:
+  //
+  //   cc1plus: error: command-line option '-std=gnu17' is valid for C/ObjC
+  //   but not for C++ [-Werror]
+  //   make[2]: *** [.../src/CMakeFiles/ccache_framework.dir/all] Error 2
+  //
+  // A correção tem de ser recursiva (`=`), não imediata (`:=`): com `:=` a
+  // variável congela e pacotes que a estendam depois perdem a extensão.
+  const texto = await readFile(OVERRIDES, "utf8");
+  assert.match(texto, /^override HOST_CXXFLAGS = \$\(filter-out/m);
+  assert.match(texto, /filter-out[\s\S]{0,200}-std=gnu17/);
+
+  // `:=` congelaria a variável — o oposto do que se quer.
+  assert.doesNotMatch(texto, /^override HOST_CXXFLAGS :=/m);
+});
+
+test("GCC 14+: declaração implícita é rebaixada a aviso nos host tools", async () => {
+  // O `host-libffi` 3.4.4 usa `open_temp_exec_file()` em `src/tramp.c` sem
+  // declaração — a função é `static` em `src/closures.c` e nunca chegou a um
+  // header. Até o GCC 13 era aviso; do 14 em diante é erro:
+  //
+  //   src/tramp.c:262:22: error: implicit declaration of function
+  //   'open_temp_exec_file' [-Wimplicit-function-declaration]
+  //
+  // `-std=gnu17` NÃO resolve: a mudança de severidade é do GCC, não do padrão.
+  const texto = await readFile(OVERRIDES, "utf8");
+  assert.match(texto, /-Wno-error=implicit-function-declaration/);
 });
 
 test("a correção de C23 vale só para HOST, não para o target", async () => {

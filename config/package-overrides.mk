@@ -34,28 +34,55 @@
 # qualquer posição da declaração. Era por isso que funcionava antes.
 #
 # Correção: compilar os tools de HOST em `gnu17`, que é o que a árvore espera.
-# Restrito a HOST de propósito: o cross-compile do target e o código que roda no
-# aparelho não são afetados de forma nenhuma.
 #
-# EFEITO COLATERAL MEDIDO, e ele existe: `HOST_CXXFLAGS += $(HOST_CFLAGS)` em
-# `package/Makefile.in:252` é expansão RECURSIVA, então avalia `$(HOST_CFLAGS)`
-# no momento do uso — depois deste arquivo. Resultado: o `-std=gnu17` chega
-# também nas compilações C++, e o g++ avisa uma vez por arquivo:
+# ── EFEITO COLATERAL QUE EU NEGUEI, E QUE QUEBROU O CI ──────
 #
-#   cc1plus: warning: command-line option '-std=gnu17' is valid for C/ObjC but
-#   not for C++
+# A primeira versão desta linha dizia "restrito a HOST, o C++ não herda". Errado.
+# `HOST_CXXFLAGS += $(HOST_CFLAGS)` (`package/Makefile.in:252`) é expansão
+# RECURSIVA: avalia `$(HOST_CFLAGS)` no momento do uso, depois deste arquivo.
+# O `-std=gnu17` chegava no g++ e o g++ avisava:
 #
-# Medido neste projeto: **714 desses avisos** num build do zero. São inofensivos
-# — o g++ descarta a opção e segue com o padrão dele — mas é ruído que atrapalha
-# procurar erro de verdade no log. A tentativa óbvia de silenciar (tornar
-# `HOST_CXXFLAGS` imediata com `:=` e filtrar) CONGELA a variável e quebra
-# pacotes que a estendam depois, o que é pior que o ruído. Fica como está, com o
-# aviso esperado e documentado; se um dia incomodar, a solução é escopo por
-# pacote (`HOST_<PKG>_CONF_ENV`), não filtro global.
+#   cc1plus: warning: command-line option '-std=gnu17' is valid for C/ObjC
+#   but not for C++ [-Werror]
 #
-# Se um dia algum pacote de host exigir C23 de verdade, ele falha alto e a
-# exceção entra aqui, com o nome do pacote — não desmonte a linha.
-HOST_CFLAGS += -std=gnu17
+# Com `-Werror` — e o `host-ccache` compila assim — o aviso vira erro e o build
+# morre em `Args.cpp.o`, `AtomicFile.cpp.o`, `Config.cpp.o`, `Context.cpp.o`,
+# `Depfile.cpp.o`. Medido no CI. Não é cosmético.
+#
+# A correção não é filtrar depois: é nunca deixar vazar. Como `HOST_CXXFLAGS` já
+# é recursiva, redefini-la recursivamente (com `=`, NÃO `:=`) mantém a avaliação
+# tardia e só remove as flags que são de C:
+#
+#   override HOST_CXXFLAGS = $(filter-out <flags de C>,$(HOST_CFLAGS))
+#
+# `=` e não `:=` de propósito: com atribuição imediata a variável CONGELA no
+# valor de agora e pacotes que a estendam depois perdem a extensão — trocaria um
+# erro visível por um comportamento errado silencioso, que é pior.
+#
+# ── SEGUNDA ARMADILHA: GCC 14+ trata declaração implícita como ERRO ─────────
+#
+# `host-libffi` 3.4.4 usa `open_temp_exec_file()` em `src/tramp.c` sem
+# declaração — a função é `static` em `src/closures.c` e nunca chegou a um
+# header. Até o GCC 13 isso era um aviso; do GCC 14 em diante é erro:
+#
+#   src/tramp.c:262:22: error: implicit declaration of function
+#   'open_temp_exec_file' [-Wimplicit-function-declaration]
+#
+# Note que `-std=gnu17` NÃO resolve isto: a mudança de severidade é do GCC, não
+# do padrão de C. Downgrade explícito, só nos tools de host:
+#
+#   -Wno-error=implicit-function-declaration
+#
+# Escolha consciente: o código é de terceiro, o erro é latente desde sempre
+# (a função só falharia se a assinatura divergisse), e o aparelho não roda nada
+# disto. Se um dia o libffi for atualizado para uma versão que declare a função,
+# esta flag sai.
+HOST_CFLAGS += -std=gnu17 -Wno-error=implicit-function-declaration
+
+# As duas flags acima são de C. Removidas do C++ para não virarem erro sob
+# `-Werror`. `=` (recursiva) mantém a avaliação tardia — ver comentário acima.
+override HOST_CXXFLAGS = $(filter-out \
+	-std=gnu17 -Wno-error=implicit-function-declaration,$(HOST_CFLAGS))
 
 # ── strace 6.7 ───────────────────────────────────────────────
 # Com `BR2_KERNEL_HEADERS_AS_KERNEL=y` e kernel 6.12, o strace 6.7 morre numa

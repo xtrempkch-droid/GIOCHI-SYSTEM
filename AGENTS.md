@@ -1406,22 +1406,59 @@ arquivo é incluído na linha 528, depois de `package/Makefile.in` (507), então
 `+=` soma em vez de ser apagado — ao contrário do caso do strace (§12.7), que
 precisa de `override`.
 
-**Efeito colateral medido, porque eu o neguei primeiro.** Escrevi que
-`HOST_CXXFLAGS` não herda o acréscimo. Herda: `HOST_CXXFLAGS += $(HOST_CFLAGS)`
-(`package/Makefile.in:252`) é expansão **recursiva**, então avalia
-`$(HOST_CFLAGS)` no momento do uso — depois deste arquivo. O g++ recebe
-`-std=gnu17` e avisa uma vez por arquivo:
+#### O efeito colateral que eu neguei — e que quebrou o CI
+
+Escrevi primeiro que `HOST_CXXFLAGS` não herdava o acréscimo, e que os avisos do
+g++ eram "inofensivos, só ruído". **As duas afirmações estavam erradas**, e o CI
+provou em um build:
 
 ```text
-cc1plus: warning: command-line option '-std=gnu17' is valid for C/ObjC but not for C++
+cc1plus: error: command-line option '-std=gnu17' is valid for C/ObjC but not for C++ [-Werror]
+cc1plus: all warnings being treated as errors
+make[2]: *** [src/CMakeFiles/ccache_framework.dir/all] Error 2
+make[1]: *** [package/pkg-generic.mk:283: .../host-ccache-4.8.2/.stamp_built] Error 2
 ```
 
-Medido: **714 avisos** num build do zero. Inofensivos (o g++ descarta a opção e
-segue com o padrão dele), mas atrapalham `grep error:` no log. A tentativa óbvia
-de silenciar — `HOST_CXXFLAGS := $(filter-out ...)` — **congela** a variável e
-quebra pacotes que a estendam depois; ruído é menos ruim que isso. Fica
-documentado como esperado. Se incomodar, a saída é escopo por pacote
-(`HOST_<PKG>_CONF_ENV`), nunca filtro global.
+Duas coisas que eu não tinha pesado:
+
+1. `HOST_CXXFLAGS += $(HOST_CFLAGS)` (`package/Makefile.in:252`) é expansão
+   **recursiva**, então avalia `$(HOST_CFLAGS)` no momento do uso — **depois**
+   deste arquivo. Herda sim.
+2. Aviso só é inofensivo sem `-Werror`. O `host-ccache` compila com `-Werror`, e
+   ali o aviso vira erro em cinco arquivos de uma vez.
+
+Correção: redefinir `HOST_CXXFLAGS` de forma **recursiva** (`=`, nunca `:=`),
+removendo só as flags que são de C:
+
+```make
+override HOST_CXXFLAGS = $(filter-out -std=gnu17 -Wno-error=implicit-function-declaration,$(HOST_CFLAGS))
+```
+
+`:=` congelaria a variável no valor daquele instante e pacotes que a estendam
+depois perderiam a extensão — trocaria um erro visível por um comportamento
+errado e silencioso, que é pior. Verificado com `make -p`:
+
+```text
+HOST_CFLAGS  = -O2 -I.../host/include -std=gnu17 -Wno-error=implicit-function-declaration
+HOST_CXXFLAGS = -O2 -I.../host/include          ← idêntico ao original
+```
+
+#### Terceira armadilha: GCC 14+ trata declaração implícita como erro
+
+`host-libffi` 3.4.4 usa `open_temp_exec_file()` em `src/tramp.c` sem declaração —
+a função é `static` em `src/closures.c` e nunca chegou a um header. Até o GCC 13
+isso era aviso; do 14 em diante é erro:
+
+```text
+src/tramp.c:262:22: error: implicit declaration of function 'open_temp_exec_file'
+  [-Wimplicit-function-declaration]
+make[1]: *** [package/pkg-generic.mk:283: .../host-libffi-3.4.4/.stamp_built] Error 2
+```
+
+**`-std=gnu17` não resolve isto** — a mudança de severidade é do GCC, não do
+padrão de C. Downgrade explícito, também só nos tools de host:
+`-Wno-error=implicit-function-declaration`. Sai da lista quando o libffi for
+atualizado para uma versão que declare a função.
 
 **Por que o CI não reproduz:** o runner do `ubuntu-24.04` traz GCC 13/14, que
 ainda compila em `gnu17`. Verde no CI não prova build limpo em máquina nova — é o
