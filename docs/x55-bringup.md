@@ -172,6 +172,48 @@ O que faltou para transferir: o host não tem IPv4 na interface nova (sem `sudo`
 para `ip addr add`) e o aparelho não ganhou rota IPv6 para o link. Com um IPv4
 nos dois lados, é o caminho mais rápido — o link é USB 2.0.
 
+## Modo Maskrom: quando o BootROM não lê o cartão
+
+Sintoma medido em 03/11/2026, ao testar a imagem de cartão pronta: o aparelho
+apareceu no host como
+
+```text
+Bus 002 Device 008: ID 2207:350a Fuzhou Rockchip Electronics Company
+```
+
+`2207:350a` é o **Maskrom** do RK3566 — o BootROM não achou um loader válido no
+cartão e caiu no modo de recuperação por USB. Consequência prática: **a falha é
+anterior ao kernel**, então nenhum ajuste de DTS, driver ou rootfs explica ou
+conserta esse caso.
+
+O que verificar, nesta ordem:
+
+1. **Cartão não estava no aparelho, ou entrou pela metade.** O Maskrom persiste
+   até um ciclo de energia; inserir o cartão depois não reinicia o BootROM.
+2. **Cartão SDXC grande demais para este BootROM.** O cartão que bootou é um
+   `SE32G` de 29,7 GiB. O cartão gravado nesta sessão é de **116 GiB** (SDXC) e
+   nunca bootou no aparelho — o mesmo conteúdo, byte a byte, está nos dois
+   formatos de firmware que o aparelho aceitou:
+   - setor 64: `52 4b 4e 53 00 00 00 00 80 01 02 00 01 00 00 00` (`RKNS`)
+   - setor 16384: `d0 0d fe ed 00 00 0e 00 …` (FIT)
+
+   Como esses são exatamente os bytes do cartão que funcionou, um Maskrom com
+   este cartão aponta para **compatibilidade do cartão**, não para o conteúdo.
+3. **Ciclo de energia de verdade.** Desligar e religar pelo botão (não reset por
+   software): o Maskrom só sai assim.
+
+Para capturar o próximo boot sem adivinhar:
+
+```bash
+docker run -d --name x55-serial --restart unless-stopped --device=/dev/ttyUSB0 \
+  -v "$HOME/.cache/giochi-system/serial:/work/log" --entrypoint python3 \
+  giochi-serial:1 /work/serial-log.py /dev/ttyUSB0 1500000 /work/log/boot-novo.log
+```
+
+O log traz a sequência `U-Boot SPL` → `U-Boot` → kernel. Se ele começar com
+`RKNS`/`d0 0d fe ed`, o firmware foi encontrado; se ficar vazio e o host mostrar
+`2207:350a`, o BootROM não leu o cartão.
+
 ## O que ainda falta (ordem de risco)
 
 1. **`rocknix-joypad`** — driver fora da árvore. Sem ele, **16 dos 17 botões não
