@@ -85,9 +85,16 @@ Cada parâmetro tem motivo medido:
 
 ## Diagnóstico do aparelho (`giochi-selftest`)
 
-```text
-  PASS 15 · WARN 5 · FAIL 1 · SKIP 2
-```
+Evolução medida, mesma máquina, com as correções entrando uma a uma:
+
+| Build | Resultado | O que mudou |
+| --- | --- | --- |
+| primeira imagem que bootou | `PASS 15 · WARN 5 · FAIL 1 · SKIP 2` | sem patch de DTS, amplificador `=m` |
+| com `patches/0001-…-dts.patch` e amplificador `=y` | `PASS 17 · WARN 4 · FAIL 0 · SKIP 2` | `hwrng` e placa de som aparecem |
+| com `S15modules` (autoload dos módulos) | **`PASS 18 · WARN 3 · FAIL 0 · SKIP 2`** | `wlan0` sobe no boot |
+
+O boot também caiu de **11,7 s para 2,1 s** até o `sshd` subir: com o `&rng
+okay`, o `crng` está pronto quando o userspace começa, e nada espera entropia.
 
 ### Passou
 
@@ -104,11 +111,45 @@ Cada parâmetro tem motivo medido:
 Ou seja: **tela, backlight, armazenamento, console, volume e energia
 funcionam**. Era o que faltava para o aparelho sair do console.
 
-### Falhou
+### Falhou (antes das correções)
 
 | Item | Causa medida | Correção aplicada |
 | --- | --- | --- |
-| áudio | `--- no soundcards ---`; o card `rk817_ext` declara `aux-devs = <&spk_amp>` e o amplificador estava `CONFIG_SND_SOC_SIMPLE_AMPLIFIER=m`, que não carrega (sem autoload por modalias) | `=y` no `linux.fragment` |
+| áudio | `--- no soundcards ---`; o card `rk817_ext` declara `aux-devs = <&spk_amp>` e o amplificador estava `CONFIG_SND_SOC_SIMPLE_AMPLIFIER=m`, que não carrega (sem autoload por modalias) | `=y` no `linux.fragment` — hoje `[PASS] placas de som: 0 [rk817ext]` |
+| entropia | `rng@fe388000` nasce `disabled` no `rk356x.dtsi`; o RK3566 não herda o `okay` do `rk3568.dtsi` | `&rng { status = "okay" }` no patch de DTS — hoje `[PASS] hwrng: rockchip-rng` |
+| rede | módulos `=m` sem autoload: o rootfs do Buildroot **não tem** `/etc/modules` nem `modules-load` | `rootfs-overlay/etc/init.d/S15modules` — hoje `[PASS] interfaces: wlan0` |
+
+### Wi-Fi validado
+
+Depois do `S15modules`, `rtw88_8821cs` carrega no boot, baixa o firmware
+(`Firmware version 24.11.0`) e cria `wlan0` com MAC real. O SDIO sobe em
+**SDR50** (`mmc3: new ultra high speed SDR50 SDIO card`) — no antecessor era só
+High Speed, o `sd-uhs-sdr50` do patch de DTS fez diferença.
+
+`iw dev wlan0 scan` no aparelho devolveu redes reais:
+
+```text
+SSID: Kill.exe
+	signal: -24.00 dBm
+```
+
+Ou seja: **o rádio funciona**. O `rtl8821cs_config.bin` de 25 bytes continua
+pendente para estabilidade (aparecem `sdio read32 failed (0xf0): -110` durante o
+probe), mas o caminho ponta a ponta está provado.
+
+### Bluetooth: falta firmware
+
+O `hci_uart` carrega e o chip responde (`hci0: RTL: examining hci_ver=08
+lmp_subver=8821`), mas o driver pede um arquivo que não existe no
+`linux-firmware`:
+
+```text
+bluetooth hci0: Direct firmware load for rtl_bt/rtl8821cs_fw.bin failed with error -2
+```
+
+O pacote traz `rtl8821c_fw.bin` (Wi-Fi) e `rtl8821c_config.bin`, **não**
+`rtl8821cs_fw.bin` (Bluetooth). É exatamente o buraco documentado no README do
+aparelho, agora com o nome do arquivo confirmado no aparelho.
 
 ### Avisos com causa conhecida
 
@@ -172,6 +213,45 @@ O que faltou para transferir: o host não tem IPv4 na interface nova (sem `sudo`
 para `ip addr add`) e o aparelho não ganhou rota IPv6 para o link. Com um IPv4
 nos dois lados, é o caminho mais rápido — o link é USB 2.0.
 
+## Menu extlinux sem `TIMEOUT`: o aparelho não boota sozinho
+
+Bug real, encontrado com a primeira imagem de cartão: o `extlinux.conf` gerado
+tinha `default giochi` e mais nada de tempo. O U-Boot encontrava a entrada,
+imprimia
+
+```text
+Giochi System
+1:	giochi
+Enter choice:
+```
+
+e **parava ali**. Num handheld isso é indistinguível de "não bootou": a tela
+fica no console e ninguém está com a serial aberta para apertar Enter.
+
+Correção em `scripts/make-sd-image.sh`: `timeout 30` no `extlinux.conf`
+(a unidade é 1/10 s, então 3 s). Verificado no aparelho com `reboot`: o U-Boot
+escolhe a entrada sozinho e chega ao `login:` sem nenhuma tecla.
+
+Não use `prompt 0` para "resolver": ele remove o menu e tira a única forma de
+escolher outra entrada quando houver mais de uma.
+
+### Também não é bug: `Boot failed (err=-14)` antes do extlinux
+
+O log mostra, antes de achar a entrada boa:
+
+```text
+Scanning global bootmeth 'efi_mgr':
+No EFI system partition
+Loading Boot0000 'mmc 1' failed
+EFI boot manager: Cannot load any image
+Boot failed (err=-14)
+```
+
+É o `bootstd` tentando `efi_mgr` primeiro e falhando porque o cartão é MBR com
+FAT, não uma ESP. O `bootstd` segue para o próximo método (`extlinux`) e boota.
+Também aparece `Card did not respond to voltage select! : -110` — é o `mmc2`
+(eMMC), que este aparelho não tem. Nenhum dos dois precisa de correção.
+
 ## Modo Maskrom: quando o BootROM não lê o cartão
 
 Sintoma medido em 03/11/2026, ao testar a imagem de cartão pronta: o aparelho
@@ -190,10 +270,12 @@ O que verificar, nesta ordem:
 
 1. **Cartão não estava no aparelho, ou entrou pela metade.** O Maskrom persiste
    até um ciclo de energia; inserir o cartão depois não reinicia o BootROM.
-2. **Cartão SDXC grande demais para este BootROM.** O cartão que bootou é um
-   `SE32G` de 29,7 GiB. O cartão gravado nesta sessão é de **116 GiB** (SDXC) e
-   nunca bootou no aparelho — o mesmo conteúdo, byte a byte, está nos dois
-   formatos de firmware que o aparelho aceitou:
+2. **Cartão SDXC grande demais para este BootROM** (hipótese descartada depois:
+   o `SD128` de 116 GiB bootou normalmente). O cartão que bootou primeiro é um
+   `SE32G` de 29,7 GiB; o gravado é de **116 GiB** (SDXC). O Maskrom observado
+   apontava para o cartão, mas o teste seguinte com o cartão grande bootou — a
+   causa real era o cartão **fora do aparelho** no momento da energização. O
+   conteúdo, byte a byte, era correto nos dois:
    - setor 64: `52 4b 4e 53 00 00 00 00 80 01 02 00 01 00 00 00` (`RKNS`)
    - setor 16384: `d0 0d fe ed 00 00 0e 00 …` (FIT)
 
@@ -219,13 +301,14 @@ O log traz a sequência `U-Boot SPL` → `U-Boot` → kernel. Se ele começar co
 1. **`rocknix-joypad`** — driver fora da árvore. Sem ele, **16 dos 17 botões não
    funcionam**; só o volume responde (`gpio-keys`). O `assert-kernel-config`
    falha se alguém remover o `allow-drop` sem trazer o driver.
-2. **Validação do patch de DTS em hardware** — o build com
-   `patches/0001-giochi-system-x55-dts.patch` (HDMI off, SDIO `no-mmc/no-sd`,
-   `dma-names` do uart1, `&rng okay`) foi compilado e verificado no DTB gerado,
-   mas **não foi instalado no aparelho** nesta sessão. O boot validado usou o
-   DTB **sem** o patch.
-3. **`rtl8821cs_config.bin`** de 25 bytes, gerado — o do `linux-firmware` não tem
-   a entrada de offset `0x0c` e o `hci0` fica sem endereço MAC.
+2. **~~Validação do patch de DTS em hardware~~ — FEITO.** O patch
+   `patches/0001-giochi-system-x55-dts.patch` está no aparelho e os quatro
+   efeitos foram observados: `hwrng: rockchip-rng` (o `&rng okay`), SDIO em
+   SDR50, HDMI fora do `card` de display e `dma-names` aceito pelo uart1.
+3. **Firmware de Bluetooth do RTL8821CS.** O driver pede
+   `rtl_bt/rtl8821cs_fw.bin` e o `linux-firmware` só traz `rtl8821c_fw.bin`.
+   Sem ele o `hci0` não sobe. Junto com o `rtl8821cs_config.bin` de 25 bytes
+   (offset `0x0c`), é o último item de rádio.
 4. **`giochi-init` no `/etc/inittab`** — o script está na imagem e ninguém o
    chama; `giochi-selftest` avisa.
 5. **`genimage` dentro do Buildroot** — hoje a imagem de cartão é montada por

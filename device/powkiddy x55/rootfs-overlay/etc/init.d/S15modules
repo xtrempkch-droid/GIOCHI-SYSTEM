@@ -1,0 +1,37 @@
+#!/bin/sh
+#
+# Carrega os módulos que o hardware do X55 precisa e que o kernel entrega como
+# módulo (=m).
+#
+# Por que existe: o rootfs do Buildroot não tem `modules-load` nem `/etc/modules`
+# — nada faz autoload por modalias com mdev. Sem este script, `rtw88_8821cs` e a
+# pilha de Bluetooth ficam no disco e o aparelho boota sem rede, sem uma linha de
+# erro. Medido no X55: `ip link` mostrava só `lo` até um `modprobe` manual, e
+# aí `wlan0` aparecia com MAC válido (a8:4f:a4:c9:98:4b).
+#
+# Por que não `=y` no kernel: o fragmento já decidiu que esses drivers podem ser
+# módulo (o custo é diferente do PHY DSI, que precisa ser =y porque carrega antes
+# do controlador). Carregar por script mantém o kernel menor.
+
+load_module() {
+  modprobe "$1" 2>/dev/null && echo "  $1" || true
+}
+
+case "$1" in
+  start)
+    echo "Carregando módulos do X55:"
+    # Wi-Fi RTL8821CS por SDIO. Depende de /lib/firmware/rtw88/rtw8821c_fw.bin.
+    load_module rtw88_8821cs
+    # Bluetooth RTL8821CS por UART (3 fios, hci_h5).
+    load_module hci_uart
+    load_module rtl_bt
+    ;;
+  stop|restart|reload)
+    ;;
+  *)
+    echo "Uso: $0 {start|stop|restart}"
+    exit 1
+    ;;
+esac
+
+exit 0

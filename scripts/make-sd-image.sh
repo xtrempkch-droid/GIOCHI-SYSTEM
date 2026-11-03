@@ -236,9 +236,18 @@ mkdir -p "$MNT_BOOT/dtbs"
 cp -L "$DTB_FILE" "$MNT_BOOT/dtbs/$DTB_NAME.dtb"
 
 mkdir -p "$MNT_BOOT/extlinux"
+# TIMEOUT não é cosmético: sem ele o menu extlinux espera uma tecla para sempre
+# e o aparelho NÃO boota sozinho. Medido no X55 com a imagem anterior: U-Boot
+# achava o extlinux.conf, imprimia "Enter choice:" e ficava parado — num handheld
+# isso é o mesmo que não bootar.
+#
+# A unidade é 1/10 s: 30 = 3 s. Escolhido para dar tempo de ver o menu pelo
+# console sem atrasar o uso normal. NÃO use `prompt 0`: ele remove o menu e tira
+# a única forma de escolher outra entrada quando há mais de uma.
 cat >"$MNT_BOOT/extlinux/extlinux.conf" <<EOF
 default giochi
 menu title Giochi System
+timeout 30
 
 label giochi
     kernel /Image

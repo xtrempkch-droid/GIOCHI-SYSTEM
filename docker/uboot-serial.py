@@ -2,6 +2,12 @@
 """Sessão de comandos na console serial do aparelho (U-Boot ou shell Linux).
 
 Uso: uboot-serial.py <porta> <baud> <arquivo-de-log> <cmd1> [cmd2 ...]
+     uboot-serial.py <porta> <baud> <arquivo-de-log> @arquivo-de-comandos
+
+Com `@arquivo`, cada linha do arquivo é um comando. Existe porque a console
+serial tem buffer de linha curto: mandar um comando de 1 KB numa linha só faz o
+shell entrar em continuação (`>`) e a sessão trava. Em arquivo, cada linha fica
+abaixo do limite.
 
 Envia cada comando seguido de CR, espera o eco terminar e grava tudo no log.
 Não faz nada além de escrever linhas: quem decide o que é seguro é quem chama
@@ -16,7 +22,11 @@ import serial
 port = sys.argv[1]
 baud = int(sys.argv[2])
 log_path = sys.argv[3]
-commands = sys.argv[4:]
+if len(sys.argv) > 4 and sys.argv[4].startswith("@"):
+    with open(sys.argv[4][1:], encoding="utf-8") as source:
+        commands = [line.rstrip("\n") for line in source if line.strip()]
+else:
+    commands = sys.argv[4:]
 
 IDLE_AFTER_CMD = 2.5      # silêncio que consideramos "comando terminou"
 # Teto por comando. Precisa ser configurável porque `gzwrite` de um rootfs de

@@ -5,7 +5,9 @@ MIPI-DSI **720×1280**. É o único aparelho do projeto que já bootou em hardwa
 real — no antecessor `GIOCHI-KONSOL-OS`. Este diretório traz aquele
 conhecimento para cá.
 
-Status: **draft**. Não entra no CI até alguém validar a imagem no aparelho.
+Status: **draft** — mas **boota em hardware real**: tela 720x1280, áudio, Wi-Fi
+e console. Relatório medido em [`docs/x55-bringup.md`](../../docs/x55-bringup.md).
+Continua draft porque os botões do joypad ainda não existem.
 
 ## De onde veio cada coisa
 
@@ -41,7 +43,7 @@ copiado sem conferência, e o que não foi verificado está marcado como tal.
 | `linux.fragment` | símbolos `CONFIG_*` do kernel — painel, áudio, entrada, rádio |
 | `busybox.fragment` | desliga o applet `tc` do busybox, que não compila contra os headers do 6.12 |
 | `buttons.map` | nome lógico → código evdev (vira `/etc/giochi/buttons.map`) |
-| `rootfs-overlay/` | `motd` e `device-id` |
+| `rootfs-overlay/` | `motd`, `device-id` e `etc/init.d/S15modules` (autoload de `rtw88_8821cs`/`hci_uart`) |
 
 ## Três armadilhas que já custaram imagem quebrada
 
