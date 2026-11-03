@@ -34,9 +34,24 @@
 # qualquer posição da declaração. Era por isso que funcionava antes.
 #
 # Correção: compilar os tools de HOST em `gnu17`, que é o que a árvore espera.
-# Restrito a HOST de propósito — `HOST_CXXFLAGS` é montada com `+=` na linha 252
-# de `package/Makefile.in` e não herda este acréscimo, então C++ não muda, e o
-# cross-compile do target não é afetado de forma nenhuma.
+# Restrito a HOST de propósito: o cross-compile do target e o código que roda no
+# aparelho não são afetados de forma nenhuma.
+#
+# EFEITO COLATERAL MEDIDO, e ele existe: `HOST_CXXFLAGS += $(HOST_CFLAGS)` em
+# `package/Makefile.in:252` é expansão RECURSIVA, então avalia `$(HOST_CFLAGS)`
+# no momento do uso — depois deste arquivo. Resultado: o `-std=gnu17` chega
+# também nas compilações C++, e o g++ avisa uma vez por arquivo:
+#
+#   cc1plus: warning: command-line option '-std=gnu17' is valid for C/ObjC but
+#   not for C++
+#
+# Medido neste projeto: **714 desses avisos** num build do zero. São inofensivos
+# — o g++ descarta a opção e segue com o padrão dele — mas é ruído que atrapalha
+# procurar erro de verdade no log. A tentativa óbvia de silenciar (tornar
+# `HOST_CXXFLAGS` imediata com `:=` e filtrar) CONGELA a variável e quebra
+# pacotes que a estendam depois, o que é pior que o ruído. Fica como está, com o
+# aviso esperado e documentado; se um dia incomodar, a solução é escopo por
+# pacote (`HOST_<PKG>_CONF_ENV`), não filtro global.
 #
 # Se um dia algum pacote de host exigir C23 de verdade, ele falha alto e a
 # exceção entra aqui, com o nome do pacote — não desmonte a linha.

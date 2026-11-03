@@ -1401,11 +1401,27 @@ Correção em `config/package-overrides.mk`:
 HOST_CFLAGS += -std=gnu17
 ```
 
-Restrito a **HOST** de propósito: `HOST_CXXFLAGS` é montada com `+=` na linha 252
-de `package/Makefile.in` e não herda o acréscimo, então C++ não muda; e o
-cross-compile do target não é afetado. O arquivo é incluído na linha 528, depois
-de `package/Makefile.in` (507), então o `+=` soma em vez de ser apagado — ao
-contrário do caso do strace (§12.7), que precisa de `override`.
+Restrito a **HOST** de propósito: o cross-compile do target não é afetado. O
+arquivo é incluído na linha 528, depois de `package/Makefile.in` (507), então o
+`+=` soma em vez de ser apagado — ao contrário do caso do strace (§12.7), que
+precisa de `override`.
+
+**Efeito colateral medido, porque eu o neguei primeiro.** Escrevi que
+`HOST_CXXFLAGS` não herda o acréscimo. Herda: `HOST_CXXFLAGS += $(HOST_CFLAGS)`
+(`package/Makefile.in:252`) é expansão **recursiva**, então avalia
+`$(HOST_CFLAGS)` no momento do uso — depois deste arquivo. O g++ recebe
+`-std=gnu17` e avisa uma vez por arquivo:
+
+```text
+cc1plus: warning: command-line option '-std=gnu17' is valid for C/ObjC but not for C++
+```
+
+Medido: **714 avisos** num build do zero. Inofensivos (o g++ descarta a opção e
+segue com o padrão dele), mas atrapalham `grep error:` no log. A tentativa óbvia
+de silenciar — `HOST_CXXFLAGS := $(filter-out ...)` — **congela** a variável e
+quebra pacotes que a estendam depois; ruído é menos ruim que isso. Fica
+documentado como esperado. Se incomodar, a saída é escopo por pacote
+(`HOST_<PKG>_CONF_ENV`), nunca filtro global.
 
 **Por que o CI não reproduz:** o runner do `ubuntu-24.04` traz GCC 13/14, que
 ainda compila em `gnu17`. Verde no CI não prova build limpo em máquina nova — é o
