@@ -72,7 +72,7 @@ Repositório: `https://github.com/xtrempkch-droid/GIOCHI-SYSTEM` — branch `mai
 
 | Verificação | Resultado |
 | --- | --- |
-| `node tests/run-all.mjs` | **36/36** (13 devices + 12 assert-config + 11 fdt) |
+| `node tests/run-all.mjs` | **150/150** (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, devices 13, assert-config 12, fdt 11, …) |
 | `node scripts/validate-devices.mjs` | OK — 6 devices, 1 habilitado |
 | `node scripts/list-devices.mjs --github-matrix` | matriz com `qemu-aarch64` |
 | matriz com `--device powkiddy-x55 --allow-draft` | devolve **só** o X55 |
@@ -1565,6 +1565,69 @@ tem precedência histórica e a divergência precisa ser resolvida explicitament
 
 ## 18. Como retomar
 
+### Estado no fim da sessão de 03/11/2026 — leia isto primeiro
+
+**A imagem do X55 com o `respawn` NÃO existe ainda.** O build foi interrompido de
+propósito, e o motivo é bom: ele passou por quatro falhas de ambiente que só
+aparecem em build do zero, e as quatro estão corrigidas e testadas — mas o build
+completo não chegou ao fim.
+
+| Item | Estado |
+| --- | --- |
+| Código e configuração | **pronto** — 150/150 testes, tudo commitado e no `origin` |
+| Imagem X55 com `respawn` | **não existe** — build parado em `host-tar` (~5 % do caminho) |
+| `work/` do X55 | preservado em `/tmp/giochi-system-work/powkiddy-x55` (88 MB) |
+| Cartão SD no leitor | **não gravado** — intocado, com a imagem velha |
+| Imagem X35H em `out/` | intacta, é a última que bootou e falou SSH |
+
+**Para retomar, um comando** (o `work/` já tem os 4 correções de host aplicadas
+e validadas — o log desta sessão mostra `0` avisos de C++ e `0` erros):
+
+```bash
+KEEP_WORK=1 ALLOW_DRAFT=1 bash scripts/build-device.sh powkiddy-x55
+```
+
+Antes de gravar qualquer cartão, a verificação que a equipe do app pediu — e que
+é barata:
+
+```bash
+debugfs -R "cat /etc/inittab" out/powkiddy-x55/rootfs.ext4 | grep giochi-init
+```
+
+Sem essa linha, a interface não sobe no boot e é exatamente o teste que eles não
+conseguem simular.
+
+### As quatro falhas de host, e por que a sessão parou aqui
+
+Todas são do AMBIENTE (GCC 15.2, CMake 4.2.3), não do projeto, e todas só
+aparecem em build do zero — CI verde não prova nada sobre elas. Detalhe em §12.32
+e §12.33; resumo:
+
+| Falha | Onde morreu | Correção |
+| --- | --- | --- |
+| CMake 4.x recusa mínimo 3.4 | `host-hiredis` | `CMAKE_POLICY_VERSION_MINIMUM=3.5` no `build-device.sh` |
+| C23 `[[nodiscard]]` inválido | `host-m4` | `HOST_CFLAGS += -std=gnu17` |
+| declaração implícita é erro no GCC 14+ | `host-libffi` | `-Wno-error=implicit-function-declaration` |
+| `-std=gnu17` em C++ com `-Werror` | `host-ccache` (**CI**) | `override HOST_CXXFLAGS = $(filter-out …)` |
+
+A última foi **causada por mim** e derrubou o CI: eu tinha escrito que as flags
+de C não vazavam para C++. Vazam, porque `HOST_CXXFLAGS += $(HOST_CFLAGS)` é
+expansão recursiva. Vale ler esse trecho do §12.33 antes de mexer nas flags de
+host de novo — a lição não é sobre flags, é sobre eu ter declarado "inofensivo"
+sem medir o build completo.
+
+### Pendências que não são de build
+
+1. **Três perguntas ao time do app, sem resposta:** Godot 4 Compatibility vs
+   Forward+; quanto de dados a loja precisa; Python vale o custo (eles já vetaram
+   `pygame` por licença — LGPL).
+2. **`gles-probe`** escrito e não executado. Precisa do aparelho ligado:
+   `bash scripts/gles-probe.sh powkiddy-x35h --run`
+3. **Partição de dados da loja** — eles pediram piso de 4 GiB + resto do cartão.
+   Não implementado; é mudança de particionamento e apaga o cartão.
+4. **Janela do chat: 08:00–18:50 (Brasília).** Fora dela não há troca de
+   mensagem. Ver [`docs/mensagem-giochi-system.md`](docs/mensagem-giochi-system.md).
+
 ### Disponibilidade dos aparelhos — pergunte antes
 
 | Aparelho | Estado | Consequência |
@@ -1580,7 +1643,7 @@ Ordem sugerida para a próxima sessão (nada aqui precisa da X55):
 
 ```bash
 node scripts/validate-devices.mjs      # 6 devices, 1 habilitado
-node tests/run-all.mjs                 # 107/107
+node tests/run-all.mjs                 # 150/150
 node scripts/list-devices.mjs --github-matrix
 ```
 
@@ -1592,8 +1655,8 @@ Depois, no GitHub (não há como disparar dispatch sem token daqui):
    `assert-config` vem com o nome do símbolo. Sem token, `GET
    /actions/jobs/<id>/logs` devolve 403 — leia pela interface.
 
-Estado do Git nesta revisão: `main` sincronizado com `origin/main` (`9eb3e6f`),
-remoto `https://github.com/xtrempkch-droid/GIOCHI-SYSTEM.git`. **Push por SSH**
+Estado do Git nesta revisão: `main` sincronizado com `origin/main`, remoto
+`https://github.com/xtrempkch-droid/GIOCHI-SYSTEM.git`. **Push por SSH**
 (`git@github.com:...`): o HTTPS não tem credencial no host e o push falha com
 `unable to get password from user`.
 
