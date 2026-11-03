@@ -91,12 +91,43 @@ test("o stack de texto NÃO está no fragmento comum", async () => {
   }
 });
 
-test("harfbuzz continua fora, e o motivo está escrito", async () => {
-  // SDL2_TTF faz `select FREETYPE`, mas NÃO liga harfbuzz: o `.mk` só passa
-  // --enable-harfbuzz quando BR2_PACKAGE_HARFBUZZ=y existe por conta própria.
-  // Para português não faz falta; para escrita complexa faz, e a falta não dá
-  // erro — sai com shaping errado. Documentado no defconfig de cada aparelho.
-  const x55 = await readFile(path.join(DEVICE_ROOT, "powkiddy x55/defconfig"), "utf8");
-  assert.doesNotMatch(x55, /^BR2_PACKAGE_HARFBUZZ=y$/m);
-  assert.match(x55, /harfbuzz NÃO vem/i);
+test("harfbuzz está ligado — SDL2_TTF não o puxa sozinho", async () => {
+  // ARMADILHA: SDL2_TTF faz `select FREETYPE`, mas NÃO liga harfbuzz — o `.mk`
+  // só passa --enable-harfbuzz quando BR2_PACKAGE_HARFBUZZ=y existe por conta
+  // própria. A falta não dá erro: o texto latino sai legível e o de script
+  // complexo sai com shaping errado (ligaduras trocadas, consoantes separadas).
+  //
+  // Exige C++ no toolchain (BR2_TOOLCHAIN_BUILDROOT_CXX), que a árvore já tem.
+  const aparelhos = await defconfigsComSdl2();
+  for (const { pasta, texto } of aparelhos) {
+    assert.match(
+      texto,
+      /^BR2_PACKAGE_HARFBUZZ=y$/m,
+      `${pasta}: falta HARFBUZZ — SDL2_TTF não o puxa e o shaping sai errado`,
+    );
+  }
+});
+
+test("harfbuzz não arrasta glib, cairo nem icu sem necessidade", async () => {
+  // As dependências do harfbuzz.mk são condicionais. Ligar glib/cairo/icu
+  // "por garantia" engorda a imagem sem o launcher usar nenhum dos três.
+  const aparelhos = await defconfigsComSdl2();
+  for (const { pasta, texto } of aparelhos) {
+    for (const pesado of ["BR2_PACKAGE_LIBGLIB2", "BR2_PACKAGE_CAIRO", "BR2_PACKAGE_ICU"]) {
+      assert.doesNotMatch(
+        texto,
+        new RegExp(`^${pesado}=y$`, "m"),
+        `${pasta}: ${pesado} entrou sem necessidade — harfbuzz não exige`,
+      );
+    }
+  }
+});
+
+test("o toolchain tem C++, sem o qual harfbuzz nem é oferecido", async () => {
+  // `harfbuzz/Config.in` depende de BR2_INSTALL_LIBSTDCPP. Sem ele o símbolo
+  // nem aparece, o olddefconfig descarta em silêncio e o assert-config reprova.
+  const aparelhos = await defconfigsComSdl2();
+  for (const { pasta, texto } of aparelhos) {
+    assert.match(texto, /^BR2_TOOLCHAIN_BUILDROOT_CXX=y$/m, `${pasta}: sem C++`);
+  }
 });

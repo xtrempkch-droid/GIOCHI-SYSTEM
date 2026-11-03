@@ -105,11 +105,19 @@ BR2_PACKAGE_SDL2_IMAGE=y
 #
 # ARMADILHA 1 — `BR2_PACKAGE_SDL2_TTF` não é opção do `sdl2`: é PACOTE à parte
 # (`package/sdl2_ttf/`). Ele faz `select BR2_PACKAGE_FREETYPE`, então o
-# rasterizador vem junto. Mas **harfbuzz NÃO vem**: o `.mk` só acrescenta
+# rasterizador vem. Mas **harfbuzz NÃO vem**: o `.mk` só acrescenta
 # `--enable-harfbuzz` quando `BR2_PACKAGE_HARFBUZZ=y` existe por conta própria.
-# Para português (Latim simples) não é necessário; para escrita complexa
-# (árabe, hindi, tailandês) é, e a falta não dá erro — o texto sai com
-# shaping errado.
+#
+# HarfBuzz é o motor de SHAPING: ligaduras, kerning contextual e a forma correta
+# dos scripts complexos. Sem ele o texto LATINO sai legível (por isso o
+# primeiro corte funcionou), mas sai errado em:
+#   - árabe, hebraico, hindi, tailandês, coreano (junção de consoantes)
+#   - ligaduras tipográficas (fi, fl, st) e kerning fino
+# Com seletor de idioma no app, é obrigatório.
+#
+# Custo: harfbuzz 8.3.0, exige C++ (`BR2_TOOLCHAIN_BUILDROOT_CXX=y`, já
+# ligado) e freetype (já vem). As outras dependências do `.mk` são
+# condicionais, então NÃO arrasta glib, cairo nem icu.
 #
 # ARMADILHA 2 — `BR2_PACKAGE_DEJAVU=y` sozinho NÃO instala fonte nenhuma.
 # O `dejavu.mk` começa com `DEJAVU_FONTS_INSTALL =` vazio e só preenche dentro
@@ -121,6 +129,7 @@ BR2_PACKAGE_SDL2_IMAGE=y
 # SDL2_ttf. Nesse caso as duas primeiras linhas só custam build; a fonte de
 # sistema continua fazendo falta para texto fora do Godot.
 BR2_PACKAGE_SDL2_TTF=y
+BR2_PACKAGE_HARFBUZZ=y
 BR2_PACKAGE_DEJAVU=y
 BR2_PACKAGE_DEJAVU_SANS=y
 

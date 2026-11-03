@@ -29,9 +29,19 @@ Configurado no `defconfig` de cada aparelho **com SDL2** (X55 e X35H):
 
 ```text
 BR2_PACKAGE_SDL2_TTF=y
+BR2_PACKAGE_HARFBUZZ=y
 BR2_PACKAGE_DEJAVU=y
 BR2_PACKAGE_DEJAVU_SANS=y
 ```
+
+As quatro bibliotecas que o launcher carrega, medidas na imagem:
+
+| Biblioteca | Estado |
+| --- | --- |
+| `libasound` (ALSA) | presente — `BR2_PACKAGE_ALSA_LIB` |
+| `libfreetype` | presente — `SDL2_TTF` faz `select` |
+| `libharfbuzz` | presente — e ligado no `SDL2_ttf` (ver armadilha 3) |
+| `libSDL2_ttf` | presente |
 
 ### Armadilha 1 — `SDL2_TTF` é pacote à parte, e `harfbuzz` não vem junto
 
@@ -72,9 +82,47 @@ launcher: TTF_OpenFont: Couldn't load font file
 
 A sub-opção da família é **obrigatória**. Aqui: `BR2_PACKAGE_DEJAVU_SANS=y`.
 
-`tests/launcher-deps.test.mjs` fecha as duas: exige que todo defconfig com
-`BR2_PACKAGE_SDL2=y` tenha os três símbolos, e que `DEJAVU` nunca apareça sem
-uma família.
+### Armadilha 3 — a dependência nova não reconfigura o pacote antigo
+
+Esta foi medida neste repositório e é a mais traiçoeira das três.
+
+Ligar `BR2_PACKAGE_HARFBUZZ=y` **não basta**. O `sdl2_ttf` já estava compilado
+de um build anterior, e o Buildroot **não reconfigura** pacote pronto só porque
+uma dependência apareceu. O estado ficou assim:
+
+```text
+/usr/lib/libharfbuzz.so.0                  ← instalada
+build/sdl2_ttf-2.22.0/config.log:
+    --disable-harfbuzz
+    TTF_USE_HARFBUZZ='0'                   ← ninguém usa
+```
+
+Build verde, biblioteca na imagem, e o recurso que motivou a mudança inativo.
+Nenhum gate pega: o símbolo no `.config` está certo.
+
+Correção — limpar o pacote **consumidor** e reconstruir:
+
+```bash
+rm -rf ~/.cache/giochi-system/work/<device>/build/build/sdl2_ttf-*
+```
+
+Depois: `TTF_USE_HARFBUZZ='1'` e
+
+```text
+readelf -d libSDL2_ttf-2.0.so.0 → NEEDED  libharfbuzz.so.0
+```
+
+Por isso o `giochi-selftest` **não** se contenta em ver a biblioteca presente:
+ele roda `readelf -d` no `SDL2_ttf` e avisa quando o harfbuzz não está ligado.
+Presença de `.so` não prova uso.
+
+Mesma regra do `KEEP_WORK`: seguro para depurar, perigoso quando muda **com o
+que** um pacote é compilado. `AGENTS.md` §12.29.
+
+`tests/launcher-deps.test.mjs` fecha as três: exige que todo defconfig com
+`BR2_PACKAGE_SDL2=y` tenha os quatro símbolos (`SDL2_TTF`, `HARFBUZZ`,
+`DEJAVU`, `DEJAVU_SANS`), que `DEJAVU` nunca apareça sem família, e que
+harfbuzz não arraste glib/cairo/icu sem necessidade.
 
 ### Por que estas linhas não estão no `config/common.fragment`
 

@@ -1158,6 +1158,47 @@ host, ou um serviço antes), o `mount` falha com
 `already mounted or mount point busy` — mensagem que não diz o motivo. O script
 agora reaproveita o ponto existente e **nunca desmonta o que não montou**.
 
+### 12.29 Build retomado não reconfigura pacote quando uma DEPENDÊNCIA é acrescentada
+
+O §12.27 cobre pacote **removido**. Este é o caso espelho, e é mais silencioso:
+um pacote que já foi compilado **não é reconfigurado** quando uma dependência
+nova aparece no `.config`.
+
+Medido ao ligar `BR2_PACKAGE_HARFBUZZ=y` com `KEEP_WORK=1`:
+
+```text
+.config:            BR2_PACKAGE_HARFBUZZ=y        ← correto
+/usr/lib:           libharfbuzz.so.0              ← instalada
+build/sdl2_ttf-2.22.0/config.log:
+    --disable-harfbuzz
+    TTF_USE_HARFBUZZ='0'                          ← o consumidor NÃO usa
+```
+
+`libharfbuzz` na imagem e `libSDL2_ttf` sem harfbuzz ao mesmo tempo: o build
+fica verde, o pacote novo está lá, e o recurso que motivou a mudança **não está
+ativo**. Não há `assert-config` que pegue isso — o símbolo está certo.
+
+Depois de limpar o pacote (`rm -rf build/sdl2_ttf-*`) e reconstruir:
+
+```text
+--enable-harfbuzz
+TTF_USE_HARFBUZZ='1'
+readelf -d libSDL2_ttf-2.0.so.0 → NEEDED  libharfbuzz.so.0
+```
+
+**Regra:** `KEEP_WORK=1` é seguro para depurar. Quando a mudança de configuração
+altera **com o que um pacote é compilado** (dependência, opção de configure,
+flags), limpe o pacote consumidor:
+
+```bash
+rm -rf ~/.cache/giochi-system/work/<device>/build/build/<pacote>-*
+```
+
+O `giochi-selftest` passou a checar a consequência em vez da causa: além de
+listar as cinco bibliotecas do launcher, ele roda `readelf -d` no
+`libSDL2_ttf` e avisa quando o harfbuzz **não** está ligado. É a única forma de
+ver isso no aparelho — a biblioteca presente não prova que alguém a usa.
+
 ## 13. Aparelhos
 
 | ID | Pasta | SoC | Arch | Status | Falta |

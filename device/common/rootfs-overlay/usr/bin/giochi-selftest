@@ -191,6 +191,56 @@ if [ -r /proc/meminfo ]; then
     pass "RAM: $(awk '/MemTotal/ {printf "%d MB", $2/1024}' /proc/meminfo)"
 fi
 
+# ── bibliotecas que o launcher carrega ───────────────────────
+#
+# Um `libSDL2_ttf` sem `libharfbuzz` por trás NÃO falha ao abrir: ele só faz
+# shaping errado, em silêncio. E um `libasound` ausente mata o launcher no
+# `dlopen` inicial, com mensagem que não diz qual biblioteca faltou.
+#
+# Estas quatro são as que o launcher precisa. A ordem importa: SDL2_ttf é
+# inútil sem freetype, então as duas são reportadas juntas.
+head2 "bibliotecas do launcher"
+
+MISSING_LIB=""
+for lib in libasound libfreetype libharfbuzz libSDL2-2.0 libSDL2_ttf; do
+    # O nome real tem versão (libharfbuzz.so.0), então procura o prefixo.
+    if ls /usr/lib/${lib}.so* /lib/${lib}.so* >/dev/null 2>&1; then
+        pass "$lib"
+    else
+        fail "$lib ausente — o launcher não inicia ou quebra em runtime"
+        MISSING_LIB="$MISSING_LIB $lib"
+    fi
+done
+
+# HarfBuzz ligado no SDL2_ttf? A biblioteca sozinha não prova nada: o
+# sdl2_ttf 2.22 é configurado com --disable-harfbuzz por padrão, e o
+# `BR2_PACKAGE_HARFBUZZ=y` só troca isso se o pacote for RECONFIGURADO —
+# num build retomado ele não é. Medido neste repositório: a lib estava na
+# imagem e o TTF_USE_HARFBUZZ continuava 0.
+if [ -r /usr/lib/libSDL2_ttf.so ] || ls /usr/lib/libSDL2_ttf-2.0.so.0 >/dev/null 2>&1; then
+    if command -v readelf >/dev/null 2>&1; then
+        if readelf -d /usr/lib/libSDL2_ttf-2.0.so.0 2>/dev/null | grep -q libharfbuzz; then
+            pass "SDL2_ttf com harfbuzz (shaping de script complexo ativo)"
+        else
+            warn "SDL2_ttf SEM harfbuzz — texto latino sai, script complexo sai errado"
+        fi
+    else
+        skip "sem readelf — não dá para provar que o SDL2_ttf usa harfbuzz"
+    fi
+fi
+
+# Fontes: o diretório existir não prova nada (dejavu.mk cria vazio sem família).
+FONTS=$(ls /usr/share/fonts/dejavu/*.ttf 2>/dev/null | wc -l)
+if [ "$FONTS" -gt 0 ]; then
+    pass "fontes: $FONTS arquivo(s) .ttf em /usr/share/fonts/dejavu"
+else
+    fail "nenhuma .ttf instalada — TTF_OpenFont falha e o launcher desenha vazio"
+fi
+
+if [ -r /proc/meminfo ]; then
+    pass "RAM: $(awk '/MemTotal/ {printf "%d MB", $2/1024}' /proc/meminfo)"
+fi
+
 # ── entrada ──────────────────────────────────────────────────
 head2 "entrada"
 
