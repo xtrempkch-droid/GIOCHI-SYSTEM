@@ -14,6 +14,7 @@
 - [Manifesto de dependências](dependencies-manifest.md) — contrato `forge.json` com o Giochi app.
 - [Mapas de botões](button-maps.md) — de onde vêm os códigos evdev de cada aparelho.
 - [Catálogo RK3326](rk3326-catalog.md) — 15 aparelhos extraídos de device tree.
+- `giochi-buttons` — ferramenta de teste de botões e eixos (`giochi-buttons --list`).
 - [`giochi-init`](giochi-init.md) — a camada de boot e o que falta para ligá-la.
 
 ## Estado atual

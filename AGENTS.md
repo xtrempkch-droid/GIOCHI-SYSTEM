@@ -116,6 +116,7 @@ O que passou e é o que importa para "sair do console":
 - **17 botões de gamepad** (`gpio-keys-control`, inclui BTN_MODE pelo patch 0002);
 - **4 eixos analógicos** (`adc-joystick`, ABS_X/Y/RX/RY) — exige `CONFIG_JOYSTICK_ADC`;
 - `gpio-keys-vol` e `/etc/giochi/buttons.map` (31 linhas);
+- **console rotacionado** para paisagem: `160x45` com `fbcon/rotate=3`;
 - bateria `40C`, UDC `fcc00000.usb`.
 
 As três falhas fechadas, cada uma com causa medida:
@@ -776,7 +777,30 @@ Correção: `rm -rf "$OVERLAY_STAGE"` antes de montar. Consequência para quem u
 `KEEP_WORK=1`: arquivo removido do overlay exige `target/` limpo (ou dirclean do
 pacote) para desaparecer de um `target/` já construído.
 
-### 12.19 `awk` do busybox não tem `strtonum`
+### 12.19 `fbcon=rotate:N` é ignorado em silêncio sem CONFIG_FRAMEBUFFER_CONSOLE_ROTATION
+
+Sintoma: console na vertical com texto deitado, **com `fbcon=rotate:3` já na
+linha de comando**. O painel da X55 é 720x1280 (retrato) e o console saía em
+`90x80` — orientação nativa do painel.
+
+Causa: `CONFIG_FRAMEBUFFER_CONSOLE_ROTATION` desligado. O kernel aceita o
+parâmetro, não aplica e **não avisa**. Nada tem a ver com o U-Boot.
+
+```text
+antes:  90x80    fbcon/rotate=0
+depois: 160x45   fbcon/rotate=3     (270° horário = 90° anti-horário)
+```
+
+`/sys/class/graphics/fb0/virtual_size` continua `720,1280` porque é o
+framebuffer físico; a rotação acontece na camada `fbcon`. A geometria que vale é
+a do `dmesg`: `frame buffer device NxM`.
+
+Lição de método: o teste certo olha o **resultado** (`fbcon/rotate` e geometria),
+não a intenção (o parâmetro na linha de comando). O `giochi-selftest` agora
+compara o `rotate` com o `modes` do DRM e avisa quando o painel é retrato e a
+rotação é 0.
+
+### 12.20 `awk` do busybox não tem `strtonum`
 
 O contador de bits do `giochi-selftest` usava `strtonum("0x" $i)`, que é extensão
 do **gawk**. No busybox awk a função não existe e a expressão devolve vazio: o
@@ -787,7 +811,7 @@ pesos — funciona em busybox, gawk e mawk.
 Regra ao escrever shell para este rootfs: o alvo é **busybox ash + busybox awk**,
 não bash + gawk.
 
-### 12.20 `BR2_TARGET_GENERIC_GETTY_BAUDRATE_*` reprograma a UART
+### 12.21 `BR2_TARGET_GENERIC_GETTY_BAUDRATE_*` reprograma a UART
 
 Um baud explícito no getty faz o getty **reprogramar** a UART para aquela
 velocidade, ignorando o que o kernel configurou. No X55 (console a 1500000), o

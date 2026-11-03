@@ -1,0 +1,251 @@
+#!/bin/sh
+#
+# giochi-buttons — testa os botões e eixos do aparelho, com nome de gente.
+#
+# Uso:
+#   giochi-buttons            # botões de gamepad + volume (17 + 2)
+#   giochi-buttons --axes     # só os eixos analógicos
+#   giochi-buttons --volume   # só volume (KEY_VOLUMEUP/DOWN)
+#   giochi-buttons --all      # um dispositivo por vez
+#   giochi-buttons --list     # o que existe e o que se espera pressionar
+#   giochi-buttons --raw      # evtest cru, sem tradução
+#
+# Por que existe: provar que um botão chega ao kernel com o código certo exige
+# ver EV_KEY. O `giochi-selftest` conta capacidades — sabe que o dispositivo
+# declara 17 teclas — mas não sabe se a tecla física está ligada no GPIO certo,
+# nem se o mapeamento do `buttons.map` corresponde ao que o jogo espera. Isso só
+# se responde apertando.
+#
+# Por que usa `evtest` como base, em vez de ler /dev/input direto: ele é o
+# utilitário upstream para exatamente isso, não faz buffering de saída
+# (`setbuf(stdout, NULL)` no fonte), então o evento aparece na hora — o que um
+# pipe comum com stdio bufferizado não faria. Aqui só traduzimos o código para o
+# nome lógico do `buttons.map` e contamos quantos faltam.
+
+set -u
+
+MAP=/etc/giochi/buttons.map
+EVTEST=evtest
+
+usage() {
+    sed -n '3,17p' "$0" | sed 's/^# \{0,1\}//'
+    exit "${1:-0}"
+}
+
+# Encontra o /dev/input/eventN cujo nome de dispositivo é exatamente o pedido.
+find_event() {
+    _want="$1"
+    for _dir in /sys/class/input/event*/device; do
+        [ -r "$_dir/name" ] || continue
+        _name=$(cat "$_dir/name" 2>/dev/null)
+        if [ "$_name" = "$_want" ]; then
+            printf '/dev/input/%s\n' "$(basename "$(dirname "$_dir")")"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Lista os nomes dos dispositivos de entrada, na ordem do sysfs.
+list_names() {
+    for _dir in /sys/class/input/event*/device; do
+        [ -r "$_dir/name" ] || continue
+        cat "$_dir/name" 2>/dev/null
+    done
+}
+
+# Traduz o fluxo do evtest.
+#
+# O `buttons.map` tem linhas `nome_logico = CODIGO # comentário`. Invertemos para
+# CODIGO -> nome_logico. O filtro `classe` decide o que conta como "esperado"
+# neste dispositivo: BTN_* para o gamepad, KEY_VOLUME* para o volume.
+translate() {
+    awk -v classe="$1" -v mapfile="$MAP" '
+        function human(code, name) {
+            if (name != "") return name
+            return "codigo " code
+        }
+        BEGIN {
+            esperados = 0
+            while ((getline linha < mapfile) > 0) {
+                sub(/#.*/, "", linha)
+                if (index(linha, "=") == 0) continue
+                split(linha, par, "=")
+                nome = par[1]
+                codigo = par[2]
+                gsub(/[ \t]/, "", nome)
+                gsub(/[ \t]/, "", codigo)
+                if (nome == "" || codigo == "") continue
+                # Só entradas de botão: o código é um nome evdev em maiúsculas.
+                if (codigo !~ /^([A-Z]+_)+[A-Z0-9]+$/) continue
+                porcodigo[codigo] = nome
+                if (classe == "gamepad" && codigo ~ /^BTN_/) {
+                    total++
+                    ord[total] = codigo
+                } else if (classe == "volume" && codigo ~ /^KEY_VOLUME/) {
+                    total++
+                    ord[total] = codigo
+                }
+            }
+            close(mapfile)
+            if (classe == "gamepad" || classe == "volume") {
+                printf "Esperando %d botão(ões). Cada um que responder reduz o que falta.\n", total
+                printf "Ctrl+C para sair.\n\n"
+            } else {
+                printf "Mova os eixos. Ctrl+C para sair.\n\n"
+            }
+        }
+        /-------------- SYN_REPORT/ { next }
+        /^Event:/ {
+            tipo = ""; codigo = ""; nomecodigo = ""; valor = ""
+            # A linha do evtest tem a forma:
+            #   Event: time T, type 1 (EV_KEY), code 304 (BTN_EAST), value 1
+            # Separar por ", " evita o erro de pegar o PRIMEIRO parêntese —
+            # que é o nome do TIPO (EV_KEY), não o do código. Era o que
+            # acontecia: todo evento virava "EV_KEY" e nenhum nome resolvia.
+            nalinha = split($0, campo, ", ")
+            for (i = 1; i <= nalinha; i++) {
+                if (match(campo[i], /^type [0-9]+/)) {
+                    tipo = substr(campo[i], 6) + 0
+                } else if (match(campo[i], /^code [0-9]+/)) {
+                    codigo = substr(campo[i], 6) + 0
+                    if (match(campo[i], /\(([A-Z0-9_]+)\)/)) {
+                        nomecodigo = substr(campo[i], RSTART + 1, RLENGTH - 2)
+                    }
+                } else if (match(campo[i], /^value /)) {
+                    valor = substr(campo[i], 7) + 0
+                }
+            }
+
+            if (tipo == 1) {
+                if (nomecodigo == "KEY_VOLUMEUP" || nomecodigo == "KEY_VOLUMEDOWN") {
+                    rotulo = porcodigo[nomecodigo]
+                    if (rotulo == "") rotulo = nomecodigo
+                } else {
+                    rotulo = human(codigo, porcodigo[nomecodigo])
+                }
+                if (valor == 1) {
+                    if (!(nomecodigo in visto)) {
+                        visto[nomecodigo] = 1
+                        vistos++
+                    }
+                    falta = total - vistos
+                    if (falta < 0) falta = 0
+                    if (classe == "axes") {
+                        printf "  %-10s pressionado\n", rotulo
+                    } else {
+                        printf "  [%2d/%2d] %-10s pressionado   (faltam %d)\n", vistos, total, rotulo, falta
+                    }
+                    if (classe != "axes" && total > 0 && vistos >= total) {
+                        printf "\n  Todos os %d responderam.\n\n", total
+                    }
+                    fflush()
+                } else if (valor == 0 && classe == "axes") {
+                    printf "  %-10s solto\n", rotulo
+                    fflush()
+                }
+            } else if (tipo == 3) {
+                if (nomecodigo == "ABS_X") eixo = "X  (esquerdo horizontal)"
+                else if (nomecodigo == "ABS_Y") eixo = "Y  (esquerdo vertical)"
+                else if (nomecodigo == "ABS_RX") eixo = "RX (direito horizontal)"
+                else if (nomecodigo == "ABS_RY") eixo = "RY (direito vertical)"
+                else eixo = "codigo " codigo
+                # Barra de 21 posicoes assumindo faixa 0..1023 (adc-joystick da X55).
+                pos = int(valor * 20 / 1023)
+                if (pos < 0) pos = 0
+                if (pos > 20) pos = 20
+                barra = ""
+                for (i = 0; i <= 20; i++) barra = barra (i == pos ? "#" : "-")
+                printf "  eixo %-22s %4d  [%s]\n", eixo, valor, barra
+                fflush()
+            }
+        }
+    '
+}
+
+# Roda o evtest e traduz. Usa um arquivo de estado para o resumo, porque o awk
+# pode ser interrompido pelo Ctrl+C e não teria como imprimir o que faltou.
+run_one() {
+    nome="$1"
+    classe="$2"
+    dev=$(find_event "$nome") || return 1
+
+    printf '== %s (%s) ==\n' "$nome" "$dev"
+    if [ ! -x "$EVTEST" ] && ! command -v "$EVTEST" >/dev/null 2>&1; then
+        echo "  evtest ausente na imagem (BR2_PACKAGE_EVTEST)." >&2
+        return 1
+    fi
+    "$EVTEST" "$dev" 2>/dev/null | translate "$classe"
+    return 0
+}
+
+modo="gamepad"
+for arg in "$@"; do
+    case "$arg" in
+        --axes) modo="axes" ;;
+        --volume) modo="volume" ;;
+        --all) modo="all" ;;
+        --list) modo="list" ;;
+        --raw) modo="raw" ;;
+        -h|--help) usage 0 ;;
+        *) echo "Opção desconhecida: $arg" >&2; usage 2 ;;
+    esac
+done
+
+case "$modo" in
+    list)
+        echo "Dispositivos de entrada:"
+        list_names | while IFS= read -r n; do echo "  - $n"; done
+        echo
+        echo "Botões mapeados em $MAP:"
+        if [ -r "$MAP" ]; then
+            # Separa o que é botão do que é parâmetro de eixo (`axis_x_min` e
+            # companhia): misturar os dois faz o mapa parecer ter 28 botões.
+            grep -vE '^[[:space:]]*#|^[[:space:]]*$' "$MAP" |
+                awk -F'=' '/=/{
+                    n = $1; c = $2
+                    sub(/#.*/, "", c)
+                    sub(/[ \t]+$/, "", n)
+                    gsub(/[ \t]/, "", c)
+                    if (n ~ /^axis_/) next
+                    printf "  %-14s %s\n", n, c
+                }'
+            AXES=$(grep -cE '^[[:space:]]*axis_[a-z]+_(min|max)' "$MAP" 2>/dev/null)
+            [ "${AXES:-0}" -gt 0 ] && echo "  (mais $AXES parâmetros de faixa/eixo, testados com --axes)"
+        else
+            echo "  $MAP ausente"
+        fi
+        ;;
+    raw)
+        dev=$(find_event "gpio-keys-control") || {
+            echo "gpio-keys-control não encontrado; veja --list" >&2
+            exit 1
+        }
+        exec "$EVTEST" "$dev"
+        ;;
+    axes)
+        run_one "adc-joystick" axes || {
+            echo "adc-joystick não encontrado." >&2
+            echo "Se os eixos não existem, falta CONFIG_JOYSTICK_ADC — ver kernel-required.txt." >&2
+            exit 1
+        }
+        ;;
+    volume)
+        run_one "gpio-keys-vol" volume
+        ;;
+    all)
+        run_one "gpio-keys-control" gamepad
+        echo
+        run_one "adc-joystick" axes
+        echo
+        run_one "gpio-keys-vol" volume
+        ;;
+    gamepad)
+        run_one "gpio-keys-control" gamepad || {
+            echo "gpio-keys-control não encontrado; veja --list" >&2
+            exit 1
+        }
+        ;;
+esac
+
+exit 0

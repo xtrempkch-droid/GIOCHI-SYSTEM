@@ -24,6 +24,10 @@ BR2_PACKAGE_CA_CERTIFICATES=y
 BR2_PACKAGE_LIBCURL=y
 BR2_PACKAGE_LIBCURL_CURL=y
 BR2_PACKAGE_DOSFSTOOLS=y
+# evtest: base da ferramenta `giochi-buttons` e do diagnóstico de entrada. Sem
+# ele não há como provar que um botão chega ao kernel com o código certo — o
+# `giochi-selftest` conta capacidades, mas não vê eventos.
+BR2_PACKAGE_EVTEST=y
 BR2_PACKAGE_E2FSPROGS=y
 BR2_PACKAGE_HTOP=y
 BR2_PACKAGE_LESS=y

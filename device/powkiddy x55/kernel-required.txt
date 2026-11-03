@@ -35,6 +35,10 @@ CONFIG_BACKLIGHT_CLASS_DEVICE=y
 CONFIG_BACKLIGHT_PWM=y
 CONFIG_PWM_ROCKCHIP=y
 CONFIG_DRM_FBDEV_EMULATION=y
+# Rotação do console: sem ela `fbcon=rotate:N` é ignorado em silêncio e o texto
+# sai deitado na orientação nativa do painel.
+CONFIG_FRAMEBUFFER_CONSOLE=y
+CONFIG_FRAMEBUFFER_CONSOLE_ROTATION=y
 
 # ── controles ────────────────────────────────────────────────
 # Os 16 botões de gamepad vêm de `gpio-keys-control` (gpio-keys) no DTS; os 4

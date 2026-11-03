@@ -44,7 +44,7 @@ copiado sem conferência, e o que não foi verificado está marcado como tal.
 | `linux.fragment` | símbolos `CONFIG_*` do kernel — painel, áudio, entrada, rádio |
 | `busybox.fragment` | desliga o applet `tc` do busybox, que não compila contra os headers do 6.12 |
 | `buttons.map` | nome lógico → código evdev (vira `/etc/giochi/buttons.map`) |
-| `rootfs-overlay/` | `motd`, `device-id` e `etc/init.d/S15modules` (autoload de `rtw88_8821cs`/`hci_uart`) |
+| `rootfs-overlay/` | `motd`, `device-id` e `etc/init.d/S15modules` (autoload de `rtw88_8821cs`/`hci_uart`); e `etc/bluetooth/main.conf` (AutoEnable) |
 
 ## Três armadilhas que já custaram imagem quebrada
 

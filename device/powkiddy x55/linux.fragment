@@ -23,6 +23,18 @@ CONFIG_DRM_PANEL_HIMAX_HX8394=y
 CONFIG_DRM_PANFROST=y
 CONFIG_FRAMEBUFFER_CONSOLE=y
 CONFIG_DRM_FBDEV_EMULATION=y
+# Rotação do console. SEM ESTA OPÇÃO o parâmetro `fbcon=rotate:N` da linha de
+# comando é IGNORADO EM SILÊNCIO — o kernel nem reclama.
+#
+# Medido no X55: a linha de comando já tinha `fbcon=rotate:3` e o console saía
+# em 90x80 (720/8 x 1280/16), ou seja, na orientação NATIVA do painel, com o
+# texto deitado. Não era o U-Boot: era esta opção desligada.
+#
+# O painel é 720x1280 (retrato) e o aparelho é usado em paisagem (1280x720).
+# `fbcon=rotate:3` = 270° no sentido horário = 90° anti-horário (para a
+# esquerda), que é a orientação correta aqui. Com a opção ligada o console passa
+# a 160x45.
+CONFIG_FRAMEBUFFER_CONSOLE_ROTATION=y
 
 # PWM4 alimenta o backlight: período 25000 ns (40 kHz).
 CONFIG_BACKLIGHT_CLASS_DEVICE=y

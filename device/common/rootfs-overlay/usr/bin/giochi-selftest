@@ -130,6 +130,42 @@ for b in /sys/class/backlight/*; do
 done
 [ -n "$BL" ] && pass "backlight: $BL" || warn "sem backlight em /sys/class/backlight"
 
+# Orientação do console. O painel pode ser retrato (720x1280) enquanto o
+# aparelho é usado em paisagem; sem rotação o texto sai deitado. E o parâmetro
+# `fbcon=rotate:N` da linha de comando é IGNORADO EM SILÊNCIO quando o kernel não
+# tem CONFIG_FRAMEBUFFER_CONSOLE_ROTATION — o kernel nem avisa. Por isso o teste
+# olha o resultado, não a intenção.
+FBCON_ROT=$(cat /sys/class/graphics/fbcon/rotate 2>/dev/null || echo "")
+FB_SIZE=$(cat /sys/class/graphics/fb0/virtual_size 2>/dev/null || echo "")
+MODE_FIRST=$(ls /sys/class/drm/*/modes 2>/dev/null | head -n 1)
+DRM_MODE=""
+[ -n "$MODE_FIRST" ] && DRM_MODE=$(head -n 1 "$MODE_FIRST" 2>/dev/null)
+
+if [ -n "$FBCON_ROT" ]; then
+    # 90x80 = 720/8 por 1280/16: retrato nativo, rotação não aplicada.
+    GEOM=$(dmesg 2>/dev/null | sed -n 's/.*frame buffer device \([0-9]*x[0-9]*\).*/\1/p' | head -n 1)
+    case "$DRM_MODE" in
+        720x1280)
+            case "$FBCON_ROT" in
+                0) warn "console sem rotação (rotate=$FBCON_ROT${GEOM:+, $GEOM}) — painel é retrato, texto sai deitado" ;;
+                *) pass "console rotacionado (rotate=$FBCON_ROT${GEOM:+, $GEOM}) para painel retrato" ;;
+            esac
+            ;;
+        *)
+            pass "console rotate=$FBCON_ROT${GEOM:+, $GEOM} (painel ${DRM_MODE:-?})"
+            ;;
+    esac
+else
+    warn "sem /sys/class/graphics/fbcon/rotate — CONFIG_FRAMEBUFFER_CONSOLE_ROTATION desligado?"
+fi
+
+# Ferramenta de teste de botões: só existe se evtest estiver na imagem.
+if command -v evtest >/dev/null 2>&1; then
+    pass "evtest presente (base do giochi-buttons)"
+else
+    warn "evtest ausente — giochi-buttons não funciona (BR2_PACKAGE_EVTEST)"
+fi
+
 # ── render 3D ────────────────────────────────────────────────
 head2 "render 3D"
 

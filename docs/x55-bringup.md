@@ -411,6 +411,73 @@ Resultado: `PASS 18 · FAIL 0` de novo, com `S15modules` e `wlan0` no boot.
 `gzwrite` no U-Boot, a imagem de cartão com o cartão no leitor, ou um segundo
 cartão — nunca a raiz corrente.
 
+## Orientação da tela: era o kernel, não o U-Boot
+
+Sintoma relatado: console na vertical, texto deitado. A linha de comando já
+tinha `fbcon=rotate:3` desde a primeira imagem, e mesmo assim o console saía em
+**90x80** (720/8 × 1280/16), que é a orientação nativa do painel.
+
+Causa: `CONFIG_FRAMEBUFFER_CONSOLE_ROTATION` estava **desligado**. Sem essa
+opção o kernel **ignora `fbcon=rotate:N` em silêncio** — não avisa, não reclama,
+apenas usa a orientação nativa. Nada no U-Boot participa disso.
+
+```text
+antes:  framebuffer device 90x80    fbcon/rotate = 0    (retrato, deitado)
+depois: framebuffer device 160x45   fbcon/rotate = 3    (paisagem, correto)
+```
+
+`rotate=3` é 270° no sentido horário, equivalente a **90° anti-horário** (para a
+esquerda) — exatamente o que o aparelho precisa. Corrigido em `linux.fragment`
+(e exigido em `kernel-required.txt` para não sumir sem aviso).
+
+Nota: `/sys/class/graphics/fb0/virtual_size` continua `720,1280` — é o
+framebuffer **físico**. A rotação do console acontece na camada `fbcon`, então a
+geometria que importa é a do `dmesg` (`frame buffer device NxM`).
+
+O `giochi-selftest` passou a conferir isso **pelo resultado**: se o painel está
+em `720x1280` e `fbcon/rotate` é 0, avisa que o texto vai sair deitado. Testar a
+intenção (o parâmetro na linha de comando) não pegaria este bug.
+
+## Teste de botões: `giochi-buttons`
+
+Ferramenta que fica na imagem, porque testar controle é rotina e não evento.
+
+```sh
+giochi-buttons            # 17 botões de gamepad, com contagem do que falta
+giochi-buttons --axes     # 4 eixos, com barra de posição
+giochi-buttons --volume   # só volume
+giochi-buttons --all      # um dispositivo por vez
+giochi-buttons --list     # dispositivos e mapa, sem capturar
+giochi-buttons --raw      # evtest cru
+```
+
+Saída medida no aparelho:
+
+```text
+== gpio-keys-control (/dev/input/event3) ==
+Esperando 17 botão(ões). Cada um que responder reduz o que falta.
+
+  [ 1/17] a          pressionado   (faltam 16)
+  [ 2/17] b          pressionado   (faltam 15)
+  ...
+  eixo RX (direito horizontal)  512  [----------#----------]
+```
+
+Traduz o código evdev para o **nome lógico do `buttons.map`** (`BTN_EAST` → `a`,
+`BTN_MODE` → `home`), então serve tanto para conferir hardware quanto para
+validar o mapa que o launcher vai ler.
+
+### Duas decisões de implementação
+
+1. **Base no `evtest`, não em leitura direta de `/dev/input`.** O evtest 1.35 faz
+   `setbuf(stdout, NULL)`: evento aparece na hora. Um `cat`/pipe com stdio
+   bufferizado mostraria tudo de uma vez só no fim — inútil para "aperte e veja".
+   A dependência está em `BR2_PACKAGE_EVTEST` e o selftest avisa se faltar.
+2. **Tradução em `awk` do busybox.** O parser separa a linha do evtest por `", "`
+   antes de procurar o nome do código. Sem isso, o primeiro parêntese da linha
+   (`(EV_KEY)`) é capturado no lugar de `(BTN_EAST)` — foi um bug real durante o
+   desenvolvimento, e todo evento aparecia como `EV_KEY`.
+
 ## Avisos no dmesg que NÃO são defeito
 
 Três mensagens aparecem em todo boot e nenhuma delas indica problema. Registradas
