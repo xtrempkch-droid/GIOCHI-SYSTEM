@@ -35,7 +35,21 @@ MNT=/mnt/bootlog
 LOG_NAME=giochi-boot.log
 LOCAL_LOG=/var/log/giochi-boot.log
 
-log() { echo "giochi-bootlog: $*" >&2; }
+# Escreve no stderr E no console do PAINEL.
+#
+# Por que /dev/tty0: num aparelho sem serial, o painel é a única superfície
+# legível. O `console=` da cmdline aponta para a UART, então `echo >&2` some;
+# mas `/dev/tty0` é o console virtual do `fbcon` — o que está desenhado na tela.
+# Assim o erro aparece onde a pessoa consegue ler.
+#
+# Medido: a primeira versão mandava tudo para /dev/null no init script e o
+# sintoma ficou sendo só "não tem log", sem nenhuma pista.
+log() {
+    echo "giochi-bootlog: $*" >&2
+    if [ -w /dev/tty0 ]; then
+        echo "giochi-bootlog: $*" >/dev/tty0 2>/dev/null
+    fi
+}
 
 # Encontra a partição de boot e deixa montada em $MNT.
 #
@@ -55,6 +69,9 @@ is_boot_dir() {
 }
 
 mount_boot() {
+    log "procurando a partição de boot"
+    log "  blocos visíveis: $(ls /dev/mmcblk* /dev/sd* 2>/dev/null | tr '\n' ' ')"
+
     # 1. Vfat já montado com o conteúdo certo.
     for ponto in $(awk '$3 == "vfat" {print $2}' /proc/mounts 2>/dev/null); do
         if is_boot_dir "$ponto"; then
@@ -76,7 +93,10 @@ mount_boot() {
         [ -b "$dev" ] || continue
 
         # `-o ro` no teste: se não for a nossa partição, não mexemos nela.
-        if ! mount -t vfat -o ro "$dev" "$MNT" 2>/dev/null; then
+        # O erro vai para o log: "não montou" sem motivo é o que travou a
+        # primeira tentativa deste script.
+        if ! err=$(mount -t vfat -o ro "$dev" "$MNT" 2>&1); then
+            log "  $dev: $err"
             continue
         fi
 
@@ -89,6 +109,7 @@ mount_boot() {
                 return 0
             fi
         fi
+        log "  $dev: montou, mas não tem extlinux.conf nem boot.scr"
         umount "$MNT" 2>/dev/null
     done
 

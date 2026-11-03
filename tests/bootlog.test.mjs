@@ -101,3 +101,34 @@ test("vfat está no kernel do aparelho", async () => {
     "faltou CONFIG_VFAT_FS=y: o bootlog não monta a partição de boot",
   );
 });
+
+test("o diagnóstico aparece na TELA, não é silenciado", async () => {
+  // Medido: a primeira versão fazia o init chamar `giochi-bootlog` com
+  // `>/dev/null 2>&1`. O único sintoma passou a ser "não tem log" — sem
+  // nenhuma pista de qual passo falhou. Num aparelho sem serial, o painel é a
+  // única superfície legível, então as mensagens vão para /dev/tty0.
+  const script = await read(BOOTLOG);
+  assert.match(script, /\/dev\/tty0/, "as mensagens têm de ir para o console do painel");
+
+  for (const nome of ["S10bootlog", "S96bootlog"]) {
+    const texto = await read(path.join(OVERLAY, `etc/init.d/${nome}`));
+    assert.doesNotMatch(
+      texto,
+      /giochi-bootlog (early|full)\s*>\s*\/dev\/null/,
+      `${nome} silencia a saída: o erro some e sobra só "não tem log"`,
+    );
+  }
+});
+
+test("a falha de mount registra o MOTIVO, e não só que falhou", async () => {
+  const texto = await read(BOOTLOG);
+  assert.match(texto, /if ! err=\$?\(?mount/, "o stderr do mount tem de ser capturado");
+  assert.match(texto, /\$dev: \$err/, "o motivo tem de ir para o log");
+});
+
+test("o log lista os dispositivos de bloco visíveis", async () => {
+  // Sem isso, "não achei a partição" não distingue "o cartão não enumerou" de
+  // "enumerou com outro nome".
+  const texto = await read(BOOTLOG);
+  assert.match(texto, /blocos visíveis/);
+});

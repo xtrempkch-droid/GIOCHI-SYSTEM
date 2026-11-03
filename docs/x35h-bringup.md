@@ -250,6 +250,54 @@ rodaria — e o diagnóstico seria de novo "não ligou".
 vêm do defconfig arm64, e num aparelho sem console esta é a única saída de
 diagnóstico.
 
+### 5.3 A tela acendeu — e o log continuou sem aparecer
+
+Segundo boot, com a imagem 57d232f6: **a tela acendeu**, apareceu o Tux e a
+orientação está correta. Isso fecha três incógnitas de uma vez:
+
+| Incógnita | Resultado |
+| --- | --- |
+| O painel **ST7703** funciona com o driver mainline? | **sim** |
+| O modo 640×480 é aceito? | **sim** |
+| A rotação 0 é a correta nesta carcaça? | **sim** |
+| O `CONFIG_JOYSTICK_ADC`, `panfrost`, DSI host e PHY? | funcionando — o fbcon desenha |
+
+E o LED verde aceso já tinha dado a primeira metade da resposta: ele é
+`gpio-leds` com `default-state = "on"`, ou seja, **o kernel só o liga depois de
+ler o DTB e rodar o driver**. LED aceso + Tux na tela = boot completo com
+display.
+
+Mas o `giochi-boot.log` continuou **inexistente**. E a causa não era a mesma da
+tentativa anterior.
+
+#### O que se sabe, e o que ficou faltando
+
+O mecanismo foi **provado no cartão real**: rodando o `giochi-bootlog` contra o
+`/dev/sdd1` do leitor, ele achou a partição pelo conteúdo, montou e gravou. Então
+o código do mount está correto — a diferença é o ambiente do aparelho, e para
+isso não havia dado nenhum, porque o `S10bootlog` chamava o script com
+`>/dev/null 2>&1`.
+
+**Esse silêncio foi o erro de método**, não o mount. A correção não foi tentar
+outro caminho de montagem às cegas; foi tornar o erro legível:
+
+- as mensagens do `giochi-bootlog` vão para **`/dev/tty0`** — o console do
+  `fbcon`, que é o que está desenhado no painel. O `console=` da cmdline aponta
+  para a UART, então `echo >&2` some; `/dev/tty0` aparece na tela;
+- o stderr de cada `mount` é **capturado e registrado**, com o motivo;
+- o script lista os **blocos visíveis** (`/dev/mmcblk*`, `/dev/sd*`), porque
+  "não achei a partição" sozinho não distingue "o cartão não enumerou" de
+  "enumerou com outro nome".
+
+Com isso o próximo boot responde pela tela, sem serial e sem tirar o cartão.
+Três desfechos possíveis, todos conclusivos:
+
+| O que aparece na tela | Significa |
+| --- | --- |
+| `partição de boot: /dev/mmcblkXpY` e `gravado em ...` | funcionou |
+| `  /dev/mmcblkXpY: <motivo>` | o mount falhou e agora diz por quê |
+| **nada** | o script não rodou (marcador/overlay), não é o mount |
+
 **Para testar:** colocar no X35H e ligar. Não há TTL neste aparelho; o
 diagnóstico sai em `giochi-boot.log`, na partição FAT (`GIOCHI_BOOT`), que
 qualquer PC lê. Se a tela não acender:

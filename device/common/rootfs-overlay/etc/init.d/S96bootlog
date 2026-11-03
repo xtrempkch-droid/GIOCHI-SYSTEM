@@ -9,5 +9,5 @@
 # Se esta não rodar porque um serviço travou, o do early continua lá.
 
 [ -f /etc/giochi/boot-log ] || exit 0
-/usr/bin/giochi-bootlog full >/dev/null 2>&1
+/usr/bin/giochi-bootlog full
 exit 0
