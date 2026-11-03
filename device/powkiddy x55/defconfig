@@ -98,6 +98,31 @@ BR2_PACKAGE_SDL2_OPENGLES=y
 BR2_PACKAGE_SDL2_KMSDRM=y
 BR2_PACKAGE_SDL2_IMAGE=y
 
+# ── texto do launcher: fonte e rasterizador ──────────────────
+# O launcher desenha texto. Sem estes três, ele não abre uma fonte e a tela
+# fica vazia (ou o processo morre em `TTF_OpenFont: Couldn't load font file`).
+#
+# ARMADILHA 1 — `BR2_PACKAGE_SDL2_TTF` não é opção do `sdl2`: é PACOTE à parte
+# (`package/sdl2_ttf/`). Ele faz `select BR2_PACKAGE_FREETYPE`, então o
+# rasterizador vem junto. Mas **harfbuzz NÃO vem**: o `.mk` só acrescenta
+# `--enable-harfbuzz` quando `BR2_PACKAGE_HARFBUZZ=y` existe por conta própria.
+# Para português (Latim simples) não é necessário; para escrita complexa
+# (árabe, hindi, tailandês) é, e a falta não dá erro — o texto sai com
+# shaping errado.
+#
+# ARMADILHA 2 — `BR2_PACKAGE_DEJAVU=y` sozinho NÃO instala fonte nenhuma.
+# O `dejavu.mk` começa com `DEJAVU_FONTS_INSTALL =` vazio e só preenche dentro
+# de `ifeq ($(BR2_PACKAGE_DEJAVU_<FAMILIA>),y)`. O pacote compila, o build fica
+# verde, `/usr/share/fonts/dejavu/` é criado — e fica VAZIO. A sub-opção da
+# família é obrigatória.
+#
+# Se no futuro o launcher for Godot: ele embarca o próprio freetype e não usa
+# SDL2_ttf. Nesse caso as duas primeiras linhas só custam build; a fonte de
+# sistema continua fazendo falta para texto fora do Godot.
+BR2_PACKAGE_SDL2_TTF=y
+BR2_PACKAGE_DEJAVU=y
+BR2_PACKAGE_DEJAVU_SANS=y
+
 # ── áudio ────────────────────────────────────────────────────
 BR2_PACKAGE_ALSA_LIB=y
 BR2_PACKAGE_ALSA_UTILS=y

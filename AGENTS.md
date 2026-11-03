@@ -539,6 +539,48 @@ existe. Ele precisa ser **binário separado, iniciado antes do launcher** — se
 mapeamento está errado, o usuário não consegue navegar até a tela de
 configuração.
 
+## 11-A. O launcher — contrato com o `Giochi app`
+
+Detalhe em [`docs/launcher.md`](docs/launcher.md). O que muda decisão de build:
+
+**KMSDRM funciona** (relatado pelo usuário). O caminho de render está fechado:
+`/dev/dri/card0` + render node, `panfrost`, Mesa GLES 3.1, SDL2 com
+`SDL2_KMSDRM` + `SDL2_OPENGLES`. O teste que fecha de verdade é
+`SDL_GetCurrentVideoDriver()` devolver `kmsdrm` — a alternativa silenciosa é cair
+no driver `dummy`: o processo roda, o log diz que inicializou vídeo, e a tela
+fica preta.
+
+**Stack de texto** no `defconfig` de quem tem tela (X55 e X35H):
+
+```text
+BR2_PACKAGE_SDL2_TTF=y
+BR2_PACKAGE_DEJAVU=y
+BR2_PACKAGE_DEJAVU_SANS=y
+```
+
+Duas armadilhas, as duas verificadas nos fontes do Buildroot 2024.02:
+
+| Armadilha | Efeito sem a correção |
+| --- | --- |
+| `SDL2_TTF` **não** é opção do `sdl2`, é pacote à parte — e faz `select FREETYPE`, mas **não** liga harfbuzz (o `.mk` só passa `--enable-harfbuzz` se `BR2_PACKAGE_HARFBUZZ=y` existir) | texto com shaping errado em escrita complexa, **sem erro**. Português não precisa |
+| `DEJAVU=y` **sozinho instala zero fontes**: `DEJAVU_FONTS_INSTALL` começa vazio e só cresce dentro de `ifeq ($(BR2_PACKAGE_DEJAVU_<FAMILIA>),y)` | build verde, `/usr/share/fonts/dejavu/` **vazio**, `TTF_OpenFont: Couldn't load font file` |
+
+**Por que não no `common.fragment`:** o QEMU não tem SDL2. `SDL2_TTF` depende de
+`SDL2`, então o símbolo nem seria oferecido, o `olddefconfig` descartaria em
+silêncio e o `assert-config` reprovaria o build do smoke test. O stack mora
+junto do SDL2, e `tests/launcher-deps.test.mjs` exige a invariante: **quem liga
+SDL2 liga o texto**.
+
+Caminho combinado do binário (usado pelo `giochi-init` e pelo `post-build`):
+`/opt/giochi/apps/launcher/bin/giochi-launcher`. Quando ele existir, o
+`respawn` do §11 entra sozinho.
+
+**Ainda não medido:** `fbcon` e DRM master disputando a tela. Ao abrir o KMSDRM
+o launcher vira master e o `fbcon` perde o display; o getty do console continua
+escrevendo e pode aparecer por cima. Se acontecer, tirar o getty do console
+ativo ou desligar o `fbcon` enquanto o launcher roda. Registrar aqui o que for
+observado.
+
 ## 12. Blindagens contra falha silenciosa
 
 Todas têm o mesmo formato: o build fica **verde** e entrega imagem errada.

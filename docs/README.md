@@ -7,6 +7,9 @@
 - [Build local](building-locally.md) — como compilar no Linux/WSL2 e quais variáveis usar.
 - [GitHub Actions](github-actions.md) — matriz, entradas, cache, artefatos e segredos.
 - [Gravação e boot](flashing.md) — QEMU, cartão SD, eMMC e primeiros passos.
+- [O launcher: o que o sistema entrega](launcher.md) — SDL2/KMSDRM, stack de texto
+  (as duas armadilhas: `SDL2_TTF` é pacote à parte e `DEJAVU=y` sem família instala
+  zero fontes), e o que falta para a interface subir.
 - [O sistema base](sistema-base.md) — o que **todo** aparelho tem e por quê:
   SSH por cabo USB (RNDIS + DHCP), OpenSSH, e as ferramentas de diagnóstico.
   Leia antes de criar um aparelho novo.
