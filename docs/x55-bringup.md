@@ -92,7 +92,8 @@ Evolução medida, mesma máquina, com as correções entrando uma a uma:
 | primeira imagem que bootou | `PASS 15 · WARN 5 · FAIL 1 · SKIP 2` | sem patch de DTS, amplificador `=m` |
 | com `patches/0001-…-dts.patch` e amplificador `=y` | `PASS 17 · WARN 4 · FAIL 0 · SKIP 2` | `hwrng` e placa de som aparecem |
 | com `S15modules` (autoload dos módulos) | `PASS 18 · WARN 3 · FAIL 0 · SKIP 2` | `wlan0` sobe no boot |
-| com `CONFIG_JOYSTICK_ADC` + patch 0002 (BTN_MODE) | **`PASS 20 · WARN 3 · FAIL 0 · SKIP 2`** | 4 eixos e 17º botão aparecem |
+| com `CONFIG_JOYSTICK_ADC` + patch 0002 (BTN_MODE) | `PASS 20 · WARN 3 · FAIL 0 · SKIP 2` | 4 eixos e 17º botão aparecem |
+| `Playback Mux` via `alsactl` | **`PASS 21 · WARN 3 · FAIL 0 · SKIP 1`** | áudio conferido de verdade |
 
 O boot também caiu de **11,7 s para 2,1 s** até o `sshd` subir: com o `&rng
 okay`, o `crng` está pronto quando o userspace começa, e nada espera entropia.
@@ -138,19 +139,73 @@ Ou seja: **o rádio funciona**. O `rtl8821cs_config.bin` de 25 bytes continua
 pendente para estabilidade (aparecem `sdio read32 failed (0xf0): -110` durante o
 probe), mas o caminho ponta a ponta está provado.
 
-### Bluetooth: falta firmware
+### Bluetooth: um dos dois arquivos resolvido, o outro não
 
-O `hci_uart` carrega e o chip responde (`hci0: RTL: examining hci_ver=08
-lmp_subver=8821`), mas o driver pede um arquivo que não existe no
-`linux-firmware`:
+O driver `btrtl` precisa de **dois** arquivos para este chip, e o
+`linux-firmware` não traz nenhum dos dois com o nome certo:
+
+| Arquivo | Estado |
+| --- | --- |
+| `rtl_bt/rtl8821cs_config.bin` | **resolvido** — 25 bytes, gerados por `scripts/gen-rtl8821cs-config.mjs` |
+| `rtl_bt/rtl8821cs_fw.bin` | **falta** — não existe no `linux-firmware` |
+
+O formato do config foi decifrado no kernel (`drivers/bluetooth/btrtl.c` e
+`btrtl.h`):
 
 ```text
-bluetooth hci0: Direct firmware load for rtl_bt/rtl8821cs_fw.bin failed with error -2
+struct rtl_vendor_config {        // 6 bytes
+        __le32 signature;         // 0x8723ab55
+        __le16 total_len;
+        __u8   entry[];
+};
+struct rtl_vendor_config_entry {  // 3 bytes + data
+        __le16 offset;            // 0x0c = configuração de UART
+        __u8   len;
+        __u8   data[];
+};
 ```
 
-O pacote traz `rtl8821c_fw.bin` (Wi-Fi) e `rtl8821c_config.bin`, **não**
-`rtl8821cs_fw.bin` (Bluetooth). É exatamente o buraco documentado no README do
-aparelho, agora com o nome do arquivo confirmado no aparelho.
+Para `offset = 0x0c`: `data[0..3]` é o baudrate do dispositivo em LE32
+(traduzido por `btrtl_convert_baudrate`), e `data[12]` BIT(2) liga controle de
+fluxo. A escolha aqui é `0x0252c014` → 115200, que **não reprograma** a UART, e
+3 fios (bit desligado).
+
+Medido no aparelho, com o config no lugar e o firmware emprestado do 8821C USB:
+
+```text
+hci0: RTL: cfg_sz 25, total sz 34941     ← a config foi aceita
+hci0: RTL: download fw command failed (-110)   ← o fw do 8821C não serve
+```
+
+Ou seja: **o config está correto** (o driver o aceitou junto com o fw). O
+firmware de UART do 8821CS é binário diferente do de USB, e não está em
+distribuição pública — vem no pacote do fabricante.
+
+Decisão: o config fica versionado (é necessário e está certo); **não** se
+versiona um symlink de `rtl8821c_fw.bin` para `rtl8821cs_fw.bin`. Testado: com o
+symlink o `hci0` **aparece** e o download falha em `-110` — um dispositivo que
+existe e não funciona é pior do que um que não existe, porque engana o
+diagnóstico. Sem o symlink a falha é explícita:
+
+```text
+Direct firmware load for rtl_bt/rtl8821cs_fw.bin failed with error -2
+```
+
+### `amixer` não existe, e o teste de áudio aprendeu isso
+
+O Buildroot 2024.02 empacota `alsactl` e `alsamixer`, **não** `amixer`. O
+`giochi-selftest` usava `amixer` para conferir o `Playback Mux` e caía em SKIP.
+Agora o caminho principal é `alsactl store`, que despeja todos os controles com
+nome e valor:
+
+```text
+name 'Playback Mux'
+value HP
+```
+
+No aparelho: `[PASS] Playback Mux = HP (falante roteado por HPOL/HPOR)`.
+O placar subiu para **PASS 21 · SKIP 1** — o único SKIP restante é o 3D, que
+depende de `kmscube`.
 
 ### Avisos com causa conhecida
 

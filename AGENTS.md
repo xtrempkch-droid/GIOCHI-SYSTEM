@@ -100,7 +100,8 @@ giochi-system-x55 login:
 | primeira imagem que bootou | PASS 15 · WARN 5 · **FAIL 1** · SKIP 2 |
 | + patch de DTS + amplificador `=y` | PASS 17 · WARN 4 · **FAIL 0** · SKIP 2 |
 | + `S15modules` (autoload) | PASS 18 · WARN 3 · FAIL 0 · SKIP 2 |
-| + `CONFIG_JOYSTICK_ADC` + patch 0002 (BTN_MODE) | **PASS 20 · WARN 3 · FAIL 0 · SKIP 2** |
+| + `CONFIG_JOYSTICK_ADC` + patch 0002 (BTN_MODE) | PASS 20 · WARN 3 · FAIL 0 · SKIP 2 |
+| + `Playback Mux` via `alsactl` | **PASS 21 · WARN 3 · FAIL 0 · SKIP 1** |
 
 O que passou e é o que importa para "sair do console":
 
@@ -696,7 +697,30 @@ Credencial de rede é provisionada **no aparelho**:
 `wpa_passphrase ... > /etc/wpa_supplicant.conf`. O `S40wifi` conecta se o
 arquivo existir e não faz nada se não existir.
 
-### 12.15 `awk` do busybox não tem `strtonum`
+### 12.15 Device node que existe e não funciona é pior que ausente
+
+Durante o trabalho de Bluetooth, um symlink de `rtl8821c_fw.bin` (variante USB)
+para `rtl8821cs_fw.bin` (UART) fez o `hci0` **aparecer** em
+`/sys/class/bluetooth/` — e falhar em seguida com
+`download fw command failed (-110)`. Um `ls` mostraria o dispositivo, um teste
+superficial passaria, e o rádio não funcionaria.
+
+Regra: prefira a falha explícita (`Direct firmware load ... failed with error
+-2`, sem `hci0`) a um nó que existe pela metade. O `giochi-selftest` segue a
+mesma linha — conta dispositivos e bits em vez de conferir nomes.
+
+### 12.16 `amixer` não existe no Buildroot, `alsactl` sim
+
+`BR2_PACKAGE_ALSA_UTILS` no 2024.02 traz `alsactl` e `alsamixer`, **não**
+`amixer`. Um teste que dependa de `amixer` cai em SKIP silencioso — e SKIP não é
+aprovação. Para ler valor de controle de mixer sem `amixer`:
+
+```sh
+alsactl -f /tmp/state.conf store
+# bloco: name 'Playback Mux' / value HP
+```
+
+### 12.17 `awk` do busybox não tem `strtonum`
 
 O contador de bits do `giochi-selftest` usava `strtonum("0x" $i)`, que é extensão
 do **gawk**. No busybox awk a função não existe e a expressão devolve vazio: o
@@ -707,7 +731,7 @@ pesos — funciona em busybox, gawk e mawk.
 Regra ao escrever shell para este rootfs: o alvo é **busybox ash + busybox awk**,
 não bash + gawk.
 
-### 12.16 `BR2_TARGET_GENERIC_GETTY_BAUDRATE_*` reprograma a UART
+### 12.18 `BR2_TARGET_GENERIC_GETTY_BAUDRATE_*` reprograma a UART
 
 Um baud explícito no getty faz o getty **reprogramar** a UART para aquela
 velocidade, ignorando o que o kernel configurou. No X55 (console a 1500000), o
@@ -740,12 +764,12 @@ O R35S é o que está mais avançado nisso: o DTB real está versionado em
 1. **Interface de jogos (produto, não sistema).** Os controles de hardware estão
    completos: 17 botões + 4 eixos, medidos no aparelho. O que falta é o launcher,
    que é do `Giochi app` — este repositório entrega o sistema.
-2. **Firmware de Bluetooth**: `rtl_bt/rtl8821cs_fw.bin` não vem no
-   `linux-firmware` (só `rtl8821c_fw.bin`). O `hci_uart` carrega e o chip
-   responde, mas o download falha com `-2`. Junto com o `rtl8821cs_config.bin`
-   de 25 bytes, é o último item de rádio.
-3. **`amixer` ausente no rootfs** — o selftest não consegue conferir o
-   `Playback Mux` em `HP`. Adicionar `BR2_PACKAGE_ALSA_UTILS` com o applet.
+2. **Firmware de Bluetooth**: `rtl_bt/rtl8821cs_fw.bin` não existe no
+   `linux-firmware` e vem no pacote do fabricante. O `rtl8821cs_config.bin` está
+   resolvido (`scripts/gen-rtl8821cs-config.mjs`, 25 bytes, formato decifrado no
+   `btrtl.c`) e o driver o aceita — falta só o fw, que é binário diferente do
+   `rtl8821c_fw.bin` (USB). **Não** crie symlink do fw de USB: o `hci0` aparece e
+   o download falha em `-110`, o que engana o diagnóstico.
 5. **Ligar a camada de boot** (§11): a linha `::respawn:` do `/etc/inittab`.
 6. **`genimage` dentro do Buildroot**, substituindo `make-sd-image.sh` como
    etapa externa.

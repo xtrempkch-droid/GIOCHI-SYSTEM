@@ -84,8 +84,13 @@ Nenhum item é configuração de símbolo — são código e layout:
    `rk356x.dtsi` (quem liga é o `rk3568.dtsi`). Sem entropia o `crng` inicializa
    tarde e o `getrandom()` bloqueia — medido em 11 s num boot e **1024 s** em
    outro.
-4. **`rtl8821cs_config.bin`** de 25 bytes, **gerado** — o do `linux-firmware` não
-   tem a entrada de offset `0x0c` e o `hci0` fica sem endereço MAC.
+4. **`rtl8821cs_config.bin`** — **RESOLVIDO**, gerado por
+   `scripts/gen-rtl8821cs-config.mjs` (25 bytes, offset `0x0c`, baud 115200).
+   O driver aceita: `cfg_sz 25, total sz 34941`.
+   **Falta `rtl8821cs_fw.bin`** (firmware de UART): o `rtl8821c_fw.bin` é do
+   variante USB e o download falha em `-110`; o binário correto vem no pacote do
+   fabricante. Sem ele, `hci0` não é criado — e isso é intencional: um `hci0`
+   que aparece e não funciona engana o diagnóstico.
 5. **`genimage`**: hoje o build entrega `Image`, `rootfs.ext4`, `idbloader.img` e
    `u-boot.itb` soltos. A imagem de cartão precisa do layout: p1 FAT 128 MB com
    `Image` + `dtbs/` + `extlinux.conf` (`FDT /dtbs/rk3566-powkiddy-x55.dtb`),

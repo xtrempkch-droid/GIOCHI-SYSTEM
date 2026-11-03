@@ -249,18 +249,37 @@ else
     fail "sem /proc/asound — ALSA não carregou"
 fi
 
+# O `Playback Mux` do RK817 precisa estar em HP: o amplificador do falante é
+# alimentado por HPOL/HPOR, e em SPK o aparelho fica MUDO — o SPK DAC é o
+# class-D interno do RK817 e não está roteado nesta placa.
+#
+# `amixer` NÃO existe no Buildroot 2024.02 (o pacote alsa-utils só traz
+# alsactl e alsamixer). Por isso o caminho principal aqui é o `alsactl store`,
+# que despeja todos os controles com nome e valor em formato de texto.
+MUX=""
 if command -v amixer >/dev/null 2>&1; then
-    MUX=$(amixer sget "Playback Mux" 2>/dev/null | grep -o "Item0: '[A-Z]*'" | head -n 1)
-    if [ -n "$MUX" ]; then
-        case "$MUX" in
-            *HP*) pass "Playback Mux = $MUX" ;;
-            *) fail "Playback Mux = $MUX — falante fica MUDO; precisa ser HP" ;;
-        esac
-    else
-        warn "não achei o controle 'Playback Mux'"
+    MUX=$(amixer sget "Playback Mux" 2>/dev/null | sed -n "s/.*Item0: '\([A-Z]*\)'.*/\1/p" | head -n 1)
+fi
+if [ -z "$MUX" ] && command -v alsactl >/dev/null 2>&1; then
+    STATE=/tmp/giochi-mixer.state
+    if alsactl -f "$STATE" store >/dev/null 2>&1; then
+        # O bloco é: name 'Playback Mux' / value <X>. Pega o value seguinte.
+        MUX=$(awk "
+            /name .Playback Mux./ { achou = 1; next }
+            achou && /value / { print \$2; exit }
+        " "$STATE" 2>/dev/null)
+        rm -f "$STATE"
     fi
+fi
+if [ -n "$MUX" ]; then
+    case "$MUX" in
+        HP) pass "Playback Mux = HP (falante roteado por HPOL/HPOR)" ;;
+        *)  fail "Playback Mux = $MUX — falante fica MUDO; precisa ser HP" ;;
+    esac
+elif command -v alsactl >/dev/null 2>&1 || command -v amixer >/dev/null 2>&1; then
+    warn "controle 'Playback Mux' não encontrado no mixer"
 else
-    skip "amixer ausente"
+    skip "sem amixer e sem alsactl"
 fi
 
 # ── USB ──────────────────────────────────────────────────────
