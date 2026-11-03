@@ -94,6 +94,7 @@ Evolução medida, mesma máquina, com as correções entrando uma a uma:
 | com `S15modules` (autoload dos módulos) | `PASS 18 · WARN 3 · FAIL 0 · SKIP 2` | `wlan0` sobe no boot |
 | com `CONFIG_JOYSTICK_ADC` + patch 0002 (BTN_MODE) | `PASS 20 · WARN 3 · FAIL 0 · SKIP 2` | 4 eixos e 17º botão aparecem |
 | `Playback Mux` via `alsactl` | **`PASS 21 · WARN 3 · FAIL 0 · SKIP 1`** | áudio conferido de verdade |
+| firmware oficial do RTL8821CS + `AutoEnable` | **`PASS 21 · WARN 3 · FAIL 0 · SKIP 1`** | **Bluetooth funcionando e ligado no boot** |
 
 O boot também caiu de **11,7 s para 2,1 s** até o `sshd` subir: com o `&rng
 okay`, o `crng` está pronto quando o userspace começa, e nada espera entropia.
@@ -139,57 +140,82 @@ Ou seja: **o rádio funciona**. O `rtl8821cs_config.bin` de 25 bytes continua
 pendente para estabilidade (aparecem `sdio read32 failed (0xf0): -110` durante o
 probe), mas o caminho ponta a ponta está provado.
 
-### Bluetooth: um dos dois arquivos resolvido, o outro não
+### Bluetooth: funcionando — o arquivo existe, o Buildroot é que o omite
 
-O driver `btrtl` precisa de **dois** arquivos para este chip, e o
-`linux-firmware` não traz nenhum dos dois com o nome certo:
-
-| Arquivo | Estado |
-| --- | --- |
-| `rtl_bt/rtl8821cs_config.bin` | **resolvido** — 25 bytes, gerados por `scripts/gen-rtl8821cs-config.mjs` |
-| `rtl_bt/rtl8821cs_fw.bin` | **falta** — não existe no `linux-firmware` |
-
-O formato do config foi decifrado no kernel (`drivers/bluetooth/btrtl.c` e
-`btrtl.h`):
+Correção de uma conclusão errada registrada antes neste documento. O
+`rtl8821cs_fw.bin` **existe** e é oficial: está no `linux-firmware`, o
+repositório de firmware do próprio kernel. Conferido no tarball que este build
+usa:
 
 ```text
-struct rtl_vendor_config {        // 6 bytes
-        __le32 signature;         // 0x8723ab55
-        __le16 total_len;
-        __u8   entry[];
-};
-struct rtl_vendor_config_entry {  // 3 bytes + data
-        __le16 offset;            // 0x0c = configuração de UART
-        __u8   len;
-        __u8   data[];
-};
+linux-firmware-20240115/rtl_bt/rtl8821cs_fw.bin       56648 bytes
+linux-firmware-20240115/rtl_bt/rtl8821cs_config.bin      25 bytes
 ```
 
-Para `offset = 0x0c`: `data[0..3]` é o baudrate do dispositivo em LE32
-(traduzido por `btrtl_convert_baudrate`), e `data[12]` BIT(2) liga controle de
-fluxo. A escolha aqui é `0x0252c014` → 115200, que **não reprograma** a UART, e
-3 fios (bit desligado).
+O problema é a **lista do Buildroot**: `BR2_PACKAGE_LINUX_FIRMWARE_RTL_88XX_BT`
+em `package/linux-firmware/linux-firmware.mk` instala `rtl8821a_*` e
+`rtl8821c_*` e **esquece `rtl8821cs_*`**, na mesma versão do pacote. O sintoma é
+fiel ao padrão deste repositório: build verde, imagem que boota, e Bluetooth que
+"não funciona" sem uma linha de erro — o arquivo simplesmente não está lá.
 
-Medido no aparelho, com o config no lugar e o firmware emprestado do 8821C USB:
+Correção em `config/package-overrides.mk`:
+
+```make
+LINUX_FIRMWARE_FILES += rtl_bt/rtl8821cs_fw.bin rtl_bt/rtl8821cs_config.bin
+```
+
+`LINUX_FIRMWARE_FILES` é montada com `+=`, e o arquivo de override é incluído
+antes das receitas, então o acréscimo soma à lista. Prova:
 
 ```text
-hci0: RTL: cfg_sz 25, total sz 34941     ← a config foi aceita
-hci0: RTL: download fw command failed (-110)   ← o fw do 8821C não serve
+$ make -p -n | grep '^LINUX_FIRMWARE_FILES'
+… rtl8821cs_fw.bin rtl8821cs_config.bin …
 ```
 
-Ou seja: **o config está correto** (o driver o aceitou junto com o fw). O
-firmware de UART do 8821CS é binário diferente do de USB, e não está em
-distribuição pública — vem no pacote do fabricante.
-
-Decisão: o config fica versionado (é necessário e está certo); **não** se
-versiona um symlink de `rtl8821c_fw.bin` para `rtl8821cs_fw.bin`. Testado: com o
-symlink o `hci0` **aparece** e o download falha em `-110` — um dispositivo que
-existe e não funciona é pior do que um que não existe, porque engana o
-diagnóstico. Sem o symlink a falha é explícita:
+Resultado no aparelho:
 
 ```text
-Direct firmware load for rtl_bt/rtl8821cs_fw.bin failed with error -2
+hci0: RTL: cfg_sz 25, total sz 36953
+hci0: RTL: fw version 0x75b8f098          ← firmware carregado
+Controller A8:4F:A4:C9:98:4C (public)
+	Manufacturer: 0x005d (93)     ← Realtek
 ```
+
+E o scan encontra dispositivos de verdade — com o host anunciando como
+`charles-X99-V9S`, o aparelho viu:
+
+```text
+[NEW] Device AC:ED:5C:28:73:C2 charles-X99-V9S
+[NEW] Device 59:5D:A8:D3:A7:2D 59-5D-A8-D3-A7-2D
+```
+
+### O config oficial não é o que estava sendo gerado à mão
+
+Vale registrar a diferença, porque ela decide se o rádio funciona:
+
+| Campo | Config oficial (linux-firmware) | O que se gerava à mão |
+| --- | --- | --- |
+| baudrate (`data[0..3]`) | `0x04928002` → **1500000** | `0x0252c014` → 115200 |
+| flow control (`data[12]` bit 2) | **ligado** | desligado |
+
+O oficial é idêntico ao `rtl8761b_config.bin` (o `WHENCE` do `linux-firmware`
+declara `Link: rtl_bt/rtl8821cs_config.bin -> rtl8761b_config.bin`). Ou seja: o
+hardware usa 4 fios a 1500000, coerente com `uart-has-rtscts` no DTS — não 3 fios
+como a documentação do projeto supunha. Gerar o arquivo à mão era pior do que não
+ter arquivo nenhum: o driver aceitava (`cfg_sz 25`) e o rádio funcionava pela
+metade.
+
+Lição: antes de reconstruir um binário de firmware, procurar o oficial no tarball
+do `linux-firmware` — ele quase sempre está lá, e quando a lista do Buildroot não
+o instala, a correção é acrescentar à lista, não reescrever o arquivo.
+
+### Rádio ligado no boot
+
+`bluez5-utils` não instala `/etc/bluetooth/main.conf`, e o padrão de compilação
+tem `AutoEnable=false`: o controlador aparecia em `bluetoothctl list` e ficava
+`Powered: no`. Para quem pega o aparelho, isso é indistinguível de "Bluetooth
+quebrado". O overlay traz um `main.conf` mínimo com `AutoEnable = true`;
+depois do boot, `Powered: yes` sem nenhum comando.
 
 ### `amixer` não existe, e o teste de áudio aprendeu isso
 

@@ -32,3 +32,22 @@
 # em todos os devices deste repositório; se um dia ligarem, ajuste aqui.
 override STRACE_CONF_OPTS = --enable-mpers=no --enable-bundled=yes \
 	--without-libunwind --without-libiberty
+
+# ── linux-firmware: RTL8821CS (Bluetooth por UART) ───────────
+# O Buildroot 2024.02 lista, em BR2_PACKAGE_LINUX_FIRMWARE_RTL_88XX_BT, os
+# arquivos rtl8821a_* e rtl8821c_* — mas OMITE rtl8821cs_*, que estão no MESMO
+# tarball (linux-firmware-20240115):
+#
+#   linux-firmware-20240115/rtl_bt/rtl8821cs_fw.bin      56 KB
+#   linux-firmware-20240115/rtl_bt/rtl8821cs_config.bin  25 B
+#
+# Sem eles o driver btrtl para em
+#   "RTL: firmware file rtl_bt/rtl8821cs_fw not found"
+# e o hci0 não nasce. O sintoma aparece como "Bluetooth não funciona", e o
+# pacote de firmware parece completo — nada diz que faltou arquivo.
+#
+# `LINUX_FIRMWARE_FILES` é montada com `+=` em linux-firmware.mk, e este arquivo
+# é incluído ANTES das receitas (Makefile, ~linha 530), então o acréscimo soma à
+# lista em vez de ser apagado. Conferir com:
+#   make -p -n | grep '^LINUX_FIRMWARE_FILES'
+LINUX_FIRMWARE_FILES += rtl_bt/rtl8821cs_fw.bin rtl_bt/rtl8821cs_config.bin

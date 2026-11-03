@@ -109,6 +109,8 @@ O que passou e é o que importa para "sair do console":
 - `/dev/dri/card0` + render node (`panfrost`), driver `rockchip-drm`;
 - rootfs em `/dev/root` no cartão, console `ttyS2`;
 - **`wlan0` com MAC real** e `iw scan` devolvendo redes (`Kill.exe`, -24 dBm);
+- **Bluetooth funcionando**: `hci0` com MAC `A8:4F:A4:C9:98:4C`, firmware
+  `0x75b8f098`, scan encontrando o host e outros dispositivos, ligado no boot;
 - áudio: `0 [rk817ext]: simple-card - rk817_ext`;
 - `hwrng: rockchip-rng`;
 - **17 botões de gamepad** (`gpio-keys-control`, inclui BTN_MODE pelo patch 0002);
@@ -720,7 +722,49 @@ alsactl -f /tmp/state.conf store
 # bloco: name 'Playback Mux' / value HP
 ```
 
-### 12.17 `awk` do busybox não tem `strtonum`
+### 12.17 linux-firmware do Buildroot omite arquivos do RTL8821CS
+
+`BR2_PACKAGE_LINUX_FIRMWARE_RTL_88XX_BT` lista `rtl8821a_*` e `rtl8821c_*` mas
+**não** `rtl8821cs_*` — que estão no **mesmo** tarball (`linux-firmware-20240115`):
+
+```text
+linux-firmware-20240115/rtl_bt/rtl8821cs_fw.bin       56648 B
+linux-firmware-20240115/rtl_bt/rtl8821cs_config.bin      25 B
+```
+
+Sintoma: build verde, imagem que boota, e Bluetooth que "não funciona" sem erro.
+A falha só aparece no dmesg do aparelho:
+`firmware file rtl_bt/rtl8821cs_fw not found`.
+
+Correção em `config/package-overrides.mk`:
+`LINUX_FIRMWARE_FILES += rtl_bt/rtl8821cs_fw.bin rtl_bt/rtl8821cs_config.bin`
+(a variável é montada com `+=` e o override é incluído antes das receitas).
+
+**Armadilha ao investigar isso:** o arquivo oficial **não** é o mesmo que se
+gera à mão. O oficial tem baudrate `0x04928002` (1500000) e flow control
+**ligado**; gerar "no chute" com 115200 e 3 fios produz um config que o driver
+aceita (`cfg_sz 25`) e um rádio que funciona pela metade. Regra: procurar o
+firmware no tarball do `linux-firmware` antes de reconstruir qualquer binário.
+
+Gate: `device/<pasta>/firmware-required.txt` + verificação no build. Um arquivo
+de firmware ausente não impede o boot, então nada notaria.
+
+### 12.18 Staging de overlay nunca era limpo
+
+`stage_overlay` fazia `cp -a origem/. destino/` a cada build. Copiar sobrescreve,
+mas **não apaga**: um arquivo removido do overlay do aparelho continuava no
+staging e era aplicado em `target-finalize`, sobrepondo o arquivo de um pacote.
+
+Medido: `rtl8821cs_config.bin` saiu do overlay, mas a cópia de 25 bytes de um
+build anterior continuou no staging e **sobrescreveu o firmware oficial** do
+`linux-firmware` — mesmo nome, conteúdo diferente. O sintoma seria "Bluetooth não
+funciona" com o arquivo presente, que é o pior tipo.
+
+Correção: `rm -rf "$OVERLAY_STAGE"` antes de montar. Consequência para quem usa
+`KEEP_WORK=1`: arquivo removido do overlay exige `target/` limpo (ou dirclean do
+pacote) para desaparecer de um `target/` já construído.
+
+### 12.19 `awk` do busybox não tem `strtonum`
 
 O contador de bits do `giochi-selftest` usava `strtonum("0x" $i)`, que é extensão
 do **gawk**. No busybox awk a função não existe e a expressão devolve vazio: o
@@ -731,7 +775,7 @@ pesos — funciona em busybox, gawk e mawk.
 Regra ao escrever shell para este rootfs: o alvo é **busybox ash + busybox awk**,
 não bash + gawk.
 
-### 12.18 `BR2_TARGET_GENERIC_GETTY_BAUDRATE_*` reprograma a UART
+### 12.20 `BR2_TARGET_GENERIC_GETTY_BAUDRATE_*` reprograma a UART
 
 Um baud explícito no getty faz o getty **reprogramar** a UART para aquela
 velocidade, ignorando o que o kernel configurou. No X55 (console a 1500000), o
@@ -764,12 +808,11 @@ O R35S é o que está mais avançado nisso: o DTB real está versionado em
 1. **Interface de jogos (produto, não sistema).** Os controles de hardware estão
    completos: 17 botões + 4 eixos, medidos no aparelho. O que falta é o launcher,
    que é do `Giochi app` — este repositório entrega o sistema.
-2. **Firmware de Bluetooth**: `rtl_bt/rtl8821cs_fw.bin` não existe no
-   `linux-firmware` e vem no pacote do fabricante. O `rtl8821cs_config.bin` está
-   resolvido (`scripts/gen-rtl8821cs-config.mjs`, 25 bytes, formato decifrado no
-   `btrtl.c`) e o driver o aceita — falta só o fw, que é binário diferente do
-   `rtl8821c_fw.bin` (USB). **Não** crie symlink do fw de USB: o `hci0` aparece e
-   o download falha em `-110`, o que engana o diagnóstico.
+2. **~~Firmware de Bluetooth~~ — RESOLVIDO.** O `rtl_bt/rtl8821cs_fw.bin` **é
+   oficial** e está no `linux-firmware-20240115`; o Buildroot 2024.02 é que não
+   o instala (§12.19). No aparelho: `fw version 0x75b8f098`, `Controller
+   A8:4F:A4:C9:98:4C`, scan encontrando dispositivos reais. Rádio liga no boot
+   por `AutoEnable = true` em `/etc/bluetooth/main.conf`.
 5. **Ligar a camada de boot** (§11): a linha `::respawn:` do `/etc/inittab`.
 6. **`genimage` dentro do Buildroot**, substituindo `make-sd-image.sh` como
    etapa externa.

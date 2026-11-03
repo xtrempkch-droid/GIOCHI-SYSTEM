@@ -285,6 +285,16 @@ fi
 
 # Copia overlays para caminhos sem espaços, independentemente do nome
 # da pasta do device (ex.: "powkiddy x55").
+# O staging é RECRIADO a cada build. `cp -a origem/. destino/` copia e
+# sobrescreve, mas nunca APAGA: um arquivo removido do overlay do aparelho
+# continuava no staging e era aplicado de novo em target-finalize — inclusive
+# sobrescrevendo um arquivo de pacote com a versão antiga.
+#
+# Medido: `rtl8821cs_config.bin` saiu do overlay, mas a cópia de 25 bytes do
+# build anterior continuou no staging e sobrepôs o firmware oficial do
+# linux-firmware, idêntico em nome e diferente em conteúdo. O sintoma seria
+# "Bluetooth não funciona" com o arquivo presente — o pior tipo.
+rm -rf "$OVERLAY_STAGE"
 mkdir -p "$OVERLAY_STAGE"
 stage_overlay() {
   local source="$1"
@@ -582,6 +592,42 @@ if [[ "$BUILD_STATUS" -ne 0 ]]; then
     echo "setsid: $(command -v setsid || echo 'ausente') ${SETSID_WAIT:-(sem --wait)}" >&2
   fi
   exit 1
+fi
+
+# Firmware obrigatório do aparelho (device/<pasta>/firmware-required.txt).
+#
+# O mesmo raciocínio do kernel-required.txt, aplicado a /lib/firmware: um
+# arquivo ausente não impede o boot, então ninguém nota até o Wi-Fi ou o
+# Bluetooth simplesmente não existirem. Medido neste repositório: o Buildroot
+# 2024.02 não instala `rtl_bt/rtl8821cs_*` mesmo com o pacote de firmware
+# ligado, e o sintoma foi "Bluetooth não funciona".
+FIRMWARE_REQUIRED="$DEVICE_DIR/firmware-required.txt"
+if [[ -f "$FIRMWARE_REQUIRED" ]]; then
+  missing_firmware=()
+  while IFS= read -r firmware_line; do
+    firmware_line="${firmware_line%%#*}"
+    firmware_line="$(printf '%s' "$firmware_line" | tr -d '[:space:]')"
+    [[ -z "$firmware_line" ]] && continue
+    case "$firmware_line" in
+      /*|*..*)
+        echo "ERRO: firmware-required.txt tem caminho inválido: $firmware_line" >&2
+        exit 2
+        ;;
+    esac
+    if [[ ! -e "$BUILD_DIR/target/lib/firmware/$firmware_line" ]]; then
+      missing_firmware+=("$firmware_line")
+    fi
+  done <"$FIRMWARE_REQUIRED"
+
+  if ((${#missing_firmware[@]})); then
+    echo "ERRO: firmware obrigatório ausente do rootfs ($DEVICE_ID):" >&2
+    printf '  - /lib/firmware/%s\n' "${missing_firmware[@]}" >&2
+    echo "" >&2
+    echo "A imagem bootaria e o rádio simplesmente não existiria. Se o arquivo" >&2
+    echo "está no tarball do linux-firmware mas não é instalado, acrecente-o a" >&2
+    echo "LINUX_FIRMWARE_FILES em config/package-overrides.mk." >&2
+    exit 1
+  fi
 fi
 
 # Credenciais no rootfs: o artefato do CI é público. Um `wpa_supplicant.conf`

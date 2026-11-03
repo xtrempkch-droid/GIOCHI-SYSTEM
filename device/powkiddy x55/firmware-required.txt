@@ -1,0 +1,18 @@
+# Arquivos de firmware que o rootfs PRECISA ter para o rádio funcionar.
+# ============================================================================
+# Verificado por `scripts/build-device.sh` depois da instalação: se algum faltar,
+# o build falha. Sem esta lista, um arquivo ausente produz imagem que boota e
+# "só não tem Wi-Fi/Bluetooth" — sem uma linha de erro em lugar nenhum.
+#
+# Um caminho por linha, relativo a /lib/firmware. Comentários com `#`.
+
+# ── Wi-Fi: RTL8821CS por SDIO (driver rtw88) ─────────────────
+rtw88/rtw8821c_fw.bin
+
+# ── Bluetooth: RTL8821CS por UART (driver btrtl) ─────────────
+# Os dois arquivos EXISTEM em linux-firmware-20240115, mas o Buildroot 2024.02
+# não os instala: BR2_PACKAGE_LINUX_FIRMWARE_RTL_88XX_BT lista rtl8821a_* e
+# rtl8821c_* e omite rtl8821cs_*. O acréscimo está em
+# config/package-overrides.mk, e esta lista garante que ele continua valendo.
+rtl_bt/rtl8821cs_fw.bin
+rtl_bt/rtl8821cs_config.bin
