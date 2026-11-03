@@ -16,6 +16,6 @@
   "runner": "ubuntu-24.04",
   "timeoutMinutes": 300,
   "status": "draft",
-  "bootNotes": "Compartilha DTS e mapa de botões com o X35S (decisão de 02/11/2026). A diferença entre as duas variantes ainda não foi levantada.",
+  "bootNotes": "Compartilha DTS e mapa de botões com o X35S (decisão de 02/11/2026). A diferença entre as duas variantes ainda não foi levantada. Sem `kernelCmdline` DE PROPÓSITO: console, baud, earlycon e rotação deste aparelho nunca foram medidos, e adivinhar aqui produz cartão que boota sem console. Ver docs/x35h-bringup.md.",
   "docs": "README.md"
 }

@@ -2,11 +2,31 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { loadDevice } from "./lib/devices.mjs";
+import { buildKernelCmdline, validateCmdlineSpec } from "./lib/cmdline.mjs";
 
-const [id, field = "json"] = process.argv.slice(2);
+const argv = process.argv.slice(2);
+
+// `--partuuid` é opcional: sem ele a cmdline sai com um marcador, o que serve
+// para documentação e teste. Com ele (é o que o make-sd-image.sh faz) sai a
+// linha que vai para o extlinux.conf e o boot.scr.
+let partuuid = undefined;
+const positional = [];
+for (let i = 0; i < argv.length; i += 1) {
+  const arg = argv[i];
+  if (arg === "--partuuid") {
+    partuuid = argv[i + 1];
+    i += 1;
+  } else if (arg.startsWith("--partuuid=")) {
+    partuuid = arg.slice("--partuuid=".length);
+  } else {
+    positional.push(arg);
+  }
+}
+
+const [id, field = "json"] = positional;
 
 if (!id) {
-  console.error("Uso: node scripts/device-info.mjs <device-id> [campo]");
+  console.error("Uso: node scripts/device-info.mjs <device-id> [campo] [--partuuid <uuid>]");
   process.exit(2);
 }
 
@@ -85,6 +105,21 @@ switch (field) {
       process.exit(2);
     }
     console.log(path.basename(match[1]));
+    break;
+  }
+  case "cmdline": {
+    const errors = validateCmdlineSpec(device.kernelCmdline);
+    if (errors.length > 0) {
+      for (const message of errors) {
+        console.error(`  ${message}`);
+      }
+      process.exit(2);
+    }
+    console.log(
+      buildKernelCmdline(device.kernelCmdline, {
+        partuuid: partuuid ?? "<PARTUUID>",
+      }),
+    );
     break;
   }
   default:

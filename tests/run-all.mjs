@@ -12,3 +12,5 @@ import "./buildroot-hash.test.mjs";
 import "./prepare-config.test.mjs";
 import "./assert-kernel-config.test.mjs";
 import "./firmware-required.test.mjs";
+import "./buttons-map.test.mjs";
+import "./cmdline.test.mjs";

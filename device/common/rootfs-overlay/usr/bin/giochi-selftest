@@ -244,13 +244,41 @@ for dev in /sys/class/input/event*/device; do
     esac
 done
 
-# O DTS mainline do 6.12 declara 16 botões em gpio-keys-control; o patch do
-# Giochi System acrescenta o 17º (BTN_MODE). Exigir 17 pega a regressão de
-# alguém remover o patch e o botão F sumir sem aviso.
-if [ "${PAD_BUTTONS:-0}" -ge 17 ]; then
-    pass "botões de gamepad: $PAD_BUTTONS (gpio-keys-control)"
+# Quantos botões de gamepad o `buttons.map` trata como OBRIGATÓRIOS.
+#
+# O kernel declara 17 (o patch 0002 acrescenta o BTN_MODE), mas o gabarito físico
+# desta revisão tem 16: o botão `F` não existe. O mapa marca essa entrada como
+# OPCIONAL e é ele que manda — exigir 17 aqui deixaria o teste falhando para
+# sempre, e um vermelho permanente esconde um botão realmente quebrado.
+MAP_FILE=/etc/giochi/buttons.map
+MAP_GAMEPAD=0
+if [ -r "$MAP_FILE" ]; then
+    MAP_GAMEPAD=$(awk '
+        {
+            opc = (tolower($0) ~ /opcional/)
+            sub(/#.*/, "")
+            if (index($0, "=") == 0) next
+            split($0, par, "=")
+            codigo = par[2]
+            gsub(/[ \t]/, "", codigo)
+            if (codigo ~ /^BTN_/) {
+                if (opc) nopt++
+                else total++
+            }
+        }
+        END { print total + 0 }
+    ' "$MAP_FILE" 2>/dev/null)
+fi
+
+if [ "${PAD_BUTTONS:-0}" -gt 0 ] && [ "$MAP_GAMEPAD" -gt 0 ] && [ "$PAD_BUTTONS" -lt "$MAP_GAMEPAD" ]; then
+    fail "botões de gamepad: $PAD_BUTTONS declarados — o mapa exige $MAP_GAMEPAD"
 elif [ "${PAD_BUTTONS:-0}" -gt 0 ]; then
-    fail "botões de gamepad: $PAD_BUTTONS — esperado 17 (falta o BTN_MODE do patch 0002?)"
+    EXTRA=$((PAD_BUTTONS - MAP_GAMEPAD))
+    if [ "$EXTRA" -gt 0 ]; then
+        pass "botões de gamepad: $PAD_BUTTONS declarados ($MAP_GAMEPAD obrigatórios + $EXTRA opcional(is))"
+    else
+        pass "botões de gamepad: $PAD_BUTTONS (gpio-keys-control)"
+    fi
 else
     fail "sem gpio-keys-control — nenhum botão de gamepad"
 fi

@@ -5,10 +5,11 @@ MIPI-DSI **720×1280**. É o único aparelho do projeto que já bootou em hardwa
 real — no antecessor `GIOCHI-KONSOL-OS`. Este diretório traz aquele
 conhecimento para cá.
 
-Status: **draft** — mas **boota em hardware real** com tela 720x1280, áudio,
-Wi-Fi, console, **17 botões de gamepad e 4 eixos analógicos**. Relatório medido
-em [`docs/x55-bringup.md`](../../docs/x55-bringup.md). Continua draft porque falta
-firmware de Bluetooth e a interface de jogos (que é do `Giochi app`).
+Status: **draft** — mas **boota em hardware real** com tela 720x1280 na
+orientação certa, áudio, Wi-Fi, Bluetooth, console e **16 botões de gamepad +
+4 eixos analógicos**. Relatório medido em
+[`docs/x55-bringup.md`](../../docs/x55-bringup.md). Continua draft porque falta a
+interface de jogos, que é do `Giochi app`.
 
 ## De onde veio cada coisa
 
@@ -17,7 +18,7 @@ firmware de Bluetooth e a interface de jogos (que é do `Giochi app`).
 | `GIOCHI-KONSOL-OS/buildroot/configs/giochi_x55_defconfig` | a base do `defconfig` deste diretório |
 | `GIOCHI-KONSOL-OS/device/x55/device.conf` | SoC, DTB, painel, rotação, rádio, U-Boot, versões |
 | `GIOCHI-KONSOL-OS/docs/hardware-e-drivers.md` | arquitetura de hardware, armadilhas medidas, receitas F1–F12 |
-| DTS mainline | `buttons.map`: o mapa evdev dos 17 botões |
+| DTS mainline | `buttons.map`: o mapa evdev dos botões (16 físicos + 1 declarado) |
 
 Regra que continua valendo: é **antecessor, não verdade atual**. Nada aqui foi
 copiado sem conferência, e o que não foi verificado está marcado como tal.
@@ -28,7 +29,7 @@ copiado sem conferência, e o que não foi verificado está marcado como tal.
 | --- | --- |
 | Painel | Himax **HX8394**, `powkiddy,x55-panel`, 720×1280@~60 Hz, `rotation = <270>` |
 | Backlight | PWM no `pwm4`, período 25000 ns |
-| Entrada | **17 botões + 4 eixos** pelo driver fora da árvore `rocknix-joypad`; volume por `gpio-keys` |
+| Entrada | **16 botões físicos + 4 eixos**, tudo por driver mainline (`gpio-keys-control` + `adc-joystick`); volume por `gpio-keys-vol` |
 | Áudio | codec **RK817** em `i2s1_8ch`, placa `rk817_ext` |
 | Wi-Fi | **RTL8821CS** por SDIO (`rtw88_8821cs`) |
 | Bluetooth | o mesmo chip por UART (`hci_h5`, tratado como 3 fios) |
@@ -72,9 +73,12 @@ Nenhum item é configuração de símbolo — são código e layout:
 1. ~~**`rocknix-joypad`**~~ — **desnecessário para a X55.** Medido no aparelho: o
    DTS mainline já declara 16 botões em `gpio-keys-control` (com os mesmos
    códigos `BTN_*` do mapa deste diretório), e o `adc-joystick` cobre os 4 eixos
-   com `CONFIG_JOYSTICK_ADC=y`. O 17º botão (`BTN_MODE`, `gpio3 PB7`) entra pelo
-   patch `patches/0002-giochi-system-x55-btn-mode.patch`. O driver fora da árvore
-   só seria necessário para algo que o DTS não declare.
+   com `CONFIG_JOYSTICK_ADC=y`. O driver fora da árvore só seria necessário para
+   algo que o DTS não declare.
+   O patch `patches/0002-giochi-system-x55-btn-mode.patch` acrescenta um 17º
+   botão (`BTN_MODE`, `gpio3 PB7`), mas **ele não existe no gabarito**: o mapa o
+   marca como `OPCIONAL` e as ferramentas esperam 16. Nó mantido para revisões
+   que tenham o botão; ver §12.22 do `AGENTS.md`.
 2. **Patches de DTS** (receitas F2/F3/F4 da doc de hardware):
    - `&hdmi { status = "disabled" }` e `&hdmi_sound { status = "disabled" }`;
    - `&sdmmc1 { no-mmc; no-sd; sd-uhs-sdr50; }` — sem isso o probe do Wi-Fi falha

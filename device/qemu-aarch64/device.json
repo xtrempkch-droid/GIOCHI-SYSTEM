@@ -17,6 +17,9 @@
   "runner": "ubuntu-24.04",
   "timeoutMinutes": 360,
   "status": "ready",
+  "kernelCmdline": {
+    "console": "ttyAMA0"
+  },
   "bootNotes": "Image + rootfs ext4 para QEMU virt. Veja docs/flashing.md para o comando de inicialização.",
   "docs": "README.md"
 }

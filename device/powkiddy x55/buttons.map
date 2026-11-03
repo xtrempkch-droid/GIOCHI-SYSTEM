@@ -7,13 +7,28 @@
 # | DTS **mainline** (`rk3566-powkiddy-x55.dts`) | `gpio-keys` | `adc-joystick`, faixa 15..1023 |
 # | DTS do **projeto** (ROCKNIX) | **`rocknix-joypad`** (fora da árvore) | SARADC, deadzone 216, escala 2 |
 #
-# Este arquivo serve para os **dois**, porque os códigos evdev dos 17 botões são
-# idênticos. O botão `F` (MODE, gpio3 PB7) NÃO existe no DTS mainline puro; o
-# Giochi System o acrescenta pelo patch `patches/0002-giochi-system-x55-btn-mode.patch`.
+# Este arquivo serve para os **dois**, porque os códigos evdev são idênticos.
+#
+# ## O botão `F` (MODE) é OPCIONAL
+#
+# O `F` (`BTN_MODE`, gpio3 PB7) não existe no DTS mainline; o Giochi System o
+# acrescenta pelo patch `patches/0002-giochi-system-x55-btn-mode.patch`. Mas no
+# aparelho físico testado este botão **não existe**: o gabarito tem 16 botões de
+# gamepad, não 17. Provavelmente foi removido em alguma revisão de hardware.
+#
+# Decisão: o nó continua no DTS (revisões com o botão funcionam sem rebuild) e a
+# entrada abaixo leva o marcador `OPCIONAL`. As ferramentas leem esse marcador:
+#
+#   giochi-buttons        espera 16 e trata o `home` como bônus
+#   giochi-selftest       não falha por declarar 17 e o físico ter 16
+#
+# Sem o marcador, as duas ferramentas ficariam presas em "falta 1 botão" para
+# sempre — falso negativo que esconde um botão realmente quebrado.
 #
 # Conferido no aparelho com o patch aplicado:
 #   gpio-keys-control: 17 teclas declaradas, incluindo 0x13c (BTN_MODE)
 #   adc-joystick:      ABS_X|ABS_Y|ABS_RX|ABS_RY (4 eixos)
+#   16 botões físicos respondem; o 17º não existe no gabarito
 #
 # ## O que o build do projeto usa
 #
@@ -50,7 +65,7 @@ r2      = BTN_TR2            # gpio3 PC7
 start   = BTN_START          # gpio4 PA2
 select  = BTN_SELECT         # gpio4 PA4
 # Botão F. Só existe no DTS do projeto (mainline não tem), em gpio3 PB7.
-home    = BTN_MODE
+home    = BTN_MODE           # gpio3 PB7 — OPCIONAL: nao existe fisicamente nesta revisao do aparelho
 
 # ── clique dos analógicos ────────────────────────────────────
 thumbl  = BTN_THUMBL         # gpio4 PA7

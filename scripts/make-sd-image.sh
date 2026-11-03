@@ -201,16 +201,21 @@ mkfs.ext4 -q -L GIOCHI -F "$ROOT_LOOP"
 PARTUUID_P2="$(printf '%08x-02' "$DISK_ID")"
 echo "  p2:      PARTUUID=$PARTUUID_P2"
 
-# Linha de comando derivada do cartão que BOOTOU neste aparelho (log do
-# antecessor preservado em ~/.cache/giochi-system/old-card). Cada parâmetro tem
-# motivo medido:
-#   console=ttyS2,1500000n8      UART do console é ttyS2 a 1500000, não 115200
+# A linha de comando vem do `kernelCmdline` do device.json — NÃO de um literal
+# aqui. Com um aparelho só isso era inofensivo; a partir do segundo, um literal
+# herdado da X55 gera cartão que boota e não mostra console nenhum, sem uma
+# linha de erro. Cada parâmetro continua com motivo medido, agora no device.json:
+#   console=ttyS2,1500000n8      UART do console da X55 é ttyS2 a 1500000
 #   earlycon=uart8250,mmio32,..  saída desde o início do kernel; sem ela, uma
 #                                falha antes do console subir é silêncio total
-#   fbcon=rotate:3               o painel é montado a 270°; sem isso o console
-#                                aparece de cabeça para baixo
+#   fbcon=rotate:3               o painel da X55 é montado a 270°
 #   rootwait rw                  cartão SD enumera depois do rootfs
-KERNEL_CMDLINE="root=PARTUUID=$PARTUUID_P2 rootwait rw rootfstype=ext4 console=ttyS2,1500000n8 earlycon=uart8250,mmio32,0xfe660000 fbcon=rotate:3"
+if ! KERNEL_CMDLINE="$(node "$ROOT/scripts/device-info.mjs" "$DEVICE_ID" cmdline --partuuid "$PARTUUID_P2")"; then
+  echo "ERRO: $DEVICE_ID não tem kernelCmdline válido em device.json." >&2
+  echo "Sem ele não há console no cartão — e o cartão 'boota' sem ninguém ver." >&2
+  exit 2
+fi
+echo "  cmdline: $KERNEL_CMDLINE"
 
 echo "Gravando firmware nos offsets do RK3566..."
 case "$FIRMWARE_MODE" in

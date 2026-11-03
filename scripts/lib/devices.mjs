@@ -1,6 +1,7 @@
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { validateCmdlineSpec } from "./cmdline.mjs";
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const DEVICE_ROOT = path.join(ROOT, "device");
@@ -266,6 +267,15 @@ export async function validateDevice(device) {
     require(await pathExists(docsPath), `documentação não encontrada: ${device.docs}`);
   } catch (error) {
     errors.push(error.message);
+  }
+
+  // kernelCmdline: opcional no schema, OBRIGATÓRIO para gerar imagem de cartão
+  // (make-sd-image.sh falha sem ele). Aqui a validação é de forma — o build de
+  // rascunho legitimamente ainda não sabe a UART do aparelho.
+  if (device.kernelCmdline !== undefined) {
+    for (const message of validateCmdlineSpec(device.kernelCmdline)) {
+      errors.push(message);
+    }
   }
 
   return errors;

@@ -443,7 +443,7 @@ intenção (o parâmetro na linha de comando) não pegaria este bug.
 Ferramenta que fica na imagem, porque testar controle é rotina e não evento.
 
 ```sh
-giochi-buttons            # 17 botões de gamepad, com contagem do que falta
+giochi-buttons            # 16 botões de gamepad, com contagem do que falta
 giochi-buttons --axes     # 4 eixos, com barra de posição
 giochi-buttons --volume   # só volume
 giochi-buttons --all      # um dispositivo por vez
@@ -455,10 +455,11 @@ Saída medida no aparelho:
 
 ```text
 == gpio-keys-control (/dev/input/event3) ==
-Esperando 17 botão(ões). Cada um que responder reduz o que falta.
+Esperando 16 botão(ões). Cada um que responder reduz o que falta.
+(1 mapeado(s) como OPCIONAL — não existe no gabarito desta revisão)
 
-  [ 1/17] a          pressionado   (faltam 16)
-  [ 2/17] b          pressionado   (faltam 15)
+  [ 1/16] a          pressionado   (faltam 15)
+  [ 2/16] b          pressionado   (faltam 14)
   ...
   eixo RX (direito horizontal)  512  [----------#----------]
 ```
@@ -500,7 +501,7 @@ ping 1.1.1.1      → 2 pacotes, 0% de perda, 9 ms
 
 Só tratar como falha se o `wlan0` **não** aparecer ou se o `iw link` ficar vazio.
 
-## Controles: 17 botões e 4 eixos, sem driver fora da árvore
+## Controles: 16 botões físicos e 4 eixos, sem driver fora da árvore
 
 Correção de um diagnóstico anterior deste repositório. A documentação dizia que
 "16 dos 17 botões não funcionam" e que o `rocknix-joypad` era obrigatório. Ao
@@ -540,6 +541,46 @@ adc-joystick | abs: 1b              → ABS_X|ABS_Y|ABS_RX|ABS_RY
   [PASS] eixos analógicos: 4 (adc-joystick)
   [PASS] /etc/giochi/buttons.map (31 entradas)
 ```
+
+### O botão `F` não existe no aparelho
+
+Medido a pedido do usuário, que apontou o fato: **o `F` (`BTN_MODE`, `gpio3 PB7`)
+não existe fisicamente** neste gabarito. Provavelmente saiu numa revisão de
+hardware anterior a esta. O DTS continua declarando o nó e o pino não gera
+evento espúrio — o problema não é o kernel, é a **expectativa** das ferramentas.
+
+Sem tratamento, o efeito é um falso negativo permanente:
+
+```text
+giochi-buttons     → "Esperando 17 botão(ões)" ... nunca chega a 17
+giochi-selftest    → [FAIL] botões de gamepad: 16 de 17
+```
+
+Um teste que falha para sempre é pior do que teste nenhum: o operador aprende a
+ignorá-lo e um botão que **realmente** quebrar passa despercebido. Foi preciso
+mudar as três peças, não só o número:
+
+| Peça | Antes | Agora |
+| --- | --- | --- |
+| `buttons.map` | 17 botões, todos iguais | `home = BTN_MODE … OPCIONAL` |
+| `giochi-buttons` | esperava 17 fixo | lê o marcador: espera **16**, `home` é bônus |
+| `giochi-selftest` | `index` fixo por 17 bits | deriva a contagem do próprio mapa |
+
+Saída agora, com o `F` pressionado se ele existir:
+
+```text
+Esperando 16 botão(ões). Cada um que responder reduz o que falta.
+(1 mapeado(s) como OPCIONAL — não existe no gabarito desta revisão)
+
+  [ 1/16] a          pressionado   (faltam 15)
+  home       pressionado   [OPCIONAL — este aparelho tem o botão]
+```
+
+`OPCIONAL` não é "ignore": é "este aparelho pode ou não ter". O nó fica no DTS
+para que uma revisão que tenha o botão funcione sem rebuild, e
+`tests/buttons-map.test.mjs` fecha o contrato — 16 obrigatórios, exatamente um
+opcional, e ele é o `BTN_MODE`. O usuário deixou a decisão **em aberto**: se
+alguma revisão futura não tiver o furo, basta remover o marcador.
 
 ### Duas armadilhas dentro da correção
 
@@ -589,21 +630,27 @@ execução (`wpa_passphrase` no aparelho).
 
 ## O que ainda falta (ordem de risco)
 
-1. **`rocknix-joypad`** — driver fora da árvore. Sem ele, **16 dos 17 botões não
-   funcionam**; só o volume responde (`gpio-keys`). O `assert-kernel-config`
-   falha se alguém remover o `allow-drop` sem trazer o driver.
+1. **~~`rocknix-joypad`~~ — NÃO É NECESSÁRIO.** Diagnóstico anterior errado,
+   corrigido medindo: o `gpio-keys-control` do DTS mainline já declara os 16
+   botões físicos com os códigos certos e os 4 eixos vêm do `adc-joystick` com
+   `CONFIG_JOYSTICK_ADC=y`. O driver fora da árvore não acrescenta nada aqui.
 2. **~~Validação do patch de DTS em hardware~~ — FEITO.** O patch
    `patches/0001-giochi-system-x55-dts.patch` está no aparelho e os quatro
    efeitos foram observados: `hwrng: rockchip-rng` (o `&rng okay`), SDIO em
    SDR50, HDMI fora do `card` de display e `dma-names` aceito pelo uart1.
-3. **Firmware de Bluetooth do RTL8821CS.** O driver pede
-   `rtl_bt/rtl8821cs_fw.bin` e o `linux-firmware` só traz `rtl8821c_fw.bin`.
-   Sem ele o `hci0` não sobe. Junto com o `rtl8821cs_config.bin` de 25 bytes
-   (offset `0x0c`), é o último item de rádio.
+3. **~~Firmware de Bluetooth~~ — RESOLVIDO.** O `rtl_bt/rtl8821cs_fw.bin` **é
+   oficial** e vem no `linux-firmware-20240115`; o Buildroot 2024.02 é que não o
+   instala (`config/package-overrides.mk`). O `rtl8821cs_config.bin` também é
+   oficial (25 bytes, 1500000 baud, flow control ligado) — o gerador que havia
+   aqui produzia um arquivo **errado** e foi removido. Medido no aparelho:
+   `fw version 0x75b8f098`, `Controller A8:4F:A4:C9:98:4C`, scan achando
+   dispositivos reais.
 4. **`giochi-init` no `/etc/inittab`** — o script está na imagem e ninguém o
    chama; `giochi-selftest` avisa.
 5. **`genimage` dentro do Buildroot** — hoje a imagem de cartão é montada por
    `scripts/make-sd-image.sh`, fora do Buildroot.
+6. **Launcher** — é do `Giochi app`, não deste repositório. Enquanto ele não
+   chegar, o aparelho para no console com a tela na orientação certa.
 
 ## Como reproduzir
 

@@ -66,8 +66,14 @@ translate() {
             return "codigo " code
         }
         BEGIN {
-            esperados = 0
             while ((getline linha < mapfile) > 0) {
+                # O marcador OPCIONAL fica no comentário da linha, então precisa
+                # ser detectado ANTES de remover o comentário. Um botão opcional
+                # é aquele que existe no DT mas não no gabarito físico (o `F`
+                # desta revisão): contá-lo como obrigatório faria o teste nunca
+                # fechar e esconderia um botão realmente quebrado.
+                opcional = (tolower(linha) ~ /opcional/)
+
                 sub(/#.*/, "", linha)
                 if (index(linha, "=") == 0) continue
                 split(linha, par, "=")
@@ -79,17 +85,21 @@ translate() {
                 # Só entradas de botão: o código é um nome evdev em maiúsculas.
                 if (codigo !~ /^([A-Z]+_)+[A-Z0-9]+$/) continue
                 porcodigo[codigo] = nome
+                if (opcional) opcionais[nome] = 1
+
                 if (classe == "gamepad" && codigo ~ /^BTN_/) {
+                    if (opcional) { nopt++; continue }
                     total++
-                    ord[total] = codigo
                 } else if (classe == "volume" && codigo ~ /^KEY_VOLUME/) {
                     total++
-                    ord[total] = codigo
                 }
             }
             close(mapfile)
             if (classe == "gamepad" || classe == "volume") {
                 printf "Esperando %d botão(ões). Cada um que responder reduz o que falta.\n", total
+                if (nopt > 0) {
+                    printf "(%d mapeado(s) como OPCIONAL — não existe no gabarito desta revisão)\n", nopt
+                }
                 printf "Ctrl+C para sair.\n\n"
             } else {
                 printf "Mova os eixos. Ctrl+C para sair.\n\n"
@@ -125,6 +135,12 @@ translate() {
                     rotulo = human(codigo, porcodigo[nomecodigo])
                 }
                 if (valor == 1) {
+                    if (rotulo in opcionais) {
+                        # Bônus: aparece se o hardware tiver o botão. Não conta.
+                        printf "  %-10s pressionado   [OPCIONAL — este aparelho tem o botão]\n", rotulo
+                        fflush()
+                        next
+                    }
                     if (!(nomecodigo in visto)) {
                         visto[nomecodigo] = 1
                         vistos++
@@ -208,7 +224,8 @@ case "$modo" in
                     sub(/[ \t]+$/, "", n)
                     gsub(/[ \t]/, "", c)
                     if (n ~ /^axis_/) next
-                    printf "  %-14s %s\n", n, c
+                    opc = (tolower($0) ~ /opcional/) ? "  (opcional)" : ""
+                    printf "  %-14s %s%s\n", n, c, opc
                 }'
             AXES=$(grep -cE '^[[:space:]]*axis_[a-z]+_(min|max)' "$MAP" 2>/dev/null)
             [ "${AXES:-0}" -gt 0 ] && echo "  (mais $AXES parâmetros de faixa/eixo, testados com --axes)"

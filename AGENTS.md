@@ -113,7 +113,9 @@ O que passou e é o que importa para "sair do console":
   `0x75b8f098`, scan encontrando o host e outros dispositivos, ligado no boot;
 - áudio: `0 [rk817ext]: simple-card - rk817_ext`;
 - `hwrng: rockchip-rng`;
-- **17 botões de gamepad** (`gpio-keys-control`, inclui BTN_MODE pelo patch 0002);
+- **16 botões de gamepad** que existem fisicamente (`gpio-keys-control`) — o DTS
+  declara **17**, mas o `F`/`BTN_MODE` (`gpio3 PB7`, patch 0002) **não existe** no
+  gabarito desta revisão (§12.22);
 - **4 eixos analógicos** (`adc-joystick`, ABS_X/Y/RX/RY) — exige `CONFIG_JOYSTICK_ADC`;
 - `gpio-keys-vol` e `/etc/giochi/buttons.map` (31 linhas);
 - **console rotacionado** para paisagem: `160x45` com `fbcon/rotate=3`;
@@ -823,12 +825,41 @@ Decisão: `BR2_TARGET_GENERIC_GETTY_BAUDRATE_KEEP=y` no
 manda no baud é a linha de comando do kernel. Verificado no rootfs do aparelho:
 `console::respawn:/sbin/getty -L  console 0 vt100`.
 
+### 12.22 Botão declarado no DTS que não existe no plástico
+
+O `F`/`BTN_MODE` (`gpio3 PB7`) foi acrescentado ao DTS pelo patch 0002 porque o
+gabarito tem o furo do botão. Medido no aparelho: **o botão não existe** —
+provavelmente saiu numa revisão de hardware anterior a esta. O pino não gera
+evento espúrio, então o DTS fica "correto" e mesmo assim há um nó que nunca
+responde.
+
+Esse é o pior tipo de divergência para uma ferramenta de teste: `giochi-buttons`
+esperava **17** e `giochi-selftest` exigia 17 bits, então as duas ficavam presas
+em "falta 1 botão" **para sempre** — e o falso negativo esconde um botão que
+realmente quebrou, porque o operador aprende a ignorar a mensagem.
+
+Decisão (o usuário deixou em aberto; este é o padrão atual):
+
+- o nó **continua** no DTS — revisões que tenham o botão funcionam sem rebuild;
+- a entrada do `buttons.map` leva o marcador **`OPCIONAL`**;
+- `giochi-buttons` espera **16** obrigatórios e trata o `home` como bônus
+  (`[OPCIONAL — este aparelho tem o botão]`, sem contar no que falta);
+- `giochi-selftest` deriva a quantidade esperada **do próprio mapa** e reporta
+  `16 declarados (16 obrigatórios + 1 opcional)`.
+
+`tests/buttons-map.test.mjs` fecha o contrato: 16 `BTN_*` obrigatórios, exatamente
+um `OPCIONAL` e ele é o `BTN_MODE`. Mudar a contagem sem querer agora falha o
+teste em vez de virar um selftest eternamente vermelho.
+
+Se um dia o marcador for removido sem que o botão exista, o teste não pega — mas
+o `giochi-buttons` volta a mentir. O marcador é a fonte da verdade.
+
 ## 13. Aparelhos
 
 | ID | Pasta | SoC | Arch | Status | Falta |
 | --- | --- | --- | --- | --- | --- |
 | `qemu-aarch64` | `qemu-aarch64/` | virtual | arm64 | **ready** | nada — é o smoke test do pipeline |
-| `powkiddy-x55` | `powkiddy x55/` | RK3566 | arm64 | draft | **boota com tela, áudio, Wi-Fi e 17 botões + 4 eixos**; falta firmware de BT (`rtl8821cs_fw.bin`) |
+| `powkiddy-x55` | `powkiddy x55/` | RK3566 | arm64 | draft | **boota com tela, áudio, Wi-Fi, BT e 16 botões + 4 eixos**; falta o launcher (do `Giochi app`) |
 | `powkiddy-x35s` | `powkiddy x35s/` | RK3326 | arm64 | draft | o mesmo + driver de joypad |
 | `powkiddy-x35h` | `powkiddy x35h/` | RK3326 | arm64 | draft | o mesmo |
 | `r35s` | `r35s/` | RK3326 | arm64 | draft | pipeline RK3326 (BL31/DDR/U-Boot), joypad fora da árvore |
@@ -842,8 +873,8 @@ O R35S é o que está mais avançado nisso: o DTB real está versionado em
 ## 14. Próximos passos, por ordem de risco
 
 1. **Interface de jogos (produto, não sistema).** Os controles de hardware estão
-   completos: 17 botões + 4 eixos, medidos no aparelho. O que falta é o launcher,
-   que é do `Giochi app` — este repositório entrega o sistema.
+   completos: 16 botões físicos + 4 eixos, medidos no aparelho. O que falta é o
+   launcher, que é do `Giochi app` — este repositório entrega o sistema.
 2. **~~Firmware de Bluetooth~~ — RESOLVIDO.** O `rtl_bt/rtl8821cs_fw.bin` **é
    oficial** e está no `linux-firmware-20240115`; o Buildroot 2024.02 é que não
    o instala (§12.19). No aparelho: `fw version 0x75b8f098`, `Controller
