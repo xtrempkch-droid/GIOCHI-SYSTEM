@@ -679,7 +679,24 @@ o rootfs, use uma destas vias:
 Detalhe: o `gzwrite` **não** depende do host depois do envio; parar o container
 não interrompe a gravação.
 
-### 12.14 `awk` do busybox não tem `strtonum`
+### 12.14 Credencial do usuário nunca pode entrar na imagem
+
+O artefato do CI é público. Um `wpa_supplicant.conf` com `ssid=`/`psk=` no
+overlay de um aparelho entrega a senha da rede de quem buildou — e ninguém
+percebe, porque o arquivo "só existe no aparelho". O mesmo vale para chave de
+host SSH: toda imagem sairia com a mesma identidade.
+
+`build-device.sh` agora **falha** se, no `target/`:
+
+- `etc/wpa_supplicant.conf` tiver linha `ssid=` ou `psk=` (o template do
+  Buildroot tem só `key_mgmt=NONE` e passa);
+- existir `etc/ssh/ssh_host_*_key` (o sshd gera no primeiro boot).
+
+Credencial de rede é provisionada **no aparelho**:
+`wpa_passphrase ... > /etc/wpa_supplicant.conf`. O `S40wifi` conecta se o
+arquivo existir e não faz nada se não existir.
+
+### 12.15 `awk` do busybox não tem `strtonum`
 
 O contador de bits do `giochi-selftest` usava `strtonum("0x" $i)`, que é extensão
 do **gawk**. No busybox awk a função não existe e a expressão devolve vazio: o
@@ -690,7 +707,7 @@ pesos — funciona em busybox, gawk e mawk.
 Regra ao escrever shell para este rootfs: o alvo é **busybox ash + busybox awk**,
 não bash + gawk.
 
-### 12.15 `BR2_TARGET_GENERIC_GETTY_BAUDRATE_*` reprograma a UART
+### 12.16 `BR2_TARGET_GENERIC_GETTY_BAUDRATE_*` reprograma a UART
 
 Um baud explícito no getty faz o getty **reprogramar** a UART para aquela
 velocidade, ignorando o que o kernel configurou. No X55 (console a 1500000), o

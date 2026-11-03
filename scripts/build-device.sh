@@ -584,6 +584,27 @@ if [[ "$BUILD_STATUS" -ne 0 ]]; then
   exit 1
 fi
 
+# Credenciais no rootfs: o artefato do CI é público. Um `wpa_supplicant.conf`
+# com `ssid=`/`psk=` dentro da imagem entrega a senha da rede de quem buildou, e
+# ninguém percebe porque o arquivo "só existe no aparelho". O template que o
+# Buildroot instala tem apenas `key_mgmt=NONE`, sem rede — é o que se espera.
+TARGET_ETC="$BUILD_DIR/target/etc"
+if [[ -f "$TARGET_ETC/wpa_supplicant.conf" ]]; then
+  if grep -qE '^[[:space:]]*(ssid|psk)=' "$TARGET_ETC/wpa_supplicant.conf" 2>/dev/null; then
+    echo "ERRO: $TARGET_ETC/wpa_supplicant.conf tem credencial de rede." >&2
+    echo "A imagem publicada levaria a senha do Wi-Fi. Remova o arquivo do" >&2
+    echo "overlay do aparelho; ele deve ser criado no aparelho, em tempo de uso" >&2
+    echo "(ver docs/x55-bringup.md, seção de Wi-Fi)." >&2
+    exit 1
+  fi
+fi
+# Chave privada SSH na imagem é o mesmo problema, com dano maior.
+if compgen -G "$TARGET_ETC/ssh/ssh_host_*_key" >/dev/null; then
+  echo "ERRO: chave de host SSH dentro da imagem ($TARGET_ETC/ssh)." >&2
+  echo "Toda imagem sairia com a mesma identidade. O sshd gera no primeiro boot." >&2
+  exit 1
+fi
+
 # `assert-config` cobriu os símbolos BR2_*. Os CONFIG_* do kernel são outro
 # Kconfig, resolvido por outro `olddefconfig`, e ninguém verificava o resultado:
 # símbolo de painel, MMC ou console ausente gera imagem que não boota com o
