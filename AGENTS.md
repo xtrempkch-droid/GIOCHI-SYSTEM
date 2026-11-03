@@ -1133,12 +1133,22 @@ tem precedência histórica e a divergência precisa ser resolvida explicitament
 
 ## 18. Como retomar
 
-Ordem sugerida para a próxima sessão:
+### Disponibilidade dos aparelhos — pergunte antes
+
+| Aparelho | Estado | Consequência |
+| --- | --- | --- |
+| `powkiddy-x55` | **em uso pelo time do `Giochi app`** (launcher) | não usar para teste; **avisar com antecedência** se precisar |
+| `powkiddy-x35h` | disponível para teste | é o aparelho de bring-up agora |
+
+A X55 continua conectada (USB e TTL) mas está **ocupada**. Não rode nada nela
+sem combinar antes: um reboot ou uma gravação de cartão interrompe o trabalho de
+quem está usando. O mesmo vale para `adb`/SSH/serial — conectar já interfere.
+
+Ordem sugerida para a próxima sessão (nada aqui precisa da X55):
 
 ```bash
-cd "C:\Users\Jussara dias\Desktop\plataforma sistema\Giochi system"
 node scripts/validate-devices.mjs      # 6 devices, 1 habilitado
-node tests/run-all.mjs                 # 36/36
+node tests/run-all.mjs                 # 107/107
 node scripts/list-devices.mjs --github-matrix
 ```
 
@@ -1150,8 +1160,10 @@ Depois, no GitHub (não há como disparar dispatch sem token daqui):
    `assert-config` vem com o nome do símbolo. Sem token, `GET
    /actions/jobs/<id>/logs` devolve 403 — leia pela interface.
 
-Estado do Git nesta revisão: `main` limpo, sincronizado com `origin/main`
-(`d9e81aa`), remoto `https://github.com/xtrempkch-droid/GIOCHI-SYSTEM.git`.
+Estado do Git nesta revisão: `main` sincronizado com `origin/main` (`9eb3e6f`),
+remoto `https://github.com/xtrempkch-droid/GIOCHI-SYSTEM.git`. **Push por SSH**
+(`git@github.com:...`): o HTTPS não tem credencial no host e o push falha com
+`unable to get password from user`.
 
 Build real: só em Linux/WSL2 com caminho sem espaços (o script recusa caminho
 com espaço), ou pelo GitHub Actions.

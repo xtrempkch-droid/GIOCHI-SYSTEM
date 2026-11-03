@@ -30,6 +30,16 @@ test("o acréscimo usa LINUX_FIRMWARE_FILES, que é a variável do pacote", asyn
   assert.match(text, /^LINUX_FIRMWARE_FILES \+= [^\n]*rtl8821cs_fw\.bin/m);
 });
 
+test("o acréscimo é condicional ao pacote do rádio existir no aparelho", async () => {
+  // O override vale para TODOS os aparelhos. A X35H não tem o RTL8821CS e o
+  // defconfig dela desliga BR2_PACKAGE_LINUX_FIRMWARE_RTL_88XX_BT de propósito:
+  // um `+=` incondicional punha os blobs no rootfs dela mesmo assim, 56 KB de
+  // firmware para um chip ausente, contradizendo o próprio defconfig.
+  const text = await readOverrides();
+  assert.match(text, /^ifeq \(\$\(BR2_PACKAGE_LINUX_FIRMWARE_RTL_88XX_BT\),y\)$/m);
+  assert.match(text, /^endif$/m);
+});
+
 test("o X55 declara os firmwares obrigatórios do rádio", async () => {
   const required = await readFile(
     path.join(ROOT, "device/powkiddy x55/firmware-required.txt"),

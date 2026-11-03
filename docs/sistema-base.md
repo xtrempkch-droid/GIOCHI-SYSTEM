@@ -126,6 +126,29 @@ device/common/rootfs-overlay/
 A ordem dos `S*` importa: `S30usbnet` sobe a interface **antes** de `S50sshd`,
 para o sshd nascer com socket válido.
 
+## Trocar de servidor SSH num build retomado exige build limpo
+
+Buildroot **não apaga** arquivo de `target/` quando um símbolo sai do Kconfig.
+Remover `BR2_PACKAGE_DROPBEAR` do defconfig e rodar com
+`GIOCHI_SYSTEM_KEEP_WORK=1` deixa o binário antigo no rootfs — e a imagem sai
+com **os dois** servidores na porta 22, que é exatamente o defeito que a troca
+existia para corrigir.
+
+Desde que isso foi medido, `build-device.sh` guarda o conjunto de
+`BR2_PACKAGE_*=y` em `work/<device>/packages.state` e **recusa** continuar
+quando um pacote sumiu:
+
+```text
+ERRO: pacote(s) removido(s) desde o último build: DROPBEAR
+  O target/ do build anterior ainda tem os arquivos deles e o
+  Buildroot NÃO os remove: a imagem sairia com binário que a config
+  diz que não existe.
+  Rode de novo SEM GIOCHI_SYSTEM_KEEP_WORK=1 (o padrão limpa work/).
+```
+
+Regra prática: `KEEP_WORK=1` é seguro para **acrescentar** pacote e para
+depurar o mesmo conjunto. Remover ou renomear exige build limpo.
+
 ## O que um aparelho NÃO pode tirar do sistema base
 
 Um `defconfig` de aparelho pode acrescentar, mas não pode remover:

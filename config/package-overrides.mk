@@ -50,4 +50,13 @@ override STRACE_CONF_OPTS = --enable-mpers=no --enable-bundled=yes \
 # é incluído ANTES das receitas (Makefile, ~linha 530), então o acréscimo soma à
 # lista em vez de ser apagado. Conferir com:
 #   make -p -n | grep '^LINUX_FIRMWARE_FILES'
+#
+# CONDICIONAL, e tem de continuar assim: este arquivo vale para TODOS os
+# aparelhos. A X35H não tem o RTL8821CS populado e o defconfig dela desliga
+# `BR2_PACKAGE_LINUX_FIRMWARE_RTL_88XX_BT` de propósito. Um `+=` incondicional
+# colocava os dois blobs no rootfs dela mesmo assim — 56 KB de firmware para um
+# chip que não existe, contradizendo o que o defconfig declara. Buildroot expõe
+# os símbolos `BR2_*` como variáveis de make, então a condição é a mesma do menu.
+ifeq ($(BR2_PACKAGE_LINUX_FIRMWARE_RTL_88XX_BT),y)
 LINUX_FIRMWARE_FILES += rtl_bt/rtl8821cs_fw.bin rtl_bt/rtl8821cs_config.bin
+endif
