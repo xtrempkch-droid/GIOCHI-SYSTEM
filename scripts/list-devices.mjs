@@ -30,10 +30,23 @@ const args = parseArgs(process.argv.slice(2));
 const index = await loadIndex();
 const arch = args.arch || index.defaultArch;
 const deviceId = args.device || "all";
-// `--allow-draft` (ou ALLOW_DRAFT=1) inclui rascunhos que já declaram
+// `--allow-draft` (ou ALLOW_DRAFT=1/true/yes) inclui rascunhos que já declaram
 // buildrootDefconfig. É o que permite tentar um aparelho novo no CI antes de
 // ligá-lo na matriz normal.
-const allowDraft = Boolean(args["allow-draft"]) || process.env.ALLOW_DRAFT === "1";
+//
+// Aceita 1, true, yes e on porque a variável vem de dois lugares: do `env:` do
+// workflow (string) e da mão de quem roda local. Comparar só com "1" já
+// derrubou um build com "Dispositivo desabilitado".
+function truthy(value) {
+  const text = String(value ?? "").trim().toLowerCase();
+  return text === "1" || text === "true" || text === "yes" || text === "on";
+}
+
+const allowDraftFlag = args["allow-draft"];
+const allowDraft =
+  allowDraftFlag === true ||
+  truthy(allowDraftFlag) ||
+  truthy(process.env.ALLOW_DRAFT);
 
 try {
   if (args["github-matrix"]) {

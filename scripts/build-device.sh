@@ -49,7 +49,14 @@ if [[ ! "$BUILDROOT_VERSION" =~ ^[0-9]{4}\.[0-9]{2}(\.[0-9]+)?$ ]]; then
 fi
 
 ENABLED="$(node "$ROOT/scripts/device-info.mjs" "$DEVICE_ID" enabled)"
-if [[ "$ENABLED" != "true" && "${ALLOW_DRAFT:-0}" != "1" ]]; then
+# ALLOW_DRAFT aceita 1/true/yes/on: a variável chega do `env:` do workflow como
+# string, e comparar só com "1" já derrubou um build com "Dispositivo
+# desabilitado" quando o valor era "true".
+case "$(printf '%s' "${ALLOW_DRAFT:-0}" | tr '[:upper:]' '[:lower:]')" in
+  1|true|yes|on) ALLOW_DRAFT_OK=1 ;;
+  *) ALLOW_DRAFT_OK=0 ;;
+esac
+if [[ "$ENABLED" != "true" && "$ALLOW_DRAFT_OK" != "1" ]]; then
   echo "ERRO: $DEVICE_ID está desabilitado em device/devices.json." >&2
   echo "Habilite o device ou use ALLOW_DRAFT=1 para uma tentativa de desenvolvimento." >&2
   exit 2

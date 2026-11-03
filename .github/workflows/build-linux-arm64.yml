@@ -31,10 +31,17 @@ on:
         default: ""
         type: string
       allow_draft:
-        description: "Incluir rascunho que já declare defconfig (ex.: powkiddy-x55)"
+        description: "Construir rascunho (ex.: powkiddy-x55). Só vale com device=<id>, nunca com all."
         required: false
-        default: false
-        type: boolean
+        default: "false"
+        # `choice`, e não `boolean`: `github.event.inputs.*` chega como STRING, e
+        # comparar string com booleano em expressão do Actions faz coerção
+        # numérica — "true" == true dá falso. Foi o que manteve o allow_draft
+        # desligado e derrubou o discover com "Dispositivo desabilitado".
+        type: choice
+        options:
+          - "false"
+          - "true"
 
 permissions:
   contents: read

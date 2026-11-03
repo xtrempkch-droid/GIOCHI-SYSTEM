@@ -262,7 +262,11 @@ export async function getBuildableDevices({ arch = null, deviceId = "all", allow
     const entry = index.devices.find((item) => item.id === deviceId);
     if (!entry) throw new Error(`Dispositivo não encontrado: ${deviceId}`);
     if (!entry.enabled && !allowDraft) {
-      throw new Error(`Dispositivo desabilitado: ${deviceId}`);
+      throw new Error(
+        `Dispositivo desabilitado: ${deviceId}. ` +
+          `Para construir um rascunho, peça este id (não "all") e ligue o ` +
+          `allow_draft — no CI é a entrada allow_draft="true"; local é ALLOW_DRAFT=1.`,
+      );
     }
     if (entry.arch !== targetArch) {
       throw new Error(

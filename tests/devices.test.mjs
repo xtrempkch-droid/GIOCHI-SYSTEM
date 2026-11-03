@@ -81,6 +81,31 @@ test("arquitetura sem device habilitado retorna erro claro", async () => {
   );
 });
 
+test("allow-draft inclui rascunho com defconfig quando pedido pelo id", async () => {
+  const matrix = await buildGithubMatrix({
+    arch: "arm64",
+    deviceId: "powkiddy-x55",
+    allowDraft: true,
+  });
+  assert.deepEqual(
+    matrix.include.map((item) => item.device),
+    ["powkiddy-x55"],
+  );
+});
+
+test("allow-draft nunca puxa rascunho quando o pedido é device=all", async () => {
+  const matrix = await buildGithubMatrix({ arch: "arm64", allowDraft: true });
+  const ids = matrix.include.map((item) => item.device);
+  assert.ok(!ids.includes("powkiddy-x55"), `device=all não deveria puxar draft: ${ids}`);
+});
+
+test("o erro de device desabilitado diz como construir mesmo assim", async () => {
+  await assert.rejects(
+    () => getBuildableDevices({ arch: "arm64", deviceId: "powkiddy-x55" }),
+    /allow_draft/,
+  );
+});
+
 test("o caminho do repositório é utilizado como raiz", () => {
   assert.ok(path.isAbsolute(ROOT), `raiz não absoluta: ${ROOT}`);
 
