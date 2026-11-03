@@ -197,7 +197,7 @@ Procedimento: ligar, esperar ~40 s, desligar, tirar o cartão, ler a partição
 | Item | Valor |
 | --- | --- |
 | Imagem | `giochi-system-powkiddy-x35h-sd.img`, 2.0 GiB |
-| SHA256 | `9f1a7d37…` (1ª gravação) · `57d232f6e085dee3cdcef4189edebd8d55d65c26588a36a4fd9dbe76c02ec5fa` (2ª, com o bootlog corrigido) |
+| SHA256 | `9f1a7d37…` (1ª) · `57d232f6…` (2ª, bootlog v1) · `3c1cb9ea…` (3ª, diagnóstico na tela) · `f580b729…` (4ª, log no ext4) · **`5dc5ce3583b5d203a3a357be4bf90c86d4c1f194dda7375b51353828401a3bf7` (5ª, atual)** |
 | Cartão | `Multi-Reader -3`, 29.7 GiB (slot 4 do leitor; os outros três vazios) |
 | Conferência | SHA256 relido **do cartão** depois da gravação — confere |
 | Estrutura no cartão | idbloader `RKNS` no setor 64, FIT `d00dfeed` no setor 16384, p1 em LBA 131072 |
@@ -310,6 +310,40 @@ qualquer PC lê. Se a tela não acender:
 
 O `dmesg` desse arquivo é o que distingue "não ligou" de "morreu no probe do
 painel com `-517`".
+
+## 5.4 Estado do cartão em uso (imagem `5dc5ce35`)
+
+Este cartão é usado **também pelo time do `Giochi app`**, então o conteúdo foi
+conferido no dispositivo, não só o SHA256:
+
+| Verificação | Como | Resultado |
+| --- | --- | --- |
+| MBR + firmware | `od` nos offsets | `RKNS` no setor 64, `d00dfeed` no setor 16384 |
+| Partição de boot | montagem read-only | `Image`, `boot.scr`, `dtbs/`, `extlinux/extlinux.conf` |
+| Rootfs | `debugfs` (sem montar) | `giochi-bootlog`, `S10bootlog`, `S96bootlog`, marcador, `libharfbuzz`, `DejaVuSans.ttf`, `selftest` |
+
+### O que esperar no próximo boot
+
+Tela liga (já provado), aparece o Tux, e depois **uma** destas linhas na tela:
+
+| Mensagem | Significa |
+| --- | --- |
+| `partição de boot: /dev/mmcblkXpY` + `gravado em giochi-boot.log` | funcionou — o log está na FAT |
+| `  /dev/mmcblkXpY: <motivo>` | o mount falhou e agora diz por quê |
+| `NÃO consegui montar a partição de boot.` + caminho no ext4 | toda tentativa falhou; o log está em `/root/giochi-boot.log` |
+
+No terceiro caso, ler do PC sem montar:
+
+```bash
+debugfs -R 'cat /root/giochi-boot.log' /dev/sdX2
+```
+
+### Acesso sem tirar o cartão
+
+Se o `usb0` subir (o cabo USB estava ocupado no último teste), `ssh
+root@10.55.0.2` (senha `giochi-dev`) dá acesso direto, e o `giochi-selftest`
+mostra o bloco "bibliotecas do launcher" com as cinco `.so` e o `readelf -d`
+provando que o `SDL2_ttf` usa harfbuzz.
 
 ## 6. O que falta, e a ordem
 
