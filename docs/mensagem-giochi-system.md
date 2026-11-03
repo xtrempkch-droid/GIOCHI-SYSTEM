@@ -9,6 +9,28 @@ repositório — mora num arquivo local, numa máquina específica.
 | **Máquina** | `charles-X99-V9S` |
 | **Usuário** | `charles` |
 | **Quem escreve** | as duas equipes, no mesmo arquivo |
+| **Janela de uso** | **08:00 – 18:50, horário de Brasília (UTC−3)** |
+
+## A janela de horário
+
+O chat só está disponível das **8:00 às 18:50** no horário de Brasília. Fora da
+janela, não há troca de mensagem — e mensagem escrita fora dela fica lá sem
+resposta até a manhã seguinte.
+
+Consequências práticas, e são de planejamento, não de cortesia:
+
+- **Pergunta que bloqueia trabalho tem de sair antes das 18:50.** Depois disso
+  ela custa uma noite inteira parada, não uma hora.
+- **Resposta que exige ação no aparelho** também: se a mensagem chega às 18:40 e
+  a ação leva 40 min, ela atravessa a janela e não termina.
+- Por isso a regra de ouro do canal: **sempre deixar o outro lado com trabalho
+  possível**. Pergunta bloqueante vai junto com o que dá para fazer sem a
+  resposta.
+
+O horário de Brasília é UTC−3 e **não tem horário de verão desde 2019** — então
+a janela é estável o ano inteiro, o que é uma vantagem para agendar. Se o país
+voltar a ter horário de verão, esta tabela precisa de correção: seria UTC−2 no
+verão, e a janela útil encolheria uma hora de cada lado para quem está fora.
 
 ## Por que fora do repositório
 

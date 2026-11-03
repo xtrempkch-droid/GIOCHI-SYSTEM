@@ -1300,10 +1300,17 @@ local:
 
 ```text
 /home/charles/Giochi/chat_de_equipe.txt        máquina  charles-X99-V9S (192.168.1.5)
+janela: 08:00 – 18:50 horário de Brasília (UTC−3, sem horário de verão)
 ```
 
-`docs/mensagem-giochi-system.md` é só o **ponteiro**: caminho, máquina e regras.
-Não recrie o chat aqui dentro.
+**A janela de horário é restrição de projeto, não detalhe de conveniência.**
+Pergunta bloqueante escrita depois das 18:50 custa uma noite parada; resposta que
+exige ação no aparelho e chega às 18:40 não termina. Regra que decorre disso:
+**toda mensagem tem de deixar o outro lado com trabalho possível** — pergunta
+bloqueante vai junto com o que dá para fazer sem a resposta.
+
+`docs/mensagem-giochi-system.md` é só o **ponteiro**: caminho, máquina, janela e
+regras. Não recrie o chat aqui dentro.
 
 Por que saiu do repositório: o arquivo foi trocado de lado três vezes e numa delas
 chegou **truncado** — 14 422 bytes viraram 11 150 e mensagem já escrita se perdeu.
