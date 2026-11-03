@@ -132,3 +132,20 @@ test("o log lista os dispositivos de bloco visíveis", async () => {
   const texto = await read(BOOTLOG);
   assert.match(texto, /blocos visíveis/);
 });
+
+test("o log persiste fora do tmpfs", async () => {
+  // Medido na imagem: `/var/log` é SYMLINK para `/tmp`, que é tmpfs. A versão
+  // que gravava só ali perdia o log no desligamento — e guardar apenas no FAT
+  // não resolvia, porque era justamente a montagem da FAT que falhava.
+  const texto = await read(BOOTLOG);
+  assert.match(texto, /PERSIST_LOG=\/root\/giochi-boot\.log/, "falta o destino persistente");
+  // A coleta tem de escrever no persistente, não no tmpfs.
+  assert.match(texto, /collect_early >"\$PERSIST_LOG"/);
+  assert.match(texto, /collect_full >>"\$PERSIST_LOG"/);
+});
+
+test("a mensagem de falha ensina como ler o log do PC", async () => {
+  // Sem isso, o operador fica sem caminho quando o mount falha.
+  const texto = await read(BOOTLOG);
+  assert.match(texto, /debugfs -R 'cat \/root\/giochi-boot\.log'/);
+});
