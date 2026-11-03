@@ -296,6 +296,57 @@ O log traz a sequência `U-Boot SPL` → `U-Boot` → kernel. Se ele começar co
 `RKNS`/`d0 0d fe ed`, o firmware foi encontrado; se ficar vazio e o host mostrar
 `2207:350a`, o BootROM não leu o cartão.
 
+## Recuperação: o rootfs em execução é a partição do cartão
+
+Registro de um erro real, para não repetir. Durante a validação, a partição do
+rootfs foi montada em `/mnt/new` e limpa com `rm -rf` para receber uma cópia
+nova. Só que `/dev/mmcblk1p2` **é** a raiz em execução: `/bin/busybox`
+desapareceu, o shell ficou só com builtins e o boot seguinte terminou em
+
+```text
+Kernel panic - not syncing: No working init found.
+```
+
+O que ainda funcionava e permitiu a recuperação sem tocar no aparelho:
+
+- `/tmp` é tmpfs (RAM), então o `rootfs.ext4.gz` já enviado sobreviveu;
+- o firmware do U-Boot (setores 64 e 16384) não é tocado por nada disso;
+- o U-Boot tem `loady` e `gzwrite`, que gravam por offset sem Linux.
+
+Sequência usada:
+
+```text
+1. sysrq 'b'            sai do sistema quebrado (a CPU fica parada em panic)
+2. serial-interrupt.py   martela teclas em "Hit any key to stop autoboot"
+3. loady 0x20000000      YMODEM do rootfs.ext4.gz (52 MB, ~15 min)
+4. gzwrite mmc 1 0x20000000 ${filesize} 0x100000 0x14000000
+5. reset                 boot volta ao normal
+```
+
+Resultado: `PASS 18 · FAIL 0` de novo, com `S15modules` e `wlan0` no boot.
+
+**Regra:** nunca limpar a partição montada em `/`. Para trocar o rootfs, use
+`gzwrite` no U-Boot, a imagem de cartão com o cartão no leitor, ou um segundo
+cartão — nunca a raiz corrente.
+
+## Wi-Fi com internet (medido)
+
+Com a rede associada por `wpa_supplicant` e DHCP:
+
+```text
+wlan0  UP  192.168.1.6/24  fd00::aa4f:a4ff:fec9:984b/64
+default via 192.168.1.1 dev wlan0
+ping 1.1.1.1 → 3 pacotes, 0% de perda, 8,8 ms
+```
+
+SSH (dropbear) responde na porta 22 e, com uma chave em
+`/root/.ssh/authorized_keys`, dá acesso sem senha. **A chave é instalada em
+tempo de execução, não vai no repositório** — uma chave pública commitada dá
+acesso a quem tiver a privada.
+
+Credenciais de Wi-Fi também não entram no repositório: são passadas em tempo de
+execução (`wpa_passphrase` no aparelho).
+
 ## O que ainda falta (ordem de risco)
 
 1. **`rocknix-joypad`** — driver fora da árvore. Sem ele, **16 dos 17 botões não

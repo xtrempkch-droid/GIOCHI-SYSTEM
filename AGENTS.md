@@ -644,7 +644,38 @@ Correção: `timeout 30` (unidade de 1/10 s = 3 s). Verificado com `reboot` no
 aparelho: boota sem tecla. Não use `prompt 0` para "resolver" — ele remove o
 menu e tira a única forma de escolher outra entrada.
 
-### 12.13 `BR2_TARGET_GENERIC_GETTY_BAUDRATE_*` reprograma a UART
+### 12.13 Montar a partição do rootfs e limpá-la destrói o sistema em execução
+
+**Erro cometido nesta sessão.** Para trocar o rootfs pela rede, montei
+`/dev/mmcblk1p2` em `/mnt/new` e rodei `rm -rf` para limpar. O rootfs **em
+execução** é a mesma partição. Resultado: `/bin/busybox` apagado, shell só com
+builtins, SSH devolvendo saída vazia com exit 0 (o `sh` não existia mais para
+executar), e `Kernel panic - not syncing: No working init found` no boot
+seguinte.
+
+Nunca há motivo para limpar a partição que está montada em `/`. Para substituir
+o rootfs, use uma destas vias:
+
+| Via | Como |
+| --- | --- |
+| `gzwrite` no U-Boot | grava o `.ext4.gz` por offset; não depende do Linux (usado na recuperação) |
+| imagem de cartão | `make-sd-image.sh` + `flash-sd.sh`, com o cartão no leitor |
+| boot alternativo | montar a partição de um **segundo** cartão/slot, nunca a raiz corrente |
+
+**Recuperação que funcionou**, sem tocar no aparelho:
+
+1. `echo b > /proc/sysrq-trigger` para sair do sistema quebrado (a CPU fica
+   parada em panic; é preciso ciclo de energia).
+2. `serial-interrupt.py` martela teclas em `Hit any key to stop autoboot` e
+   prende o U-Boot em `=>`.
+3. `loady` + YMODEM do `rootfs.ext4.gz` (52 MB, ~15 min) e
+   `gzwrite mmc 1 0x20000000 ${filesize} 0x100000 0x14000000`.
+4. `reset` → sistema de volta, `PASS 18 · FAIL 0`.
+
+Detalhe: o `gzwrite` **não** depende do host depois do envio; parar o container
+não interrompe a gravação.
+
+### 12.14 `BR2_TARGET_GENERIC_GETTY_BAUDRATE_*` reprograma a UART
 
 Um baud explícito no getty faz o getty **reprogramar** a UART para aquela
 velocidade, ignorando o que o kernel configurou. No X55 (console a 1500000), o
