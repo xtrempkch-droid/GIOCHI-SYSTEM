@@ -17,6 +17,14 @@ CONFIG_MMC_DW=y
 CONFIG_MMC_DW_ROCKCHIP=y
 CONFIG_MMC_BLOCK=y
 CONFIG_EXT4_FS=y
+# VFAT é a partição de BOOT (GIOCHI_BOOT), que o Linux precisa montar para o
+# S10bootlog gravar giochi-boot.log. Vem do defconfig arm64, não do fragmento —
+# e num aparelho SEM console essa é a única saída de diagnóstico. Se sumir, o
+# sintoma é "não tem log", que é indistinguível de "não ligou".
+CONFIG_VFAT_FS=y
+CONFIG_FAT_FS=y
+CONFIG_NLS_CODEPAGE_437=y
+CONFIG_NLS_ISO8859_1=y
 
 # ── console ──────────────────────────────────────────────────
 # ttyS2 é o console do aparelho; sem 8250_DW não sai uma linha sequer.

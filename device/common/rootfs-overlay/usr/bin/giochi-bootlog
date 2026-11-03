@@ -1,0 +1,188 @@
+#!/bin/sh
+# ============================================================
+# giochi-bootlog — grava o diagnóstico na partição FAT do cartão
+# ============================================================
+# Para aparelho SEM console serial. O cartão sai do aparelho e entra em qualquer
+# PC (FAT é legível no Windows sem software nenhum).
+#
+# Uso: giochi-bootlog [early|full]
+#
+#   early → chamado por S10bootlog. Roda logo no começo: `dmesg` já tem TODO o
+#           probe de kernel (painel, DRM, MMC, USB), então mesmo que um serviço
+#           trave depois, o que interessa já está no cartão.
+#   full  → chamado por S96bootlog. Acrescenta o resultado do `giochi-selftest`
+#           e o estado final dos serviços.
+#
+# ## A armadilha que custou uma gravação de cartão
+#
+# A primeira versão montava com `mount -t vfat PARTUUID=47494f43-01 /mnt`.
+# Não funcionou, e o log não apareceu — sem nenhum sinal, porque não há console.
+#
+# Causa medida: o busybox desta imagem tem `CONFIG_FEATURE_MOUNT_LABEL` DESLIGADO,
+# então `mount` NÃO resolve `PARTUUID=`, `UUID=` nem `LABEL=` — só o util-linux
+# faz isso. A string vai crua para o kernel, que responde ENODEV. O kernel tinha
+# `CONFIG_VFAT_FS=y`, então o problema nunca foi o filesystem.
+#
+# Correção: achar a partição por CONTEÚDO. A partição 1 é a de boot e contém
+# `extlinux/extlinux.conf` (e `boot.scr`). Se o arquivo está lá, é a partição
+# certa — não importa o nome que o kernel deu ao dispositivo.
+# ============================================================
+
+set -u
+
+PHASE="${1:-full}"
+MNT=/mnt/bootlog
+LOG_NAME=giochi-boot.log
+LOCAL_LOG=/var/log/giochi-boot.log
+
+log() { echo "giochi-bootlog: $*" >&2; }
+
+# Encontra a partição de boot e deixa montada em $MNT.
+#
+# Dois caminhos, nesta ordem:
+#
+#   1. Já existe um vfat montado com `extlinux.conf`/`boot.scr`? Usa esse
+#      ponto. Acontece quando algo montou antes — e tentar montar por cima
+#      falha com "already mounted or mount point busy", que não diz o motivo.
+#   2. Senão, tenta montar cada candidato e VALIDA PELO CONTEÚDO.
+#
+# $MOUNTED_BY_US diz se devemos desmontar no fim: nunca desmontamos o que não
+# montamos, senão derrubamos o ponto de montagem de outro processo.
+MOUNTED_BY_US=0
+
+is_boot_dir() {
+    [ -f "$1/extlinux/extlinux.conf" ] || [ -f "$1/boot.scr" ]
+}
+
+mount_boot() {
+    # 1. Vfat já montado com o conteúdo certo.
+    for ponto in $(awk '$3 == "vfat" {print $2}' /proc/mounts 2>/dev/null); do
+        if is_boot_dir "$ponto"; then
+            MNT="$ponto"
+            log "partição de boot já montada em $ponto"
+            return 0
+        fi
+    done
+
+    mkdir -p "$MNT" 2>/dev/null
+
+    # 2. Glob em vez de lista fixa: o nome depende de como o driver enumerou, e
+    # uma lista fixa erra no aparelho que importa. `mmcblk0p1` (SD/eMMC com
+    # partição nomeada), `mmcblk01` (drivers antigos, sem 'p'), `sdX1` (leitor
+    # USB) e `vdX1` (virt). A validação por conteúdo descarta o que não for a
+    # partição de boot — inclusive o próprio rootfs (ext4, então o mount vfat
+    # nem pega).
+    for dev in /dev/mmcblk*p1 /dev/mmcblk*1 /dev/sd*[0-9] /dev/vd*[0-9]; do
+        [ -b "$dev" ] || continue
+
+        # `-o ro` no teste: se não for a nossa partição, não mexemos nela.
+        if ! mount -t vfat -o ro "$dev" "$MNT" 2>/dev/null; then
+            continue
+        fi
+
+        if is_boot_dir "$MNT"; then
+            # Remonta rw: o teste foi só leitura.
+            umount "$MNT" 2>/dev/null
+            if mount -t vfat -o rw,umask=0022 "$dev" "$MNT" 2>/dev/null; then
+                MOUNTED_BY_US=1
+                log "partição de boot: $dev"
+                return 0
+            fi
+        fi
+        umount "$MNT" 2>/dev/null
+    done
+
+    return 1
+}
+
+finish_mount() {
+    if [ "$MOUNTED_BY_US" = "1" ]; then
+        sync
+        umount "$MNT" 2>/dev/null
+    else
+        sync
+    fi
+}
+
+collect_early() {
+    echo "=== giochi-boot.log — fase early — $(date -u '+%Y-%m-%dT%H:%M:%SZ') (UTC) ==="
+    echo
+    echo "## versao"
+    cat /etc/giochi-system-release 2>/dev/null || cat /etc/giochi-release 2>/dev/null || uname -a
+    echo
+    echo "## cmdline"
+    cat /proc/cmdline 2>/dev/null
+    echo
+    echo "## uptime"
+    cat /proc/uptime 2>/dev/null
+    echo
+    # O bloco mais importante num bring-up: aqui estão o probe do painel DSI,
+    # o DRM, o MMC e o USB — com os códigos de erro (-517 EPROBE_DEFER, -110
+    # timeout) que dizem POR QUE a tela não acendeu.
+    echo "## dmesg"
+    dmesg 2>/dev/null || echo "(dmesg indisponível)"
+    echo
+    echo "## DRM: conectores, status e modos"
+    for f in /sys/class/drm/*/status; do
+        [ -r "$f" ] || continue
+        echo "$f: $(cat "$f" 2>/dev/null)"
+    done
+    for f in /sys/class/drm/*/modes; do
+        [ -r "$f" ] || continue
+        echo "$f: $(head -1 "$f" 2>/dev/null)"
+    done
+    ls -l /dev/dri 2>/dev/null || echo "(sem /dev/dri)"
+    for f in /sys/class/backlight/*/brightness; do
+        [ -r "$f" ] || continue
+        echo "backlight $f: $(cat "$f" 2>/dev/null)"
+    done
+    echo
+    echo "## entrada (botões e eixos existem?)"
+    cat /proc/bus/input/devices 2>/dev/null || echo "(sem /proc/bus/input)"
+    echo
+    echo "## armazenamento"
+    cat /proc/partitions 2>/dev/null
+    echo
+    echo "## rede"
+    ip -o link show 2>/dev/null || echo "(sem ip)"
+}
+
+collect_full() {
+    echo
+    echo "## rede (fase full)"
+    ip -o addr show 2>/dev/null || echo "(sem ip)"
+    echo
+    echo "## df"
+    df -h 2>/dev/null
+    echo
+    echo "## selftest"
+    /usr/bin/giochi-selftest 2>&1
+    echo
+    echo "=== fim — $(date -u '+%Y-%m-%dT%H:%M:%SZ') (UTC) ==="
+}
+
+# A fase early ESCREVE; a full ACRESCENTA. Assim, se a full não rodar (serviço
+# travou), o arquivo do early continua no cartão com o dmesg.
+if [ "$PHASE" = "early" ]; then
+    collect_early >"$LOCAL_LOG" 2>&1
+else
+    collect_full >>"$LOCAL_LOG" 2>&1
+fi
+
+if ! mount_boot; then
+    log "não achei a partição de boot (procurei extlinux.conf/boot.scr)."
+    log "log só em $LOCAL_LOG — para ler, monte o rootfs no PC."
+    exit 0
+fi
+
+if [ "$PHASE" = "early" ]; then
+    cp "$LOCAL_LOG" "$MNT/$LOG_NAME" 2>/dev/null
+else
+    # A full ACRESCENTA ao que já está no cartão: o early escreveu primeiro.
+    cat "$LOCAL_LOG" >"$MNT/$LOG_NAME" 2>/dev/null
+fi
+
+# sync antes do umount: o cartão pode ser removido a qualquer momento depois.
+finish_mount
+log "gravado em $LOG_NAME em $MNT"
+exit 0

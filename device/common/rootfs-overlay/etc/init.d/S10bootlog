@@ -1,0 +1,15 @@
+#!/bin/sh
+# ============================================================
+# S10bootlog — log do boot na FAT do cartão, o MAIS CEDO possível
+# ============================================================
+# Roda logo depois dos módulos, antes de rede, sshd e qualquer serviço que possa
+# travar. O que interessa num bring-up (probe do painel, DRM, MMC, USB) já está
+# no `dmesg` neste ponto — então mesmo que um serviço pendure o boot depois, o
+# diagnóstico está no cartão.
+#
+# Só roda quando o aparelho tem o marcador /etc/giochi/boot-log. Aparelho com
+# console (X55) não tem o marcador e não escreve no cartão a cada boot.
+
+[ -f /etc/giochi/boot-log ] || exit 0
+/usr/bin/giochi-bootlog early >/dev/null 2>&1
+exit 0
