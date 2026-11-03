@@ -411,6 +411,28 @@ Resultado: `PASS 18 · FAIL 0` de novo, com `S15modules` e `wlan0` no boot.
 `gzwrite` no U-Boot, a imagem de cartão com o cartão no leitor, ou um segundo
 cartão — nunca a raiz corrente.
 
+## Avisos no dmesg que NÃO são defeito
+
+Três mensagens aparecem em todo boot e nenhuma delas indica problema. Registradas
+aqui porque, sem isso, o próximo a investigar gasta tempo nas três:
+
+| Mensagem | O que é |
+| --- | --- |
+| `mmc0: Failed to initialize a non-removable card` | `mmc0` é o slot de eMMC, que **este aparelho não tem**. O controlador existe no SoC; não há cartão para inicializar. |
+| `rtw_8821cs mmc3:0001:1: sdio read32 failed (0xf0): -110` | primeira tentativa do driver durante o probe, antes do power-on do rádio estabilizar. O driver tenta de novo e segue: `Firmware version 24.11.0` vem na linha seguinte. |
+| `rtw_8821cs mmc3:0001:1: sdio write8 failed (0x1c): -110` | idem, mesmo instante do probe. |
+| `Card did not respond to voltage select! : -110` (U-Boot) | também `mmc2`/eMMC inexistente. |
+
+Prova de que os `-110` do Wi-Fi são transitórios, medido depois do boot:
+
+```text
+wlan0  UP  192.168.1.6/24
+iw dev wlan0 link → SSID: Kill.exe         signal: -29.00 dBm
+ping 1.1.1.1      → 2 pacotes, 0% de perda, 9 ms
+```
+
+Só tratar como falha se o `wlan0` **não** aparecer ou se o `iw link` ficar vazio.
+
 ## Controles: 17 botões e 4 eixos, sem driver fora da árvore
 
 Correção de um diagnóstico anterior deste repositório. A documentação dizia que

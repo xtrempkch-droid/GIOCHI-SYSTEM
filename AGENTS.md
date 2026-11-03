@@ -127,8 +127,20 @@ As três falhas fechadas, cada uma com causa medida:
 | `nenhuma interface além de lo` | módulos `=m` e o rootfs não tem `/etc/modules` nem `modules-load` | `rootfs-overlay/etc/init.d/S15modules` |
 | sem `adc-joystick` | nó do DTS sem driver: `CONFIG_JOYSTICK_ADC` não estava ligado | `=y` no `linux.fragment` + `kernel-required.txt` |
 
-Ganho colateral medido: boot até o `sshd` caiu de **11,7 s para 2,1 s** com
-entropia disponível desde o começo.
+Ganho colateral medido: `random: crng init done` em **0,53 s** (era tarde o
+bastante para o `sshd` esperar ~11,7 s no primeiro build). O kernel chega ao
+userspace com entropia pronta.
+
+### Avisos de boot que NÃO são defeito
+
+| Mensagem | Por quê |
+| --- | --- |
+| `mmc0: Failed to initialize a non-removable card` | `mmc0` é o slot de eMMC; **este aparelho não tem eMMC** |
+| `rtw_8821cs … sdio read32 failed (0xf0): -110` | probe antes do rádio estabilizar; a linha seguinte já é `Firmware version 24.11.0` |
+| `rtw_8821cs … sdio write8 failed (0x1c): -110` | idem, mesmo instante |
+| `Card did not respond to voltage select! : -110` (U-Boot) | `mmc2`, eMMC inexistente |
+
+Só é falha se `wlan0` não aparecer ou `iw dev wlan0 link` ficar vazio.
 
 ### Instalação remota sem tirar o cartão
 
