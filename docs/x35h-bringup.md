@@ -192,6 +192,37 @@ Procedimento: ligar, esperar ~40 s, desligar, tirar o cartão, ler a partição
 
 ---
 
+## 5.1 A primeira imagem gravada (03/11/2026)
+
+| Item | Valor |
+| --- | --- |
+| Imagem | `giochi-system-powkiddy-x35h-sd.img`, 2.0 GiB |
+| SHA256 | `9f1a7d370b9be3777f812c08f93aca6b3ac3e082809f8efc8ec0b33d43949ded` |
+| Cartão | `Multi-Reader -3`, 29.7 GiB (slot 4 do leitor; os outros três vazios) |
+| Conferência | SHA256 relido **do cartão** depois da gravação — confere |
+| Estrutura no cartão | idbloader `RKNS` no setor 64, FIT `d00dfeed` no setor 16384, p1 em LBA 131072 |
+
+O `--expect-gib 30` do `flash-sd.sh` não é enfeite: um leitor Multi-Reader
+expõe **quatro** discos e três deles medem `0.0 GiB`. Sem a guarda, o cartão
+errado é uma escolha de uma letra. É o mesmo cenário do `AGENTS.md` §12.8, que
+já custou uma gravação no lugar errado neste projeto.
+
+O cartão já tinha rótulos de uma gravação anterior (`GIOCHI_BOOT` + `rootfs`),
+então é mídia de teste descartável — nada de valor foi perdido ao sobrescrever.
+
+**Para testar:** colocar no X35H e ligar. Não há TTL neste aparelho; o
+diagnóstico sai em `giochi-boot.log`, na partição FAT (`GIOCHI_BOOT`), que
+qualquer PC lê. Se a tela não acender:
+
+```text
+1. desliga, tira o cartão, põe no PC
+2. abre a partição GIOCHI_BOOT
+3. lê giochi-boot.log  →  cmdline, dmesg, DRM status, entrada, selftest
+```
+
+O `dmesg` desse arquivo é o que distingue "não ligou" de "morreu no probe do
+painel com `-517`".
+
 ## 6. O que falta, e a ordem
 
 1. **Bootar e ler o log.** Sem isso o resto é especulação.
