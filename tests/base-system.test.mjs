@@ -190,3 +190,34 @@ test("link USB desconectado não é FAIL", async () => {
   assert.match(bloco, /cabo desconectado/);
   assert.doesNotMatch(bloco, /fail "usb0.*down/);
 });
+
+test("o build recusa continuar quando um pacote foi removido da config", async () => {
+  // Buildroot nunca apaga arquivo de target/ quando o símbolo sai do Kconfig.
+  // Medido na X55: dropbear foi removido do defconfig, o .config ficou correto,
+  // e o binário continuou no target/ indo para a imagem — com S50dropbear e
+  // S50sshd, os dois na porta 22.
+  //
+  // Tentar consertar apagando target/ + stamps NÃO funciona (o target-finalize
+  // morre em /etc/shells). Então o build tem de RECUSAR.
+  const script = await read(path.join(ROOT, "scripts/build-device.sh"));
+  assert.match(script, /packages\.state/, "falta o estado do conjunto de pacotes");
+  assert.match(script, /pacote\(s\) removido\(s\) desde o \u00faltimo build/);
+  assert.match(
+    script,
+    /SEM GIOCHI_SYSTEM_KEEP_WORK=1/,
+    "a recusa precisa dizer como sair dela",
+  );
+});
+
+test("o estado de pacotes só avança com build bem-sucedido", async () => {
+  // Gravar antes faz um build que falha deixar o estado "em dia", e a próxima
+  // tentativa perde a detecção — foi medido no primeiro teste deste gate.
+  const script = await read(path.join(ROOT, "scripts/build-device.sh"));
+  const escrita = script.lastIndexOf('printf \'%s\' "$CURRENT_PACKAGES"');
+  const sucesso = script.lastIndexOf('OK: imagem(ns) em $OUT_DIR');
+  assert.ok(escrita > 0, "o estado de pacotes nunca é gravado");
+  assert.ok(
+    escrita < sucesso,
+    "o estado é gravado antes do sucesso: build que falha esquece a remoção",
+  );
+});

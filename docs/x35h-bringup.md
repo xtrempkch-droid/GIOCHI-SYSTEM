@@ -135,6 +135,37 @@ escrito.
 
 ---
 
+## 4.1 O defeito que só apareceu ao ler o DTB pronto
+
+O primeiro build do X35H passou por tudo: patches aplicados, `assert-config`
+OK, `assert-kernel-config` OK, imagem gerada. Estava **errado**.
+
+Patch de kernel **não se compõe entre aparelhos**: o `kernelPatches` do X35H
+lista só os patches dele, então o patch `0001` da X55 — que desliga HDMI,
+conserta o `sdmmc1`, põe `dma-names` no uart1 e liga o `&rng` — não é aplicado.
+
+E o DTS do X35H faz `#include "rk3566-powkiddy-x55.dts"`, que é o **mainstream**,
+sem essas correções. Lendo o `.dtb` gerado:
+
+| Nó | Veio | Efeito |
+| --- | --- | --- |
+| `rng@fe388000` | `disabled` | sem entropia, `getrandom()` bloqueia, inclusive o `sshd` |
+| `hdmi@fe0a0000` | `okay` | conector fantasma, probe atrasa o boot |
+| `mmc@fe2c0000` (`sdmmc1`) | `okay` + `non-removable` | kernel briga com o cartão SDIO do RTL8821CS **que não existe aqui**, `-110` repetido |
+| `uart@fe650000` (`uart1`) | `okay` | Bluetooth do mesmo chip, ausente |
+
+Nenhum desses dá erro de build. O primeiro sintoma seria "boota, mas demora" e
+"o ssh demora a responder" — dois sintomas que se confundem com hardware ruim.
+
+A correção está no `patches/0001` deste aparelho: **desligar explicitamente** o
+que a X55 liga. Omitir o patch dela não basta, porque omitir deixa o nó como o
+DTS base declarou.
+
+Lição registrada em `AGENTS.md` §12.26: herdar DTS de outro aparelho exige uma
+lista do que **reverter**, não só do que acrescentar. E
+`tests/device-x35h.test.mjs` verifica os quatro `status` para que a próxima
+herança não repita o silêncio.
+
 ## 5. Sem console: o cartão é o canal
 
 Este aparelho não tem TTL, Wi-Fi nem Bluetooth. A tela é o único canal — e é

@@ -156,6 +156,21 @@ if [[ "$CURRENT_PATCHES" != "$PREVIOUS_PATCHES" ]]; then
   printf '%s' "$CURRENT_PATCHES" >"$PATCH_STATE_FILE" 2>/dev/null || true
 fi
 
+# Pacote REMOVIDO da config continua no target/ e entra na imagem.
+#
+# Medido: `BR2_PACKAGE_DROPBEAR` saiu do defconfig da X55, o `.config` novo não
+# tinha a linha — e `target/usr/sbin/dropbear` continuou lá, de um build
+# anterior, junto com `/etc/init.d/S50dropbear`. O Buildroot não remove arquivos
+# de `target/` quando um pacote desaparece do Kconfig; ele só instala. O
+# resultado era a imagem com DOIS servidores SSH na porta 22, exatamente o
+# defeito que a mudança existia para corrigir.
+#
+# O `.config` é a fonte da verdade; `target/` é estado. Aqui os dois são
+# comparados: se algum pacote foi removido desde a última build, o `target/` e o
+# staging são apagados. Isso NÃO recompila nada — os `.stamp_*` ficam em
+# `build/` — mas força o Buildroot a reinstalar tudo, e o que não está na config
+# não volta.
+
 # KEEP_WORK=1 mantém o diretório de build e deixa o Buildroot continuar de onde
 # parou. Sem isso, cada tentativa depois de uma falha recomeça do zero: um erro
 # no busybox na terceira hora custa outras três horas para ser testado. O padrão
@@ -431,6 +446,47 @@ if ! node "$ROOT/scripts/assert-config.mjs" \
   echo "ERRO: símbolos pedidos não sobreviveram ao olddefconfig (ver acima)." >&2
   echo "O log do olddefconfig está em $WORK_DIR/olddefconfig.log." >&2
   exit 1
+fi
+
+# Só DEPOIS do olddefconfig/assert-config: antes disso o `.config` ainda é o da
+# build anterior, e comparar com ele diria "nada mudou" justamente quando mudou.
+#
+# Um pacote REMOVIDO da config continua no `target/` e entra na imagem: o
+# Buildroot nunca apaga arquivo de `target/` quando o símbolo desaparece do
+# Kconfig, ele só instala.
+#
+# Medido na X55: `BR2_PACKAGE_DROPBEAR` saiu do defconfig, o `.config` novo não
+# tinha a linha — e `target/usr/sbin/dropbear` continuava lá, com
+# `/etc/init.d/S50dropbear` junto. A imagem saía com DOIS servidores SSH na
+# porta 22: exatamente o defeito que a remoção existia para corrigir.
+#
+# Tentativa que NÃO funciona (medida): apagar `target/` e os `.stamp_*_installed`
+# para forçar reinstalação. O `target-finalize` do Buildroot morre em
+# `/etc/shells: No such file or directory`, porque a ordem de reinstalação não
+# reconstrói o rootfs base na hora certa.
+#
+# Então a resposta é recusar: build sujo com o conjunto de pacotes diferente não
+# é continuável. O caminho padrão (sem KEEP_WORK) apaga `work/<device>` e
+# resolve sozinho.
+PACKAGE_STATE_FILE="$WORK_DIR/packages.state"
+CURRENT_PACKAGES="$(
+  grep -E '^BR2_PACKAGE_[A-Z0-9_]+=y$' "$BUILD_DIR/.config" 2>/dev/null \
+    | sed 's/=y$//' | sort | tr '\n' ' '
+)"
+PREVIOUS_PACKAGES="$(cat "$PACKAGE_STATE_FILE" 2>/dev/null || true)"
+if [[ -n "$PREVIOUS_PACKAGES" && "$CURRENT_PACKAGES" != "$PREVIOUS_PACKAGES" ]]; then
+  REMOVIDOS=""
+  for antigo in $PREVIOUS_PACKAGES; do
+    [[ " $CURRENT_PACKAGES " == *" $antigo "* ]] || REMOVIDOS="$REMOVIDOS ${antigo#BR2_PACKAGE_}"
+  done
+  if [[ -n "$REMOVIDOS" ]]; then
+    echo "ERRO: pacote(s) removido(s) desde o último build:${REMOVIDOS}" >&2
+    echo "  O target/ do build anterior ainda tem os arquivos deles e o" >&2
+    echo "  Buildroot NÃO os remove: a imagem sairia com binário que a config" >&2
+    echo "  diz que não existe." >&2
+    echo "  Rode de novo SEM GIOCHI_SYSTEM_KEEP_WORK=1 (o padrão limpa work/)." >&2
+    exit 1
+  fi
 fi
 
 # `assert-config` acima cobre os fragmentos BR2_*. O fragmento de KERNEL é outra
@@ -769,5 +825,11 @@ cp -a "$DEVICE_DOCS" "$OUT_DIR/DEVICE.md"
 )
 
 echo
+# O estado do conjunto de pacotes só avança com build BEM-SUCEDIDO. Gravar antes
+# fazia um build que falha deixar o estado "em dia", e a próxima tentativa
+# perdia a detecção de pacote removido — foi o que aconteceu no primeiro teste
+# deste gate.
+printf '%s' "$CURRENT_PACKAGES" >"$PACKAGE_STATE_FILE" 2>/dev/null || true
+
 echo "OK: imagem(ns) em $OUT_DIR"
 ls -lh "$OUT_DIR"

@@ -429,7 +429,7 @@ Variáveis do build: `BUILDROOT_VERSION`, `ROOT_PASSWORD` (8–128; letras, núm
 
 ## 10. Testes
 
-`node tests/run-all.mjs` → **87/87**:
+`node tests/run-all.mjs` → **106/106**:
 
 | Arquivo | Testes | Cobre |
 | --- | --- | --- |
@@ -443,6 +443,7 @@ Variáveis do build: `BUILDROOT_VERSION`, `ROOT_PASSWORD` (8–128; letras, núm
 | `tests/assert-kernel-config.test.mjs` | 8 | `CONFIG_*` que sobrevive/desaparece/cai para `=m`, `--required` |
 | `tests/firmware-required.test.mjs` | 5 | `rtl8821cs_*` no override, firmware obrigatório presente |
 | `tests/buildroot-hash.test.mjs` | 2 | hash do tarball fixado e usado |
+| `tests/base-system.test.mjs` | 19 | contrato do sistema base: udhcpd, RNDIS (não ECM), `os_desc` completo, `PermitRootLogin`/`UseDNS`, dropbear ausente, recusa de build com pacote removido |
 
 ## 10-A. O sistema base — acesso antes de interface
 
@@ -477,7 +478,7 @@ o que sustenta esse canal mora no **overlay comum**, não no do aparelho:
   definição do "sistema base" no que depende do busybox. Fragmento do aparelho
   continua existindo para o que **quebra o build** daquele aparelho (o `tc`).
 
-`tests/base-system.test.mjs` (16 testes) fecha o contrato: `udhcpd` presente,
+`tests/base-system.test.mjs` (19 testes) fecha o contrato: `udhcpd` presente,
 comum não desliga applet, RNDIS como padrão, `PermitRootLogin`/`UseDNS`,
 dropbear ausente dos defconfigs, e o selftest tratando `usb0` como canal padrão.
 
@@ -972,6 +973,81 @@ editar um arquivo que outro processo está lendo por `getline`/`tail -f`.
 
 Vale também para o container: o repositório é **bind-mount**, então a edição no
 host é vista pelo processo dentro do container no mesmo inode.
+
+### 12.26 Patch de kernel NÃO se compõe entre aparelhos
+
+O `kernelPatches` do X35H lista **só** os patches da pasta dele. O patch `0001`
+da X55 (HDMI off, `sdmmc1` com `no-mmc`/`no-sd`, `dma-names` do uart1, `&rng
+okay`) **não é aplicado** quando o build é do X35H.
+
+Como o DTS do X35H faz `#include "rk3566-powkiddy-x55.dts"`, ele herda o DTS
+da X55 **mainstream** — sem as correções. Resultado medido no DTB gerado:
+
+| Nó | Valor que veio | O que causa |
+| --- | --- | --- |
+| `rng@fe388000` | `disabled` | sem entropia: o `crng` demora e o `getrandom()` bloqueia — inclusive no `sshd` da primeira conexão |
+| `hdmi@fe0a0000` | `okay` | conector fantasma; o probe do `dw-hdmi` atrasa o boot sem uso possível |
+| `mmc@fe2c0000` (`sdmmc1`) | `okay` + `non-removable` | o kernel inicializa o cartão SDIO do **RTL8821CS** que esta placa não tem: `-110` repetido e atraso |
+| `uart@fe650000` (`uart1`) | `okay` | Bluetooth do mesmo chip, ausente |
+
+Build verde, imagem que boota devagar e sem entropia. É a mesma classe de falha
+do §12.1: o build não tem como saber que o aparelho não tem o hardware.
+
+**Regra:** herdar um DTS de outro aparelho exige **reverter explicitamente** o
+que aquele aparelho ligava e este não tem. Não basta omitir o patch dele —
+omitir deixa o nó como o DTS base declarou.
+
+`tests/device-x35h.test.mjs` verifica os quatro `status` no patch. Herdar DTS de
+novo sem esse teste repete tudo em silêncio.
+
+### 12.27 Pacote removido da config continua no `target/` e entra na imagem
+
+Buildroot **nunca apaga** arquivo de `target/` quando um símbolo desaparece do
+Kconfig — ele só instala. Então remover `BR2_PACKAGE_X` do defconfig **não**
+remove `X` da imagem num build retomado (`KEEP_WORK=1`).
+
+Medido na X55 ao trocar dropbear por OpenSSH:
+
+```text
+$ grep DROPBEAR work/powkiddy-x55/build/.config
+(nada — o .config novo está correto)
+
+$ ls -l work/powkiddy-x55/build/target/usr/sbin/dropbear
+-rwxr-xr-x ... 306448 ...   ← do build ANTERIOR
+$ ls work/powkiddy-x55/build/target/etc/init.d/
+S50dropbear  S50sshd        ← os dois, ambos na porta 22
+```
+
+O sintoma final é exatamente o defeito que a remoção existia para corrigir, e
+nada no build indica o problema: `assert-config` passa (o símbolo saiu por
+vontade própria, não foi descartado).
+
+**O que NÃO funciona** (medido): apagar `target/` e os `.stamp_{target,staging,
+host}_installed` para forçar reinstalação. O Buildroot não reinstala na ordem
+necessária e o `target-finalize` morre em:
+
+```text
+/bin/bash: .../target/etc/shells: No such file or directory
+make: *** [Makefile:727: target-finalize] Error 1
+```
+
+**Resposta aplicada:** `build-device.sh` guarda o conjunto de
+`BR2_PACKAGE_*=y` em `work/<device>/packages.state` (gravado **só** ao fim de um
+build bem-sucedido — gravar antes faz um build que falha "esquecer" a remoção).
+Se um pacote sumiu, o build **recusa continuar** e diz para rodar sem
+`GIOCHI_SYSTEM_KEEP_WORK=1`:
+
+```text
+ERRO: pacote(s) removido(s) desde o último build: DROPBEAR
+  O target/ do build anterior ainda tem os arquivos deles e o
+  Buildroot NÃO os remove: a imagem sairia com binário que a config
+  diz que não existe.
+  Rode de novo SEM GIOCHI_SYSTEM_KEEP_WORK=1 (o padrão limpa work/).
+```
+
+É a mesma família do §12.11 (patch novo não reaplicado): **`KEEP_WORK=1` só é
+seguro quando a configuração não mudou de forma que remova coisa.** Acrescentar
+pacote é seguro; remover e renomear, não.
 
 ## 13. Aparelhos
 
