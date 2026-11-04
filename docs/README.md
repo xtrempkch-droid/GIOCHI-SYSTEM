@@ -28,6 +28,9 @@
 - [Quiver Launcher: viabilidade](evaluacao-quiver-launcher.md) — estudo de
   integração do launcher de terceiros: licença BSL 1.1, ausência de servidor
   gráfico, Rust 1.74 vs 1.90 e RAM. **Não integrar**; o encaixe é app de loja.
+- [pyglet e arcade: viabilidade](evaluacao-pyglet-arcade.md) — jogos em Python com
+  gamepad. Licença BSD-3/MIT e evdev **funcionam**; falta backend de janela em
+  KMSDRM no pyglet (só há X11). Medir shader GLES e RAM antes de decidir.
 - [Mapas de botões](button-maps.md) — de onde vêm os códigos evdev de cada aparelho.
 - [Catálogo RK3326](rk3326-catalog.md) — 15 aparelhos extraídos de device tree.
 - `giochi-buttons` — ferramenta de teste de botões e eixos (`giochi-buttons --list`).
