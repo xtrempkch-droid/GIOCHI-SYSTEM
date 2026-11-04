@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "powkiddy-x35h",
   "name": "Powkiddy X35H",
-  "description": "Console portátil Rockchip RK3566 (4x Cortex-A55, Mali-G52), painel MIPI-DSI 640x480 Sitronix ST7703. Variante de painel menor da X55, sem rádio: o RTL8821CS não é populado, então não há Wi-Fi nem Bluetooth.",
+  "description": "Console portátil Rockchip RK3566 (4x Cortex-A55, Mali-G52), painel MIPI-DSI 640x480 Sitronix ST7703, 964 MB de RAM (medido no aparelho em 04/11/2026 — não 2 GB). Variante de painel menor da X55, sem rádio: o RTL8821CS não é populado, então não há Wi-Fi nem Bluetooth.",
   "arch": "arm64",
   "hostname": "giochi-system-x35h",
   "buildrootDefconfig": "giochi_x35h_defconfig",

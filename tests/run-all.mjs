@@ -22,5 +22,6 @@ import "./boot-layer.test.mjs";
 import "./launcher-deps.test.mjs";
 import "./graphics-stack.test.mjs";
 import "./bootlog.test.mjs";
+import "./selftest-contract.test.mjs";
 import "./dongle.test.mjs";
 import "./host-compat.test.mjs";

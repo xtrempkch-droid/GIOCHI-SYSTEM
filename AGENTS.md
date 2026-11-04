@@ -1488,6 +1488,83 @@ só presença de comando: **CI verde não prova build limpo em máquina nova.** 
 build local do zero prova, e é por isso que estes quatro ficam documentados em
 vez de apenas corrigidos.
 
+### 12.34 `ls A* B*` volta não-zero quando UM dos padrões não casa
+
+O `giochi-selftest` testava as bibliotecas do launcher assim:
+
+```sh
+if ls /usr/lib/${lib}.so* /lib/${lib}.so* >/dev/null 2>&1; then pass ...; fi
+```
+
+`ls` recebe **dois** argumentos. Se `/usr/lib/libasound.so*` casa e
+`/lib/libasound.so*` não (no Buildroot `/lib` **não** é symlink para `/usr/lib`,
+é diretório real), o `ls` lista o primeiro, reclama do segundo e **sai com 1** —
+o `if` então trata como ausente.
+
+Sintoma medido no X35H em 04/11/2026: **cinco `[FAIL]` falsos** num aparelho onde
+as cinco bibliotecas estavam em `/usr/lib` e o launcher rodava com texto.
+
+```text
+ls /usr/lib/libasound.so*                       ; echo $?   # 0
+ls /lib/libasound.so*                           ; echo $?   # 1
+ls /usr/lib/libasound.so*  /lib/libasound.so*   ; echo $?   # 1   <- o bug
+```
+
+Correção: um `ls` por diretório, num laço (`lib_existe()`), nunca dois globs no
+mesmo comando.
+
+**Por que isto merece um §12 e não só um commit:** um `FAIL` falso é pior que
+teste nenhum. Ele manda caçar dependência que está no lugar e, na terceira vez
+que aparece, o operador aprende a ignorar o bloco inteiro — inclusive quando ele
+estiver certo. É o espelho exato da regra de "biblioteca presente não prova uso"
+(§12.29): o teste tem de perguntar pela **consequência**, e "o arquivo existe" é
+uma pergunta, "o launcher carrega" é outra.
+
+`tests/selftest-contract.test.mjs` executa `lib_existe()` num diretório sintético
+com os três casos: só em `/usr/lib`, só em `/lib`, e ausente nos dois (esse
+último impede que a correção vire um `PASS` sempre-verde, que é o defeito
+oposto).
+
+### 12.35 O BMP prova o conteúdo, não a posição
+
+O `--dump-frame` do launcher grava o framebuffer com `read_pixels`, e essa
+chamada **não respeita o deslocamento do viewport**: devolve o conteúdo a partir
+de (0,0). Quem mede *onde* a faixa preta está no arquivo conclui "faixa só
+embaixo" — e o time do app quase documentou um bug de renderização a partir
+disso, quando a tela estava correta (60 px em cima **e** embaixo).
+
+| Medida no BMP | Vale? |
+| --- | --- |
+| percentual de preto | **sim** — o total independe do offset |
+| comparação pixel a pixel com a referência | **sim** — as duas têm o mesmo artefato |
+| posição da faixa (topo × base) | **não** — só olhando a tela |
+
+Isso não afeta nenhum script desta árvore (não há `read_pixels`/`--dump-frame`
+aqui), mas fica registrado porque o `giochi-selftest` vai crescer na direção de
+imagem, e a armadilha é da mesma família do §12.20: a ferramenta responde uma
+pergunta que não é a que se fez.
+
+### 12.36 O launcher prova harfbuzz sem `readelf`
+
+`readelf -d` é a prova exata de que o `libSDL2_ttf` usa harfbuzz (entrada
+`NEEDED`). Mas `readelf` não está na imagem, e no Buildroot ele só vem com
+`BR2_PACKAGE_BINUTILS_TARGET=y`, que instala a **toolchain inteira** no aparelho
+(`ar`, `as`, `ld`, `objdump`, `strip`…) para servir a um diagnóstico.
+
+Resultado medido no X35H: o bloco saía `[SKIP]` justamente no item que importa.
+
+Decisão: não instalar binutils. O selftest usa `readelf` **quando existe** e cai
+para `grep -aq 'libharfbuzz\.so'` no binário. As duas provas não valem o mesmo, e
+o texto do `PASS` diz qual foi usada:
+
+| Prova | O que garante |
+| --- | --- |
+| `readelf -d` → `NEEDED` | o ligador exigiu a biblioteca |
+| `grep -a` → soname no `.dynstr` | o nome está lá; na prática equivale a `NEEDED`, mas não distingue um `dlopen()` opcional (que o SDL2_ttf não faz) |
+
+O que **não** se faz é transformar "não deu para medir" em `FAIL`: `FAIL` falso
+custa confiança no bloco inteiro (§12.34).
+
 ## 13. Aparelhos
 
 | ID | Pasta | SoC | Arch | Status | Falta |

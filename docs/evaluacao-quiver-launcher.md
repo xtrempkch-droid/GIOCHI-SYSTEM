@@ -151,11 +151,16 @@ Contra o nosso hardware:
 - **X55: 2 GB de RAM no total** (`DRAM: 2 GiB` medido no U-Boot). O launcher
   pediria **25–38 %** da memória só para existir, e **até 65 %** no pico — antes
   de o jogo rodar. Num handheld, o launcher e o jogo dividem o mesmo 2 GB.
-- **X35H:** RAM ainda não medida (é uma das pendências com o time do app).
+- **X35H: 964 MB**, medido no aparelho pelo time do app em 04/11/2026. Com
+  ~1 GB efetivo o WebKitGTK assentado (490–560 MiB) já consome **mais da
+  metade** da RAM, e o CEF no pico (**1,0–1,3 GiB**) **não caberia** — nem
+  contando com swap, que num cartão SD seria pior que não ter. Este número
+  fecha a discussão para o X35H: não é "apertado", é inviável.
 - **Rootfs de 1 GiB:** 82–183 MiB de launcher é 8–18 % do rootfs, e a pilha
   WebKitGTK+GTK3+cage soma bem mais que o binário do app.
 - **Tela do X35H: 640x480.** Uma UI React com capas de jogo, filtros e mods
-  nessa resolução é apertada — e o projeto mediu 25 % de letterbox em 4:3.
+  nessa resolução é apertada — e o projeto mediu 25 % de letterbox em 4:3
+  (resolvido do lado deles depois, com layout adaptativo).
 
 Nada disso é opinião: são números deles contra a ficha do nosso hardware.
 
@@ -206,5 +211,16 @@ binário de usuário.
 | Reabrir isto quando? | Se a versão que interessar já tiver passado o `Change Date` (MIT), **e** se o alvo for o PC |
 
 Se algum dia essa decisão for reaberta, os três números que decidem são: **RAM
-do X35H**, **custo em MiB da pilha WebKitGTK no rootfs de 1 GiB**, e **versão do
-Rust na árvore**. Sem esses três, a conversa recomeça do zero.
+do aparelho**, **custo em MiB da pilha WebKitGTK no rootfs de 1 GiB**, e
+**versão do Rust na árvore**. Dois dos três já estão medidos:
+
+| Número | Estado |
+| --- | --- |
+| RAM do X35H | **964 MB** (medido no aparelho, 04/11) — fecha a questão para esse aparelho |
+| RAM do X55 | **2 GiB** (medido no U-Boot) |
+| Custo da pilha WebKitGTK no rootfs | **não medido** — exigiria um build de teste com GTK3+cage |
+| Rust na árvore | **1.74.1**; o app pede 1.90 |
+
+Ou seja: a conversa só recomeça do zero se alguém aparecer com um aparelho de
+**4 GB ou mais** e disposição de subir o Rust. Em 2 GB ou 1 GB, os números já
+responderam.

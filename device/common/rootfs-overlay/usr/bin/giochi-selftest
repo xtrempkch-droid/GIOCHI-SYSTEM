@@ -125,6 +125,42 @@ else
     fail "/dev/dri/card0 AUSENTE — sem console gráfico (suspeite do PHY DSI)"
 fi
 
+# Tamanho do painel, reportado como LINHA PRÓPRIA e cedo no bloco.
+#
+# Não é redundância com "conector ... connected 640x480" logo abaixo: foi esse
+# número, 640x480, que explicou em 04/11/2026 por que a UI de 1280x720 aparecia
+# com 25% de faixa preta e fonte pela metade. Quem abre um aparelho novo precisa
+# dele primeiro, e no meio de uma lista de 20 linhas de PASS ele se perde.
+#
+# A proporção vai junto porque é o que decide o layout: 720x1280 é retrato
+# (precisa de rotate=3), 640x480 é 4:3 e recebe UI 16:9 com faixa.
+PAINEL=""
+for c in /sys/class/drm/card0-*; do
+    [ -d "$c" ] || continue
+    [ "$(read_or "$c/status")" = "connected" ] || continue
+    PAINEL=$(head -n 1 "$c/modes" 2>/dev/null)
+    [ -n "$PAINEL" ] && break
+done
+if [ -n "$PAINEL" ]; then
+    W=${PAINEL%x*}
+    H=${PAINEL#*x}
+    case "$W$H" in
+        *[!0-9]*|"") pass "painel: $PAINEL" ;;
+        *)
+            if [ "$W" -gt "$H" ]; then ORI="paisagem"; else ORI="retrato"; fi
+            # Proporção com aritmética INTEIRA, sem awk e sem ponto flutuante:
+            # o alvo é busybox ash + busybox awk, e o §12.20 já mostrou que
+            # função de gawk some em silêncio (strtonum devolvia vazio e o
+            # teste "passava" com zero). Aqui não há o que degradar.
+            R100=$(( (W * 100 + H / 2) / H ))
+            RATIO="$((R100 / 100)).$(printf '%02d' "$((R100 % 100))")"
+            pass "painel: $PAINEL ($ORI, $RATIO:1)"
+            ;;
+    esac
+else
+    warn "painel: sem modo anunciado por nenhum conector — driver de painel não subiu?"
+fi
+
 if [ -e /dev/dri/renderD128 ]; then
     pass "render node presente (3D disponível para processos)"
 else
@@ -253,16 +289,46 @@ done
 # `BR2_PACKAGE_HARFBUZZ=y` só troca isso se o pacote for RECONFIGURADO —
 # num build retomado ele não é. Medido neste repositório: a lib estava na
 # imagem e o TTF_USE_HARFBUZZ continuava 0.
-if [ -r /usr/lib/libSDL2_ttf.so ] || ls /usr/lib/libSDL2_ttf-2.0.so.0 >/dev/null 2>&1; then
+#
+# `readelf -d` seria a prova exata (entrada NEEDED), mas o binutils NÃO está na
+# imagem: `BR2_PACKAGE_BINUTILS_TARGET=y` instala a toolchain inteira no target
+# (ar, as, ld, objdump, strip…) só para um diagnóstico. Medido no X35H em
+# 04/11: o bloco saía sempre `[SKIP]`, justamente no item que importa.
+#
+# Então há dois caminhos, e eles provam coisas diferentes — por isso o texto
+# do PASS diz qual foi usado:
+#
+#   readelf -d     NEEDED  → prova que o ligador exigiu a libharfbuzz
+#   grep -a        soname → prova que o nome está no binário. Para `.dynstr`
+#                           isso é o mesmo que NEEDED na prática; o que ele não
+#                           distingue é um `dlopen()` opcional, que o
+#                           SDL2_ttf não faz.
+#
+# Um FAIL falso aqui seria pior que SKIP: some com a confiança no bloco.
+TTF_LIB=""
+for dir in /usr/lib /lib; do
+    for cand in "$dir"/libSDL2_ttf-2.0.so.0 "$dir"/libSDL2_ttf.so; do
+        [ -e "$cand" ] || continue
+        TTF_LIB="$cand"
+        break
+    done
+    [ -n "$TTF_LIB" ] && break
+done
+
+if [ -n "$TTF_LIB" ]; then
     if command -v readelf >/dev/null 2>&1; then
-        if readelf -d /usr/lib/libSDL2_ttf-2.0.so.0 2>/dev/null | grep -q libharfbuzz; then
-            pass "SDL2_ttf com harfbuzz (shaping de script complexo ativo)"
+        if readelf -d "$TTF_LIB" 2>/dev/null | grep -q libharfbuzz; then
+            pass "SDL2_ttf com harfbuzz (NEEDED, readelf) — shaping complexo ativo"
         else
-            warn "SDL2_ttf SEM harfbuzz — texto latino sai, script complexo sai errado"
+            warn "SDL2_ttf SEM harfbuzz (NEEDED, readelf) — script complexo sai errado"
         fi
+    elif grep -aq 'libharfbuzz\.so' "$TTF_LIB" 2>/dev/null; then
+        pass "SDL2_ttf com harfbuzz (soname no binário) — shaping complexo ativo"
     else
-        skip "sem readelf — não dá para provar que o SDL2_ttf usa harfbuzz"
+        warn "SDL2_ttf SEM harfbuzz — script complexo sai errado (sem readelf, prova por soname)"
     fi
+else
+    skip "libSDL2_ttf não encontrada — nada a provar sobre harfbuzz"
 fi
 
 # Fontes: o diretório existir não prova nada (dejavu.mk cria vazio sem família).
