@@ -24,5 +24,6 @@ import "./graphics-stack.test.mjs";
 import "./bootlog.test.mjs";
 import "./selftest-contract.test.mjs";
 import "./python-libs-study.test.mjs";
+import "./arcade-probe.test.mjs";
 import "./dongle.test.mjs";
 import "./host-compat.test.mjs";

@@ -157,18 +157,9 @@ na lista. **`panfrost` não aparece.**
 
 ### Por que isso é pior que "colisão mais lenta"
 
-O `Context` do arcade carrega dois programas de colisão **incondicionalmente**
-(qualquer `gl_api != "webgl"`), em `arcade/context.py`:
-
-```python
-if gl_api != "webgl":
-    self.collision_detection_program = self.load_program(
-        vertex_shader=":system:shaders/collision/col_trans_vs.glsl",
-        geometry_shader=":system:shaders/collision/col_trans_gs.glsl",   # <- exige a extensão
-    )
-```
-
-E `load_program` **levanta**, não degrada:
+O `Context` do arcade carrega os programas com geometry shader
+**incondicionalmente** na inicialização, e `load_program` **levanta**, não
+degrada:
 
 ```python
 raise ShaderException(f"Program link error: {log.value.decode()}")
@@ -180,24 +171,53 @@ levanta `ShaderException` **antes de qualquer coisa aparecer na tela**. Não é
 
 ### O que isso quer dizer, sem exagero
 
-| Componente | Usa geometry shader? | Em panfrost |
+**Correção de uma afirmação anterior deste documento.** Eu tinha escrito que só
+os dois programas de colisão exigem geometry shader, e que "todo o caminho de
+renderização 2D funciona". Isso está **errado** para a 3.3.3 (a versão estável
+que o `pip install arcade` traz). Medido no código instalado: são **cinco**
+programas, e **três são de desenho**.
+
+| Programa em `context.py` | Para que serve | Fallback sem geo |
 | --- | --- | --- |
-| `sprite_list_simple_vs.glsl` (desenho normal) | **não** | ✅ funciona |
-| `sprite_list_geometry_*` (lista por geometria) | sim | ❌ |
-| `collision/col_trans_gs.glsl` | **sim** | ❌ e derruba o boot |
-| `atlas/resize_simple_*` | não | ✅ |
-| tessellation | — | fora de escopo (2D) |
+| `sprite_list_program_no_cull` | desenhar `SpriteList` | `sprite_list_program_no_geo` ✅ |
+| `sprite_list_program_cull` | desenhar com culling | `sprite_list_program_no_geo` ✅ |
+| `sprite_program_single` | sprite único | `sprite_program_single_simple` ✅ |
+| `collision_detection_program` | colisão GPU | não — CPU (`hitbox`) |
+| `collision_detection_program_simple` | colisão GPU | não — CPU (`hitbox`) |
 
-Ou seja: **todo o caminho de renderização 2D funciona; o que não funciona é o
-carregamento dos dois programas de colisão**, e ele é obrigatório na
-inicialização. O trabalho não é portar shader: é fazer o arcade **tolerar** a
-ausência dos programas de colisão, como já faz no ramo `webgl` (que os define
-como `None`).
+O fallback de shader **existe para tudo que desenha**. O que faltava era a
+escolha: em `sprite_list.py` o caminho sem geo está **comentado**:
 
-Estimativa honesta dessa correção: **~10 linhas** (um `try/except` em volta dos
-dois `load_program`, caindo no mesmo estado do ramo `webgl`), mais a escolha de
-colisão por `arcade/hitbox` em CPU no lugar da GPU. É contribuição upstream
-pequena e defensável — "não morra quando a plataforma não tem geometry shader".
+```python
+# Desktop GL (with geo shader)
+self._data = SpriteListBufferData(...)
+# WebGL (without geo shader)
+# self._data = SpriteListTextureData(...)      <- pronto, mas desligado
+```
+
+`SpriteListTextureData` é código real, escrito para WebGL. O remendo só o liga.
+
+### O remendo foi medido, e funciona
+
+Estimativa anterior: "~10 linhas". **Errado também** — o remendo real tem oito
+trocas (ver [`scripts/arcade-probe/`](../../scripts/arcade-probe/README.md)),
+porque não basta tolerar a ausência: é preciso escolher a implementação de dados
+sem geo e transformar o `TypeError` da colisão num erro com nome.
+
+Resultado em ambiente fechado (arcade 3.3.3, Xvfb + llvmpipe), com a falha
+injetada no mesmo ponto (`load_program` com `geometry_shader`):
+
+| Cenário | Resultado |
+| --- | --- |
+| A — caminho normal | `SpriteListBufferData`, render `count=2`, colisão GPU ok |
+| B — sem geo, **sem** remendo | `ShaderException` na inicialização |
+| B — sem geo, **com** remendo | abre, `SpriteListTextureData`, render `count=2`, colisão CPU ok, colisão GPU → `CollisionUnavailable` |
+
+**O que isso NÃO prova**, e está registrado no README do probe: o driver foi
+llvmpipe, não panfrost; a falha foi injetada, não produzida pelo driver; e o
+caminho **GLES** (`gl_api="opengles"`, onde o pyglet reescreve para
+`#version 310 es`) não foi exercitado, porque Xvfb entrega desktop GL 4.5.
+Medir GLES exige EGL + driver GLES, que é outro ambiente.
 
 ### Texturas: a outra limitação, que é do pyglet
 
@@ -382,7 +402,7 @@ O que cada resultado decide:
 | Resultado | Significa |
 | --- | --- |
 | `get_joysticks()` lista os 16 botões e 4 eixos | ✅ o requisito do usuário está atendido — e **isto pode ser medido hoje**, sem janela |
-| lista de extensões **sem** `geometry_shader` | ✗ confirma o §4: precisa das ~10 linhas de tolerância antes de o arcade abrir |
+| lista de extensões **sem** `geometry_shader` | ✗ confirma o §4: precisa do remendo (já medido em `scripts/arcade-probe/`) antes de o arcade abrir |
 | lista **com** `GL_EXT_geometry_shader` | ✅ o §4 estava conservador — o arcade roda sem patch |
 | janela abre e sprite aparece em GLES 3.1 | ✅ arcade viável, caminho (c) ou (d) |
 | `ShaderException` no `arcade.Window()` | ✗ esperado pelo §4; é o patch de tolerância |
@@ -400,7 +420,7 @@ O que cada resultado decide:
 | O `#version 330` do arcade é problema? | **Não** — ele reescreve para `#version 310 es` no load |
 | O que trava o arcade no panfrost? | **`GL_EXT_geometry_shader`**, que o Mesa não expõe no panfrost. Derruba o boot, não só a colisão |
 | Vale desenvolver jogos com eles? | **Sim**, no `generic-x64`, desde já |
-| Qual caminho para o handheld? | (c) backend KMSDRM no pyglet **+** ~10 linhas de tolerância a geometry shader no arcade |
+| Qual caminho para o handheld? | (c) backend KMSDRM no pyglet **+** o remendo de geometry shader, **já medido e funcionando** |
 | Vale escrever o backend KMSDRM? | Só se Python virar linha de produto. 200–400 linhas + manutenção |
 | Existe caminho mais rápido? | **`PySDL2`** — SDL2/KMSDRM que já temos, CC0, custo zero de arquitetura |
 | Reabrir quando? | Quando houver medida de RAM de um jogo real e de janela em KMSDRM |
@@ -410,7 +430,7 @@ O que cada resultado decide:
 **pyglet e arcade são a escolha certa por licença e a escolha certa por gamepad;
 erram na janela, e o arcade erra mais um pouco no geometry shader.** Os dois
 consertos são conhecidos e pequenos — backend KMSDRM (200–400 linhas) e tolerância
-à ausência de `GL_EXT_geometry_shader` (~10 linhas) —, e nenhum deles é o tipo de
+à ausência de `GL_EXT_geometry_shader` (oito trocas, já medido) —, e nenhum deles é o tipo de
 trabalho que pode ser evitado com configuração.
 
 Comparado com o Quiver, o custo é **muito menor**: lá eram WebKitGTK + GTK3 +
