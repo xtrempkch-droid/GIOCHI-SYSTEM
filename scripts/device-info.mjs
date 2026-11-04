@@ -90,6 +90,16 @@ switch (field) {
       console.log(path.join(device.directory, patchPath));
     }
     break;
+  case "buildrootFragments":
+    for (const extra of device.buildrootFragments ?? []) {
+      console.log(path.join(device.directory, extra));
+    }
+    break;
+  case "firmwareFiles":
+    for (const firmware of device.firmwareFiles ?? []) {
+      console.log(path.join(device.directory, firmware));
+    }
+    break;
   case "dts": {
     // O nome do DTB vem do defconfig do aparelho, não de um campo extra no
     // device.json: duas fontes para a mesma informação divergem em silêncio, e

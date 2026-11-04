@@ -261,6 +261,52 @@ export async function validateDevice(device) {
     }
   }
 
+  // buildrootFragments: fragmentos por área (painel, input, áudio…), aplicados
+  // DEPOIS de buildroot.fragment. Existem porque um aparelho que herda o
+  // defconfig de outro acumula exceções por área, e um arquivo único vira
+  // listas que ninguém sabe de onde vieram. Declarado e inexistente = build
+  // sem a opção de painel, que é falha silenciosa (§12.1).
+  if (device.buildrootFragments !== undefined) {
+    require(
+      Array.isArray(device.buildrootFragments),
+      "buildrootFragments deve ser um array.",
+    );
+    if (Array.isArray(device.buildrootFragments)) {
+      for (const extra of device.buildrootFragments) {
+        try {
+          assertRelativePath(extra, "buildrootFragments[]");
+          require(
+            await pathExists(path.join(device.directory, extra)),
+            `fragmento por área não encontrado: ${extra}`,
+          );
+        } catch (error) {
+          errors.push(error.message);
+        }
+      }
+    }
+  }
+
+  // firmwareFiles: blobs que o aparelho precisa e que NÃO vêm do
+  // linux-firmware do Buildroot (o rtl8821cs_* é o caso concreto, §12.17).
+  // O destino no rootfs é sempre /lib/firmware/, preservando a subpasta: o
+  // driver pede o caminho relativo (`rtl_bt/rtl8821cs_config.bin`), não o nome.
+  if (device.firmwareFiles !== undefined) {
+    require(Array.isArray(device.firmwareFiles), "firmwareFiles deve ser um array.");
+    if (Array.isArray(device.firmwareFiles)) {
+      for (const firmware of device.firmwareFiles) {
+        try {
+          assertRelativePath(firmware, "firmwareFiles[]");
+          require(
+            await pathExists(path.join(device.directory, firmware)),
+            `firmware não encontrado: ${firmware}`,
+          );
+        } catch (error) {
+          errors.push(error.message);
+        }
+      }
+    }
+  }
+
   try {
     assertRelativePath(device.docs, "docs");
     const docsPath = path.join(device.directory, device.docs);

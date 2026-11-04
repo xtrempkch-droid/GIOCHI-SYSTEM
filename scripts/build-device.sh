@@ -347,6 +347,37 @@ else
   echo "  botões:    sem buttons.map neste aparelho (launcher usa o mapa embutido)"
 fi
 
+# Firmware declarado pelo aparelho (device.json → firmwareFiles): blobs que NÃO
+# vêm do linux-firmware do Buildroot — o rtl8821cs_* é o caso concreto (§12.17).
+# Destino é sempre /lib/firmware, preservando a subpasta, porque o driver pede o
+# caminho relativo (`rtl_bt/rtl8821cs_config.bin`), não o nome do arquivo.
+# Arquivo no lugar errado produz `Direct firmware load ... failed with error -2`
+# no dmesg e mais nada: o dispositivo "não funciona" com o arquivo presente
+# (§12.15). Por isso cada arquivo é listado com o caminho final no log.
+#
+# O staging já foi limpo acima (§12.18), então firmware removido do aparelho
+# desaparece da imagem em vez de sobreviver de um build anterior.
+FIRMWARE_OVERLAY="$OVERLAY_STAGE/02-firmware"
+mapfile -t FIRMWARE_DECL < <(node "$ROOT/scripts/device-info.mjs" "$DEVICE_ID" firmwareFiles)
+if [[ ${#FIRMWARE_DECL[@]} -gt 0 ]]; then
+  mkdir -p "$FIRMWARE_OVERLAY/lib/firmware"
+  for firmware_path in "${FIRMWARE_DECL[@]}"; do
+    if [[ ! -e "$firmware_path" ]]; then
+      echo "ERRO: firmware declarado não existe: $firmware_path" >&2
+      exit 2
+    fi
+    if [[ -d "$firmware_path" ]]; then
+      cp -a "$firmware_path/." "$FIRMWARE_OVERLAY/lib/firmware/"
+    else
+      cp -a "$firmware_path" "$FIRMWARE_OVERLAY/lib/firmware/"
+    fi
+  done
+  OVERLAY_ARGS+=(--overlay "$FIRMWARE_OVERLAY")
+  while IFS= read -r staged_fw; do
+    echo "  firmware:  ${staged_fw#"$FIRMWARE_OVERLAY"/}"
+  done < <(find "$FIRMWARE_OVERLAY/lib/firmware" -type f | sort)
+fi
+
 echo "Mesclando configuração comum + device..."
 # O fragmento de kernel também passa pelo staging: Buildroot trata
 # BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES como lista separada por ESPAÇO, e
@@ -361,6 +392,31 @@ KERNEL_FRAGMENT_ARGS=()
 if [[ -f "$KERNEL_FRAGMENT" ]]; then
   cp -a "$KERNEL_FRAGMENT" "$WORK_DIR/linux.fragment"
   KERNEL_FRAGMENT_ARGS=(--kernel-fragment "$WORK_DIR/linux.fragment")
+fi
+
+# Fragmentos por área (device.json → buildrootFragments). Entram DEPOIS de
+# buildroot.fragment e na ordem declarada, que é o contrato do device/README.md:
+# "common → buildroot.fragment → fragmentos por área". O common e o principal já
+# foram aplicados antes deste ponto, então a ordem sai de graça.
+#
+# Vão pelo staging pelo mesmo motivo dos outros (§12.6): a pasta do aparelho tem
+# espaço no nome, e o nome do arquivo também pode ter.
+EXTRA_FRAGMENT_ARGS=()
+mapfile -t EXTRA_FRAGMENTS < <(node "$ROOT/scripts/device-info.mjs" "$DEVICE_ID" buildrootFragments)
+if [[ ${#EXTRA_FRAGMENTS[@]} -gt 0 ]]; then
+  mkdir -p "$WORK_DIR/fragments"
+  extra_index=0
+  for extra_fragment in "${EXTRA_FRAGMENTS[@]}"; do
+    if [[ ! -f "$extra_fragment" ]]; then
+      echo "ERRO: fragmento por área não encontrado: $extra_fragment" >&2
+      exit 2
+    fi
+    extra_index=$((extra_index + 1))
+    staged_fragment="$WORK_DIR/fragments/$(printf '%02d' "$extra_index")-$(basename "$extra_fragment")"
+    cp -a "$extra_fragment" "$staged_fragment"
+    EXTRA_FRAGMENT_ARGS+=(--fragment "$staged_fragment")
+    echo "  fragmento: $(basename "$extra_fragment") (área, depois do principal)"
+  done
 fi
 
 # Patches de kernel (device.json → kernelPatches). Vão para o staging pelo
@@ -437,6 +493,7 @@ node "$ROOT/scripts/prepare-config.mjs" \
   --dl-dir "$BUILDROOT_DL_DIR" \
   --fragment "$ROOT/config/common.fragment" \
   --fragment "$FRAGMENT" \
+  ${EXTRA_FRAGMENT_ARGS[@]+"${EXTRA_FRAGMENT_ARGS[@]}"} \
   --ccache-dir "$CCACHE_ARG" \
   "${KERNEL_FRAGMENT_ARGS[@]+"${KERNEL_FRAGMENT_ARGS[@]}"}" \
   "${BUSYBOX_FRAGMENT_ARGS[@]+"${BUSYBOX_FRAGMENT_ARGS[@]}"}" \
@@ -449,10 +506,15 @@ make -C "$BR2_DIR" O="$BUILD_DIR" olddefconfig >"$WORK_DIR/olddefconfig.log" 2>&
 
 # O olddefconfig descarta símbolo em silêncio (nome inexistente, símbolo legacy ou
 # pai unset). Sem esta checagem o build fica verde e a imagem sai incompleta.
+#
+# Os fragmentos por ÁREA (buildrootFragments) entram aqui também: se ficassem de
+# fora, um símbolo pedido só neles poderia ser descartado sem ninguém notar —
+# que é precisamente o buraco que este gate existe para fechar (§12.1).
 if ! node "$ROOT/scripts/assert-config.mjs" \
   --config "$BUILD_DIR/.config" \
   --fragment "$ROOT/config/common.fragment" \
-  --fragment "$FRAGMENT"; then
+  --fragment "$FRAGMENT" \
+  ${EXTRA_FRAGMENT_ARGS[@]+"${EXTRA_FRAGMENT_ARGS[@]}"}; then
   echo "ERRO: símbolos pedidos não sobreviveram ao olddefconfig (ver acima)." >&2
   echo "O log do olddefconfig está em $WORK_DIR/olddefconfig.log." >&2
   exit 1

@@ -6,6 +6,7 @@
 // Importar os arquivos aqui registra todos os testes no mesmo processo, o que
 // também funciona no CI e dá a saída completa de uma vez.
 import "./devices.test.mjs";
+import "./device-fields.test.mjs";
 import "./assert-config.test.mjs";
 import "./fdt.test.mjs";
 import "./buildroot-hash.test.mjs";
@@ -15,6 +16,7 @@ import "./firmware-required.test.mjs";
 import "./buttons-map.test.mjs";
 import "./cmdline.test.mjs";
 import "./device-x35h.test.mjs";
+import "./device-generic-x64.test.mjs";
 import "./base-system.test.mjs";
 import "./boot-layer.test.mjs";
 import "./launcher-deps.test.mjs";
