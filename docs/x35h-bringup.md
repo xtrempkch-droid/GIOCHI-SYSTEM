@@ -493,6 +493,37 @@ aqui e não pode ser plugado.
 `giochi-selftest` agora reporta porta USB host, `wlan0` e os módulos de dongle:
 plugar um dongle e não ver nada é o pior resultado possível.
 
+## 5.6 Imagem refeita em 04/11/2026 — agora com o `respawn`
+
+A imagem de `out/powkiddy-x35h/` era de **antes** do `post-build` incondicional
+(commit `3601e73`), então o binário do `giochi-init` estava no rootfs e ninguém o
+chamava. Refeita com `KEEP_WORK=1` — ~4 min, sem recompilar pacote:
+
+```bash
+ALLOW_DRAFT=1 GIOCHI_SYSTEM_KEEP_WORK=1 bash scripts/build-in-container.sh powkiddy-x35h
+```
+
+`built_at_utc=2026-11-04T21:14:18Z`, commit `70d86a1`. No `/etc/inittab` gerado:
+
+```text
+29:::sysinit:/etc/init.d/rcS
+30:::respawn:/usr/bin/giochi-init        ← acrescentada
+33:console::respawn:/sbin/getty -L  console 0 vt100 # GENERIC_SERIAL
+```
+
+O getty da serial e o resto do que o Buildroot escreveu continuam lá — o
+`post-build` só insere, nunca substitui.
+
+**O que isso muda no aparelho:** nada visível hoje. Sem
+`/opt/giochi/apps/launcher/bin/giochi-launcher`, o `giochi-init` espera em ciclos
+de 30 s. Como esta placa **não tem console serial exposto**, o custo de não ter a
+linha é justamente o que dói aqui: sem `respawn` não existe canal para saber que
+o launcher não subiu além do `/root/giochi-boot.log`.
+
+**O cartão não foi regravado** — o X35H estava em uso. A `.img` de cartão em
+`out/` também é de 03/11 e não inclui esta mudança; gerar e gravar exige o
+aparelho livre.
+
 ## 6. O que falta, e a ordem
 
 1. **Bootar e ler o log.** Sem isso o resto é especulação.

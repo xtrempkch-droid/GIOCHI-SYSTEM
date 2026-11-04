@@ -263,6 +263,7 @@ Giochi system/
 │   ├── r35s/                          # RK3326 — draft, com dts/*.dtb real
 │   │   └── dts/rk3326-gameconsole-r36s.dtb
 │   ├── steamdeck/                     # x86_64 — draft
+│   ├── generic-x64/                   # x86_64 — draft, PC comum com UEFI
 │   └── _template/
 ├── docs/
 │   ├── README.md, architecture.md, adding-a-device.md, building-locally.md
@@ -1494,9 +1495,10 @@ vez de apenas corrigidos.
 | `qemu-aarch64` | `qemu-aarch64/` | virtual | arm64 | **ready** | nada — é o smoke test do pipeline |
 | `powkiddy-x55` | `powkiddy x55/` | RK3566 | arm64 | draft | **boota com tela, áudio, Wi-Fi, BT e 16 botões + 4 eixos**; falta o launcher (do `Giochi app`) |
 | `powkiddy-x35s` | `powkiddy x35s/` | **RK3566** | arm64 | draft | DTS (compartilha com o X35H) e build |
-| `powkiddy-x35h` | `powkiddy x35h/` | **RK3566** | arm64 | draft | **boota com tela 640x480, `usb0` e SSH**; falta o launcher, o teste A/B de cartão e os eixos analógicos |
+| `powkiddy-x35h` | `powkiddy x35h/` | **RK3566** | arm64 | draft | **boota com tela 640x480, `usb0` e SSH**; imagem de 04/11 já tem o `respawn`. Falta o launcher, o teste A/B de cartão e os eixos analógicos |
 | `r35s` | `r35s/` | RK3326 | arm64 | draft | pipeline RK3326 (BL31/DDR/U-Boot), joypad fora da árvore |
 | `steamdeck` | `steamdeck/` | x86_64 | x86_64 | draft | kernel, firmware, áudio, Wi-Fi, controle |
+| `generic-x64` | `generic-x64/` | x86_64 | x86_64 | draft | **nunca compilado**; `pc_x86_64_efi_defconfig` declarado para permitir dispatch com `allow_draft` |
 
 **X35H e X35S são RK3566** (4× A55, Mali-G52) — não RK3326. O `AGENTS.md`
 dizia o contrário e estava errado; a fonte é o `device.conf` **medido** no
@@ -1587,7 +1589,7 @@ o cartão — não só no `target/`.
 | Imagem X55 (`Image` + `rootfs.ext4` + DTB + bootloader) | **existe** em `out/powkiddy-x55/`, `built_at_utc=2026-11-04T21:05:13Z` |
 | `/etc/inittab` na imagem | **linha 30: `::respawn:/usr/bin/giochi-init`** — conferida com `debugfs` no `rootfs.ext4` |
 | `work/` do X55 | preservado em `~/.cache/giochi-system/work/powkiddy-x55` (17 GB, já com `target/` finalizado) |
-| Imagem X35H em `out/` | intacta — mas é de **antes** do `respawn`, então **não** tem a linha |
+| Imagem X35H em `out/` | **refeita em 04/11** (`built_at_utc=21:14:18Z`), agora com o `respawn`; a `.img` de cartão continua a de 03/11 |
 
 O comando que retoma (ou refaz a etapa final) sem recompilar tudo:
 
