@@ -19,6 +19,7 @@ import "./device-x35h.test.mjs";
 import "./device-generic-x64.test.mjs";
 import "./base-system.test.mjs";
 import "./boot-layer.test.mjs";
+import "./giochi-init.test.mjs";
 import "./launcher-deps.test.mjs";
 import "./graphics-stack.test.mjs";
 import "./bootlog.test.mjs";

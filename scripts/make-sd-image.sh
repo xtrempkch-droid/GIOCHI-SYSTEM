@@ -187,13 +187,47 @@ BOOT_OFFSET=$(( BOOT_PART_START_MIB * 1024 * 1024 ))
 BOOT_SIZE=$(( BOOT_PART_MIB * 1024 * 1024 ))
 ROOT_OFFSET=$(( BOOT_OFFSET + BOOT_SIZE ))
 
-BOOT_LOOP="$(losetup -f --show --offset "$BOOT_OFFSET" --sizelimit "$BOOT_SIZE" "$IMAGE")"
-ROOT_LOOP="$(losetup -f --show --offset "$ROOT_OFFSET" "$IMAGE")"
-LOOP="$BOOT_LOOP"
-echo "  loop:    $BOOT_LOOP (p1) / $ROOT_LOOP (p2)"
+# Loop device é o caminho normal, mas não é o único. Docker instalado por snap
+# confina `losetup` mesmo com `--privileged`: o container vê /dev/loop-control e
+# recebe "Permission denied" ao abrir um loop. Sem plano B, gerar imagem nessa
+# máquina fica impossível e o erro (`failed to set up loop device`) não diz que a
+# causa é o snap.
+#
+# O plano B não usa loop nenhum:
+#   - a FAT é montada num ARQUIVO temporário e povoada com mtools (mmd/mcopy),
+#     que não precisa de mount;
+#   - o rootfs não precisa ser formatado: o Buildroot já entrega `rootfs.ext4`
+#     pronto, e ele é copiado para o offset da partição.
+#
+# `mke2fs` no lugar do dd também funcionaria, mas reformatar o rootfs que o
+# Buildroot acabou de gerar joga fora o trabalho dele e pode divergir do
+# tamanho configurado.
+LOOP_MODE=1
+if ! BOOT_LOOP="$(losetup -f --show --offset "$BOOT_OFFSET" --sizelimit "$BOOT_SIZE" "$IMAGE" 2>/dev/null)"; then
+  LOOP_MODE=0
+  echo "  loop:    indisponível (container confinado); usando modo sem loop"
+fi
 
-mkfs.vfat -n GIOCHI_BOOT "$BOOT_LOOP" >/dev/null
-mkfs.ext4 -q -L GIOCHI -F "$ROOT_LOOP"
+if ((LOOP_MODE)); then
+  if ! ROOT_LOOP="$(losetup -f --show --offset "$ROOT_OFFSET" "$IMAGE" 2>/dev/null)"; then
+    losetup -d "$BOOT_LOOP" 2>/dev/null
+    BOOT_LOOP=""
+    LOOP_MODE=0
+    echo "  loop:    falhou no segundo device; usando modo sem loop"
+  fi
+fi
+
+if ((LOOP_MODE)); then
+  LOOP="$BOOT_LOOP"
+  echo "  loop:    $BOOT_LOOP (p1) / $ROOT_LOOP (p2)"
+  mkfs.vfat -n GIOCHI_BOOT "$BOOT_LOOP" >/dev/null
+  mkfs.ext4 -q -L GIOCHI -F "$ROOT_LOOP"
+else
+  # FAT de trabalho, do tamanho exato da partição, dentro de $WORK.
+  BOOT_IMAGE="$WORK/boot.fat"
+  truncate -s "${BOOT_PART_MIB}M" "$BOOT_IMAGE"
+  mkfs.vfat -n GIOCHI_BOOT "$BOOT_IMAGE" >/dev/null
+fi
 
 # PARTUUID do MBR segue o formato <id-do-disco>-<numero>. O id é fixado no
 # sfdisk, então o valor é conhecido ANTES de formatar — não depende de blkid
@@ -232,15 +266,33 @@ case "$FIRMWARE_MODE" in
 esac
 
 echo "Populando a partição de boot..."
-mount "$BOOT_LOOP" "$MNT_BOOT"
-# `cp -a` NÃO funciona em FAT: o filesystem não tem dono nem permissão, e
-# "failed to preserve ownership" aborta antes de copiar o kernel. `cp -L`
-# dereferencia symlink e respeita só o que o FAT suporta.
-cp -L "$OUT_DIR/Image" "$MNT_BOOT/Image"
-mkdir -p "$MNT_BOOT/dtbs"
-cp -L "$DTB_FILE" "$MNT_BOOT/dtbs/$DTB_NAME.dtb"
+if ((LOOP_MODE)); then
+  mount "$BOOT_LOOP" "$MNT_BOOT"
+  BOOT_TARGET="$MNT_BOOT"
+else
+  # mtools opera direto no arquivo da FAT, sem montar. O prefixo `::` é a raiz
+  # da imagem. `MTOOLS_SKIP_CHECK=1` evita o aviso de geometria de disco, que
+  # não se aplica a uma imagem de partição.
+  export MTOOLS_SKIP_CHECK=1
+  export MTOOLS_NO_VFAT=0
+  BOOT_TARGET="::"
+fi
 
-mkdir -p "$MNT_BOOT/extlinux"
+if ((LOOP_MODE)); then
+  # `cp -a` NÃO funciona em FAT: o filesystem não tem dono nem permissão, e
+  # "failed to preserve ownership" aborta antes de copiar o kernel. `cp -L`
+  # dereferencia symlink e respeita só o que o FAT suporta.
+  cp -L "$OUT_DIR/Image" "$MNT_BOOT/Image"
+  mkdir -p "$MNT_BOOT/dtbs"
+  cp -L "$DTB_FILE" "$MNT_BOOT/dtbs/$DTB_NAME.dtb"
+  mkdir -p "$MNT_BOOT/extlinux"
+else
+  # -m preserva o nome do arquivo de origem (senão vira IMAGE.IMG)
+  mcopy -i "$BOOT_IMAGE" -m "$OUT_DIR/Image" "::Image"
+  mmd -i "$BOOT_IMAGE" "::dtbs" "::extlinux"
+  mcopy -i "$BOOT_IMAGE" -m "$DTB_FILE" "::dtbs/$DTB_NAME.dtb"
+fi
+
 # TIMEOUT não é cosmético: sem ele o menu extlinux espera uma tecla para sempre
 # e o aparelho NÃO boota sozinho. Medido no X55 com a imagem anterior: U-Boot
 # achava o extlinux.conf, imprimia "Enter choice:" e ficava parado — num handheld
@@ -249,7 +301,18 @@ mkdir -p "$MNT_BOOT/extlinux"
 # A unidade é 1/10 s: 30 = 3 s. Escolhido para dar tempo de ver o menu pelo
 # console sem atrasar o uso normal. NÃO use `prompt 0`: ele remove o menu e tira
 # a única forma de escolher outra entrada quando há mais de uma.
-cat >"$MNT_BOOT/extlinux/extlinux.conf" <<EOF
+write_file() {
+  # $1 = caminho relativo dentro da FAT, stdin = conteúdo
+  local rel="$1"
+  if ((LOOP_MODE)); then
+    cat > "$MNT_BOOT/$rel"
+  else
+    cat > "$WORK/staged"
+    mcopy -i "$BOOT_IMAGE" -o "$WORK/staged" "::$rel"
+  fi
+}
+
+write_file "extlinux/extlinux.conf" <<EOF
 default giochi
 menu title Giochi System
 timeout 30
@@ -269,18 +332,43 @@ load mmc 1:1 \${kernel_addr_r} /Image
 load mmc 1:1 \${fdt_addr_r} /dtbs/$DTB_NAME.dtb
 booti \${kernel_addr_r} - \${fdt_addr_r}
 EOF
-mkimage -C none -A arm64 -T script -d "$WORK/boot.cmd" "$MNT_BOOT/boot.scr" >/dev/null
+mkimage -C none -A arm64 -T script -d "$WORK/boot.cmd" "$WORK/boot.scr" >/dev/null
+if ((LOOP_MODE)); then
+  cp -L "$WORK/boot.scr" "$MNT_BOOT/boot.scr"
+else
+  mcopy -i "$BOOT_IMAGE" -o "$WORK/boot.scr" "::boot.scr"
+fi
 echo "  boot:    Image, dtbs/$DTB_NAME.dtb, extlinux.conf, boot.scr"
-sync
-umount "$MNT_BOOT"
+
+if ((LOOP_MODE)); then
+  sync
+  umount "$MNT_BOOT"
+else
+  # A FAT pronta vai para o offset da p1 de uma vez.
+  dd if="$BOOT_IMAGE" of="$IMAGE" bs=1M seek="$BOOT_PART_START_MIB" \
+     conv=notrunc status=none
+  echo "  p1:      FAT gravada no offset ${BOOT_PART_START_MIB} MiB"
+fi
 
 echo "Gravando o rootfs..."
-dd if="$OUT_DIR/rootfs.ext4" of="$ROOT_LOOP" bs=4M conv=notrunc status=none
-sync
+if ((LOOP_MODE)); then
+  dd if="$OUT_DIR/rootfs.ext4" of="$ROOT_LOOP" bs=4M conv=notrunc status=none
+  sync
+else
+  # `rootfs.ext4` já vem formatado do Buildroot; aqui ele só é posicionado.
+  # `seek` é contado em blocos de 4 MiB, e o offset da p2 é múltiplo de 4 MiB
+  # (320 MiB), então a conta é exata.
+  ROOT_SEEK=$(( ROOT_OFFSET / (4 * 1024 * 1024) ))
+  dd if="$OUT_DIR/rootfs.ext4" of="$IMAGE" bs=4M seek="$ROOT_SEEK" \
+     conv=notrunc status=none
+  sync
+fi
 
 sync
-losetup -d "$BOOT_LOOP"
-losetup -d "$ROOT_LOOP"
+if ((LOOP_MODE)); then
+  losetup -d "$BOOT_LOOP"
+  losetup -d "$ROOT_LOOP"
+fi
 BOOT_LOOP=""
 ROOT_LOOP=""
 LOOP=""

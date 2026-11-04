@@ -22,10 +22,26 @@ Há **dois** motivos, e o primeiro já vale hoje:
 > corrigiu foi a equipe do app. O argumento continua válido; o tempo verbal não.
 
 ```text
-giochi-init ──▶ launcher ──exec──▶ jogo        (exec: ainda NÃO implementado)
-     ▲                              │
-     └────────── jogo termina ──────┘
+                          ┌── jogo termina, launcher continua vivo
+                          ▼
+giochi-init ──▶ launcher ──fork+wait──▶ jogo     (é o que existe HOJE)
+     ▲              │
+     └── só quando o launcher MORRE ──────────
 ```
+
+**Consequência para `RESTART_MAX`, e é a pergunta que a equipe do app fez em
+04/11/2026 (item 3):** com `fork`+`wait`, o `giochi-init` fica bloqueado no
+`"$LAUNCHER"` durante o jogo inteiro e **não vê saída nenhuma** até o launcher
+morrer de verdade. Então toda saída observada ali é **anormal**, e é isso que o
+limite conta — `RESTART_MAX=5` em 60 s significa cinco quedas do launcher, não
+cinco partidas.
+
+Se o `exec` for implementado (é decisão futura do app, registrada no
+`docs/integracao.md` deles), essa premissa muda: cada jogo terminado vira uma
+saída de `giochi-init`, e o limite de 5 passaria a derrubar a interface depois
+de cinco partidas normais. **Quem implementar o `exec` tem de revisar
+`RESTART_MAX` no mesmo commit** — senão o sintoma é o launcher parando de subir
+no meio de uma sessão de jogo, sem nenhuma mensagem de erro.
 
 O custo é o launcher subir do zero (~1 s) ao voltar do jogo. É o que consoles
 fazem.
@@ -105,7 +121,7 @@ fechadas e verificadas na imagem que saiu em 04/11/2026:
 | 1. `post-build` não punha a linha no `/etc/inittab` | `scripts/post-build.sh` insere `::respawn:/usr/bin/giochi-init` depois do `rcS`. Conferido **dentro** do `rootfs.ext4`: linha 30 |
 | | O `chmod` nunca foi necessário: `cp -a` do staging preserva o bit, e o `post-build` **falha o build** se o arquivo não estiver `+x`. Na imagem: `0755` |
 | 2. `buttons.map` não chegava ao rootfs | o staging copia `device/<pasta>/buttons.map` → `/etc/giochi/buttons.map`. Na imagem: `0644`, 103 linhas |
-| 4. "nunca executado" | `giochi-init` rodou sob um `sh` real: 6 reinícios e para, como desenhado; com launcher ausente espera em vez de sair (§11 do `AGENTS.md`) |
+| 4. "nunca executado" | `giochi-init` roda sob `sh` real nos testes (`tests/giochi-init.test.mjs`): conta exatamente `RESTART_MAX` tentativas, espera sem launcher, cria o diretório de config e preserva o sinalizador quando o configurador falha |
 
 O que continua pendente é **de fora**:
 
