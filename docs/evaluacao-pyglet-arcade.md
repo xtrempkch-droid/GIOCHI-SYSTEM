@@ -121,35 +121,90 @@ Pi" ali significa "funciona sobre um compositor", não "funciona em KMSDRM puro"
 
 ---
 
-## 4. GLES: existe, é experimental, e o Mali-G52 tem uma pedra no caminho
+## 4. GLES: o arcade traduz — mas exige uma extensão que o panfrost não tem
 
-O arcade declara, em `doc/programming_guide/gles_raspi_and_sbc.rst`:
+Esta era a pergunta em aberto, e foi **respondida por leitura do código** (não por
+estimativa). O arcade **traduz** os shaders em tempo de carga, em
+`arcade/gl/backends/opengl/glsl.py`:
 
-> Both Arcade and pyglet can run via OpenGL ES on devices with either:
-> OpenGL ES 3.2 or higher, or **OpenGL ES 3.1 with certain extensions**
+```python
+# GLES specific modifications
+if ctx.gl_api == "opengles":
+    # TODO: Use the version from the context
+    self._lines[0] = "#version 310 es"
+    self._lines.insert(1, "precision mediump float;")
 
-E o pyglet, em `opengles.rst`:
+    if self._type == gl.GL_GEOMETRY_SHADER:
+        self._lines.insert(1, "#extension GL_EXT_geometry_shader : require")
+```
 
-> Pyglet has **experimental** support for OpenGL ES 3.2, with some limitations.
+Então o `#version 330` **não** é problema: ele é reescrito para `#version 310 es`
+e ganha `precision mediump float;` — exatamente o que GLSL ES exige. O pyglet
+declara GLES 3.2 experimental, e o arcade se apoia nisso.
 
-Nosso panfrost no RK3566 entrega **GLES 3.1** — está no piso declarado. Mas:
+**O problema é a linha seguinte.** Para geometry shader, o arcade exige a
+extensão `GL_EXT_geometry_shader`. E o Mesa não a expõe no panfrost:
 
-| Item | Achado | Consequência |
+```text
+$ grep -i "geometry_shader" mesa/docs/features.txt
+  Geometry shaders            DONE (freedreno/a6xx, crocus)
+  GL_OES_geometry_shader      DONE (freedreno/a6xx, nvc0, r600, softpipe, v3d)
+```
+
+`freedreno` é Adreno, `nvc0` é NVIDIA, `v3d` é **Raspberry Pi** — é literalmente
+por isso que a equipe do arcade verificou o Pi 4 e o 5 e o nosso aparelho não está
+na lista. **`panfrost` não aparece.**
+
+### Por que isso é pior que "colisão mais lenta"
+
+O `Context` do arcade carrega dois programas de colisão **incondicionalmente**
+(qualquer `gl_api != "webgl"`), em `arcade/context.py`:
+
+```python
+if gl_api != "webgl":
+    self.collision_detection_program = self.load_program(
+        vertex_shader=":system:shaders/collision/col_trans_vs.glsl",
+        geometry_shader=":system:shaders/collision/col_trans_gs.glsl",   # <- exige a extensão
+    )
+```
+
+E `load_program` **levanta**, não degrada:
+
+```python
+raise ShaderException(f"Program link error: {log.value.decode()}")
+```
+
+Não há `try/except` em volta. Consequência: em panfrost, `arcade.Window()`
+levanta `ShaderException` **antes de qualquer coisa aparecer na tela**. Não é
+"a colisão por GPU não funciona" — é **o arcade não inicia**.
+
+### O que isso quer dizer, sem exagero
+
+| Componente | Usa geometry shader? | Em panfrost |
 | --- | --- | --- |
-| Shaders do arcade | **todos `#version 330`** (desktop GLSL 3.3) | não são GLSL ES 3.10 |
-| Variante ES | **não existe** — nenhum `#version 310 es` no repositório | precisa reescrita em tempo de carga |
-| Reescrita em `arcade/gl/program.py` | **não encontrada** | ver abaixo |
-| Geometry shader | `collision/col_trans_gs.glsl` usa (`#version 330`) | Mali Bifrost **não tem** estágio de geometry shader |
-| Tessellation | o próprio pyglet diz que fica de fora | irrelevante para 2D |
-| Texturas | GLES não converte formato no upload; só **RGBA** | imagens RGB dão erro |
+| `sprite_list_simple_vs.glsl` (desenho normal) | **não** | ✅ funciona |
+| `sprite_list_geometry_*` (lista por geometria) | sim | ❌ |
+| `collision/col_trans_gs.glsl` | **sim** | ❌ e derruba o boot |
+| `atlas/resize_simple_*` | não | ✅ |
+| tessellation | — | fora de escopo (2D) |
 
-**Como ler isto honestamente:** o documento do arcade afirma que GLES funciona,
-mas os shaders que estão no pacote são desktop GLSL 330. As duas coisas só se
-reconciliam se houver tradução em algum ponto que eu não encontrei — ou se a
-afirmação for sobre uma versão mais nova que o `development`.
+Ou seja: **todo o caminho de renderização 2D funciona; o que não funciona é o
+carregamento dos dois programas de colisão**, e ele é obrigatório na
+inicialização. O trabalho não é portar shader: é fazer o arcade **tolerar** a
+ausência dos programas de colisão, como já faz no ramo `webgl` (que os define
+como `None`).
 
-Isto é **a pergunta número um a medir**, e ela é barata (§7). Não vou afirmar
-que funciona nem que não funciona.
+Estimativa honesta dessa correção: **~10 linhas** (um `try/except` em volta dos
+dois `load_program`, caindo no mesmo estado do ramo `webgl`), mais a escolha de
+colisão por `arcade/hitbox` em CPU no lugar da GPU. É contribuição upstream
+pequena e defensável — "não morra quando a plataforma não tem geometry shader".
+
+### Texturas: a outra limitação, que é do pyglet
+
+O guia do pyglet avisa que em GLES **só RGBA** é aceito no upload — GLES não
+converte formato durante `glTexImage`, e o desktop converte. Imagem RGB (PNG sem
+canal alfa) dá erro na hora de virar textura. Isso afeta asset de jogo e é
+contornável (converter para RGBA no empacotamento do pacote).
 
 ---
 
@@ -281,9 +336,11 @@ este caminho significa **alterar o gate com a decisão registrada**, não contor
 
 ## 8. O que medir, e como
 
-A pergunta que decide tudo é uma só, e o probe é curto.
+A leitura de código já respondeu a pergunta do shader (§4). O que resta é
+**medir em máquina**, e são três números.
 
-**No `generic-x64` (ou em qualquer PC Linux com GLES/desktop GL):**
+**No `generic-x64` (ou em qualquer PC Linux com GL/GLES) — o mais barato, e
+serve para desenvolver:**
 
 ```bash
 pip install arcade
@@ -296,15 +353,21 @@ arcade.SpriteList()          # força carregar o shader de sprite
 "
 ```
 
-**No handheld, com a pilha que existir (SDL2/KMSDRM ou, se for o caso, X11):**
+Isto **não** prova nada sobre o handheld (o PC tem geometry shader), mas prova
+que o jogo funciona e é onde ele deve ser desenvolvido.
+
+**No handheld, quando houver janela (caminho c ou d):**
 
 ```bash
-# 1. o GLES que o panfrost entrega tem o que o arcade pede?
-glxinfo -B 2>/dev/null | grep -i "version"    # se houver X
-# ou, sem X, pelo próprio pyglet:
-python -c "import pyglet; w=pyglet.window.Window(); print(w.context.get_info())"
+# 1. o panfrost expõe a extensão que o arcade exige?
+python -c "
+import pyglet; pyglet.options.shadow_window = False
+w = pyglet.window.Window()
+print('GLES:', w.context.get_info().get_version())
+print('extensões com geometry:', [e for e in w.context.get_info().get_extensions() if 'geometry' in e])
+"
 
-# 2. o gamepad aparece pelo evdev?
+# 2. o gamepad aparece pelo evdev?   (não depende de janela — pode rodar hoje)
 python -c "
 import pyglet.input
 for j in pyglet.input.get_joysticks(): print(j, j.device.name, len(j.get_buttons()), len(j.get_axes()))
@@ -318,10 +381,11 @@ O que cada resultado decide:
 
 | Resultado | Significa |
 | --- | --- |
-| `get_joysticks()` lista o controle | ✅ o requisito do usuário está atendido no pyglet |
+| `get_joysticks()` lista os 16 botões e 4 eixos | ✅ o requisito do usuário está atendido — e **isto pode ser medido hoje**, sem janela |
+| lista de extensões **sem** `geometry_shader` | ✗ confirma o §4: precisa das ~10 linhas de tolerância antes de o arcade abrir |
+| lista **com** `GL_EXT_geometry_shader` | ✅ o §4 estava conservador — o arcade roda sem patch |
 | janela abre e sprite aparece em GLES 3.1 | ✅ arcade viável, caminho (c) ou (d) |
-| erro de shader (`#version 330`) | ✗ arcade precisa de reescrita de shader antes de qualquer coisa |
-| erro de geometry shader | ⚠️ colisão de sprite cai para o caminho CPU, se houver |
+| `ShaderException` no `arcade.Window()` | ✗ esperado pelo §4; é o patch de tolerância |
 | `get_joysticks()` vazio | ✗ investigar mapping/`/dev/input` antes de tudo |
 
 ---
@@ -333,21 +397,28 @@ O que cada resultado decide:
 | pyglet e arcade são elegíveis por licença? | **Sim** — BSD-3 e MIT. Não é aqui que eles caem |
 | O gamepad funciona sem servidor gráfico? | **Sim**, pelo evdev — requisito atendido |
 | Dá para rodar num handheld hoje? | **Não.** Falta backend de janela em KMSDRM |
+| O `#version 330` do arcade é problema? | **Não** — ele reescreve para `#version 310 es` no load |
+| O que trava o arcade no panfrost? | **`GL_EXT_geometry_shader`**, que o Mesa não expõe no panfrost. Derruba o boot, não só a colisão |
 | Vale desenvolver jogos com eles? | **Sim**, no `generic-x64`, desde já |
-| Qual caminho para o handheld? | Primeiro medir (§8). Se o shader 330 for problema, nada abaixo importa |
+| Qual caminho para o handheld? | (c) backend KMSDRM no pyglet **+** ~10 linhas de tolerância a geometry shader no arcade |
 | Vale escrever o backend KMSDRM? | Só se Python virar linha de produto. 200–400 linhas + manutenção |
 | Existe caminho mais rápido? | **`PySDL2`** — SDL2/KMSDRM que já temos, CC0, custo zero de arquitetura |
-| Reabrir quando? | Quando houver medida de: shader GLES do arcade, RAM de um jogo, e janela em KMSDRM |
+| Reabrir quando? | Quando houver medida de RAM de um jogo real e de janela em KMSDRM |
 
 ### Em uma frase
 
 **pyglet e arcade são a escolha certa por licença e a escolha certa por gamepad;
-erram só na janela.** Como o resto da stack deles é leve e permissivo, o custo de
-consertar essa única peça (backend KMSDRM) é muito menor que o de qualquer
-alternativa de UI web — mas ele existe, e é o dobro do esforço se o
-`#version 330` do arcade também precisar de tradução.
+erram na janela, e o arcade erra mais um pouco no geometry shader.** Os dois
+consertos são conhecidos e pequenos — backend KMSDRM (200–400 linhas) e tolerância
+à ausência de `GL_EXT_geometry_shader` (~10 linhas) —, e nenhum deles é o tipo de
+trabalho que pode ser evitado com configuração.
+
+Comparado com o Quiver, o custo é **muito menor**: lá eram WebKitGTK + GTK3 +
+compositor Wayland + 700 MiB de RAM; aqui é uma extensão EGL e dois programas de
+shader. Mas o custo existe, e é o dobro do esforço se as duas peças precisarem
+ser mantidas contra mudanças de upstream.
 
 Se o objetivo for **ter jogos em Python rodando agora**, o PySDL2 resolve com a
 arquitetura que já está na imagem. Se o objetivo for **ter uma biblioteca de
 jogos de alto nível**, o arcade é a melhor opção a médio prazo, e o trabalho é na
-janela.
+janela e nos dois programas de colisão.

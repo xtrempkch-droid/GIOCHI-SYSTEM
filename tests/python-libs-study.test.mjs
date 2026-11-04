@@ -43,9 +43,30 @@ test("as três armadilhas técnicas estão nomeadas", async () => {
   // Cada uma derruba um caminho diferente; perder qualquer uma do documento
   // faz alguém gastar uma rodada descobrindo de novo.
   assert.match(texto, /#version 330/, "shaders do arcade são desktop GLSL");
-  assert.match(texto, /geometry shader/i, "colisão usa geometry shader");
+  assert.match(texto, /#version 310 es/, "o arcade reescreve a versão no load");
+  assert.match(texto, /GL_EXT_geometry_shader/, "é a extensão que o panfrost não tem");
   assert.match(texto, /3\.0\.dev11/, "pyglet vem pinado num pré-release");
   assert.match(texto, /pymunk/, "dependência binária que não existe no Buildroot");
+});
+
+test("o estudo nomeia a fonte que prova a ausência do geometry shader", async () => {
+  const texto = await readFile(DOC, "utf8");
+  // A conclusão do §4 depende de uma lista externa. Sem citar a lista, a
+  // próxima pessoa não consegue revalidar — e vai ou acreditar ou refazer tudo.
+  assert.match(texto, /features\.txt/);
+  // `v3d` é o driver do Raspberry Pi: é a explicação de por que funciona lá.
+  // Se esta frase sumir, o documento perde o elo entre o teste deles e o nosso.
+  assert.match(texto, /v3d/);
+  assert.match(texto, /panfrost/, "panfrost precisa estar nomeado como ausente");
+});
+
+test("o estudo diz que o arcade NÃO abre, e não só que a colisão degrada", async () => {
+  const texto = await readFile(DOC, "utf8");
+  // Esta era a diferença entre "funciona com ressalva" e "não funciona": o
+  // carregamento dos programas de colisão é incondicional e levanta exceção.
+  // Se o texto for suavizado para "colisão mais lenta", ele fica errado.
+  assert.match(texto, /n[ãa]o inicia|antes de qualquer coisa aparecer/);
+  assert.match(texto, /ShaderException/);
 });
 
 test("o estudo aponta a alternativa que já funciona na imagem", async () => {
