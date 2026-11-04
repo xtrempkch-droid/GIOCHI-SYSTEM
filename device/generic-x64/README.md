@@ -83,6 +83,58 @@ ALLOW_DRAFT=1 bash scripts/build-device.sh generic-x64
 `device=all` **não** puxa este aparelho: a matriz padrão é ARM64 e ele está
 `enabled: false`.
 
+## Quiver Launcher: o candidato natural deste aparelho
+
+O [estudo de viabilidade](../../docs/evaluacao-quiver-launcher.md) recusou o
+Quiver como componente da imagem **por causa dos handhelds** — licença BSL 1.1,
+ausência de servidor gráfico, Rust 1.90 e 490–770 MiB de RAM. Nada disso vale
+aqui:
+
+| Bloqueio no handheld | Aqui |
+| --- | --- |
+| Sem X11/Wayland/GTK | PC tem os três, e o usuário pode ter mais de um |
+| 2 GB de RAM no total | 8–32 GB típicos; 700 MiB deixa de ser problema |
+| Rootfs de 1 GiB | Disco de sobra, e o app nem precisa estar na imagem |
+| Tela 640x480 | Monitor comum |
+| Rust 1.90 contra 1.74.1 da árvore | **continua valendo** — ver abaixo |
+
+Ou seja: **este é o alvo onde o Quiver faz sentido**, e é o primeiro motivo
+concreto para o `generic-x64` existir além de separar defeito de sistema de
+defeito de aparelho.
+
+### O que ainda não fecha, e como fecha
+
+1. **A licença.** BSL 1.1 permite build oficial não modificado para uso
+   pessoal, e proíbe distribuir para terceiros. Então ele **não entra na
+   imagem**: entra como aplicativo do usuário, em `/user/apps/quiver/`. A
+   própria versão publicada se encarrega do próprio update.
+2. **A toolchain.** `tauri 2.12.5` exige Rust 1.90 e `edition 2024`; a árvore
+   está em 1.74.1. Só importa se formos **compilar** — e compilar é justamente
+   o que a BSL permite ("a build you make yourself"), mas não é necessário: o
+   AppImage oficial `amd64` roda neste alvo.
+3. **A pilha gráfica.** O AppImage traz a sua (WebKitGTK ou CEF). No PC ela não
+   conflita com nada. Ainda assim, decidir a pilha **da imagem** (§checklist)
+   não tem relação com a do Quiver — são camadas diferentes.
+
+### O que medir quando este alvo bootar
+
+Três números decidem se a menção vira integração:
+
+```bash
+# 1. o AppImage roda em X11, em Wayland e sobre KMSDRM puro?
+./QuiverLauncher-*amd64.AppImage --help
+
+# 2. RAM real em máquina de 8 GB, com a biblioteca cheia
+#    (o número deles é do Steam Deck; o nosso tem que ser medido)
+
+# 3. o KMSDRM da imagem basta, ou é preciso X11/Wayland no rootfs?
+#    Se precisar, o gate tests/graphics-stack.test.mjs já aponta a decisão.
+```
+
+Se o item 3 disser "precisa de X11/Wayland", a resposta é a mesma do handheld —
+e a menção vira só "roda como app de desktop numa distro normal", não neste
+alvo.
+
 ## Checklist para sair de draft
 
 - [ ] Primeiro build passar (o `assert-config` dirá o que não existe em x86_64).
@@ -93,6 +145,9 @@ ALLOW_DRAFT=1 bash scripts/build-device.sh generic-x64
       handheld sem rede; num PC a ethernet já resolve, e o gadget pode não fazer
       sentido.
 - [ ] Escrever `platform-generic.md` em `docs/` com o procedimento de instalação.
+- [ ] **Testar o Quiver Launcher como app de usuário** (§ acima): medir se roda
+      com a pilha gráfica que a imagem tiver, sem precisar de X11/Wayland no
+      rootfs. É o candidato mais concreto para este alvo.
 - [ ] Trocar `status` para `ready` e ligar `enabled` — **só depois** de a imagem
       ter bootado em máquina de verdade (§18).
 

@@ -18,6 +18,6 @@
   "runner": "ubuntu-24.04",
   "timeoutMinutes": 360,
   "status": "draft",
-  "bootNotes": "Base pc_x86_64_efi_defconfig do Buildroot 2024.02: GRUB2 EFI + genimage, kernel 6.1.24 com board/pc/linux.config. Esperado bzImage, rootfs.ext4 e um disk.img montado pelo genimage (o defconfig traz dosfstools e mtools). Nunca compilado nesta árvore — o defconfig traz GETTY em tty1, rootfs de 120M e post-build/post-image próprios da placa pc, e o pipeline só foi provado em ARM64. Se a máquina for só BIOS legado, pc_x86_64_bios_defconfig é a troca de uma linha. Console serial é opcional aqui: PC sem cabo tem teclado e vídeo, ao contrário de um handheld.",
+  "bootNotes": "Base pc_x86_64_efi_defconfig do Buildroot 2024.02: GRUB2 EFI + genimage, kernel 6.1.24 com board/pc/linux.config. Esperado bzImage, rootfs.ext4 e um disk.img montado pelo genimage (o defconfig traz dosfstools e mtools). Nunca compilado nesta árvore — o defconfig traz GETTY em tty1, rootfs de 120M e post-build/post-image próprios da placa pc, e o pipeline só foi provado em ARM64. Se a máquina for só BIOS legado, pc_x86_64_bios_defconfig é a troca de uma linha. Console serial é opcional aqui: PC sem cabo tem teclado e vídeo, ao contrário de um handheld. Candidato natural para o Quiver Launcher como app de usuário (não na imagem): ver docs/evaluacao-quiver-launcher.md.",
   "docs": "README.md"
 }
