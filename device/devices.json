@@ -37,6 +37,12 @@
       "folder": "steamdeck",
       "arch": "x86_64",
       "enabled": false
+    },
+    {
+      "id": "generic-x64",
+      "folder": "generic-x64",
+      "arch": "x86_64",
+      "enabled": false
     }
   ]
 }

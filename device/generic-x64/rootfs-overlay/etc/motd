@@ -1,0 +1,8 @@
+Giochi System — PC genérico x86_64
+===================================
+
+O mesmo sistema dos handhelds, rodando em PC comum com UEFI.
+Sem painel MIPI, sem botões de gamepad, sem rádio onboard.
+
+Hostname: giochi-system-x64
+Device ID: generic-x64

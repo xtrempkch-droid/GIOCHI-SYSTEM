@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "generic-x64",
+  "name": "PC genérico x86_64",
+  "description": "Alvo x86_64 para PC comum — o mesmo sistema em qualquer máquina com UEFI, sem hardware de handheld. Rascunho: registrado para não perder a decisão, nunca compilado.",
+  "arch": "x86_64",
+  "hostname": "giochi-system-x64",
+  "buildrootDefconfig": "pc_x86_64_efi_defconfig",
+  "buildrootFragment": "buildroot.fragment",
+  "rootfsOverlays": [
+    "rootfs-overlay"
+  ],
+  "artifacts": [
+    "bzImage",
+    "rootfs.ext4",
+    "disk.img"
+  ],
+  "runner": "ubuntu-24.04",
+  "timeoutMinutes": 360,
+  "status": "draft",
+  "bootNotes": "Base pc_x86_64_efi_defconfig do Buildroot 2024.02: GRUB2 EFI + genimage, kernel 6.1.24 com board/pc/linux.config. Esperado bzImage, rootfs.ext4 e um disk.img montado pelo genimage (o defconfig traz dosfstools e mtools). Nunca compilado nesta árvore — o defconfig traz GETTY em tty1, rootfs de 120M e post-build/post-image próprios da placa pc, e o pipeline só foi provado em ARM64. Se a máquina for só BIOS legado, pc_x86_64_bios_defconfig é a troca de uma linha. Console serial é opcional aqui: PC sem cabo tem teclado e vídeo, ao contrário de um handheld.",
+  "docs": "README.md"
+}

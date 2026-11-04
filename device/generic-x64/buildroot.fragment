@@ -1,0 +1,24 @@
+# PC genérico x86_64 — o sistema em qualquer máquina com UEFI.
+#
+# A base vem do pc_x86_64_efi_defconfig do Buildroot 2024.02, que já traz
+# GRUB2 EFI, genimage, dosfstools e mtools. Aqui fica só o que é diferente
+# entre "placa pc de referência do Buildroot" e o Giochi System.
+#
+# RASCUNHO: nada disto foi compilado. A árvore só provou build em ARM64
+# (qemu-aarch64 no CI, X55 e X35H em hardware). O primeiro build deste aparelho
+# é que vai dizer o que falta — e o `assert-config` reprova se algum símbolo
+# abaixo não existir, em vez de gerar imagem sem ele.
+
+# O defconfig da placa pc usa 120M, que é o suficiente para o rootfs de exemplo
+# do Buildroot (busybox + algumas ferramentas). O sistema base daqui acrescenta
+# OpenSSH, dropbear ausente, mesa3d/panfrost não se aplica, mas SDL2, fontes e
+# o restante do `config/common.fragment` não cabem em 120M.
+#
+# Valor de partida, NÃO medido. Quando o primeiro build rodar, o número certo é
+# o tamanho do `rootfs.ext4` com folga — medir e corrigir aqui em vez de manter
+# este comentário.
+BR2_TARGET_ROOTFS_EXT2_SIZE="1024M"
+
+# Se a máquina for só BIOS legado (sem CSM), troque o defconfig no device.json
+# por `pc_x86_64_bios_defconfig`. Não dá para cobrir os dois no mesmo defconfig:
+# o genimage do BIOS escreve no MBR e o do EFI precisa de uma ESP FAT.

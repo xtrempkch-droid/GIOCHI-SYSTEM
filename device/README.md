@@ -7,6 +7,7 @@ Cada subpasta representa um alvo de imagem. A fonte da verdade da lista é [`dev
 | `qemu-aarch64` | `qemu-aarch64/` | arm64 | ready | sim |
 | `powkiddy-x55` | `powkiddy x55/` | arm64 | draft | não |
 | `steamdeck` | `steamdeck/` | x86_64 | draft | não |
+| `generic-x64` | `generic-x64/` | x86_64 | draft | não |
 | `_template` | `_template/` | — | template | — |
 
 ## Estrutura de um dispositivo
