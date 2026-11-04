@@ -1532,6 +1532,14 @@ O R35S é o que está mais avançado nisso: o DTB real está versionado em
 
 ## 15. Decisões que não devem ser reabertas sem motivo
 
+- **Handheld renderiza em SDL2 + KMSDRM, sem servidor gráfico.** Avaliado o
+  [Quiver Launcher](docs/evaluacao-quiver-launcher.md) em 04/11/2026 e
+  **recusado** por quatro bloqueios independentes: licença BSL 1.1 (proíbe
+  distribuir para terceiros), GTK3/WebKit exigirem servidor gráfico, Rust 1.90
+  contra 1.74.1 da árvore, e 490–770 MiB de RAM (picos de 1,3 GiB) num aparelho
+  de 2 GB. Quem quiser o app instala pela loja; para o `generic-x64` ele roda
+  como qualquer binário de desktop. `tests/graphics-stack.test.mjs` impede a
+  volta por uma linha de defconfig.
 - **Buildroot em vez de fork de distro:** configuração declarativa, build em
   runner x86_64.
 - **Node.js nos scripts de metadados:** zero dependência npm, portável, testável.

@@ -25,6 +25,9 @@
 - [Solução de problemas](troubleshooting.md) — falhas comuns de build e configuração.
 - [Segurança](security.md) — senha padrão, SSH, cadeia de suprimentos e limitações.
 - [Manifesto de dependências](dependencies-manifest.md) — contrato `forge.json` com o Giochi app.
+- [Quiver Launcher: viabilidade](evaluacao-quiver-launcher.md) — estudo de
+  integração do launcher de terceiros: licença BSL 1.1, ausência de servidor
+  gráfico, Rust 1.74 vs 1.90 e RAM. **Não integrar**; o encaixe é app de loja.
 - [Mapas de botões](button-maps.md) — de onde vêm os códigos evdev de cada aparelho.
 - [Catálogo RK3326](rk3326-catalog.md) — 15 aparelhos extraídos de device tree.
 - `giochi-buttons` — ferramenta de teste de botões e eixos (`giochi-buttons --list`).
@@ -37,6 +40,9 @@
   `powkiddy-x35h` (todos **RK3566**) e `r35s` (RK3326 — outro SoC, outro
   pipeline de boot).
 - `steamdeck`: placeholder x86_64 **desabilitado**.
+- `generic-x64`: PC comum x86_64, **desabilitado** — rascunho com
+  `pc_x86_64_efi_defconfig`, nunca compilado. Serve para separar defeito do
+  sistema de defeito do aparelho.
 - Buildroot fixado em `2024.02` no arquivo [`buildroot.version`](../buildroot.version).
 - O workflow principal gera imagens por device e publica artefatos no GitHub Actions.
 

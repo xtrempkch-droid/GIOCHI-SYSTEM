@@ -20,6 +20,7 @@ import "./device-generic-x64.test.mjs";
 import "./base-system.test.mjs";
 import "./boot-layer.test.mjs";
 import "./launcher-deps.test.mjs";
+import "./graphics-stack.test.mjs";
 import "./bootlog.test.mjs";
 import "./dongle.test.mjs";
 import "./host-compat.test.mjs";
