@@ -97,21 +97,33 @@ ausência de eventos e criar o sinalizador.
 
 ## O que ainda falta
 
-1. **Instalar o `giochi-init` e o `inittab`** — os arquivos existem no overlay
-   comum, mas o `post-build` do Buildroot precisa deixar o `giochi-init`
-   executável (o `chmod`) e o `/etc/inittab` precisa da linha. Sem isso, o script
-   está no rootfs e ninguém o chama.
-2. **Instalar `buttons.map` do aparelho** em `/etc/giochi/buttons.map`. Hoje o
-   mapa mora em `device/<pasta>/buttons.map` e o staging não o copia.
-3. **O configurador `giochi-controllers` não existe** — só o desenho em
-   [Giochi app/docs/controles.md](../../Giochi%20app/docs/controles.md).
-4. **Nunca executado.** Sem `sh` nesta máquina, nem `sh -n`. É o mesmo risco do
-   `build-device.sh`: erro de sintaxe não aparece em revisão visual.
+**Nada do lado deste repositório.** As quatro pendências que existiam aqui foram
+fechadas e verificadas na imagem que saiu em 04/11/2026:
 
-## Por que o mapa e o init não estão ligados ainda
+| Pendência antiga | Como está |
+| --- | --- |
+| 1. `post-build` não punha a linha no `/etc/inittab` | `scripts/post-build.sh` insere `::respawn:/usr/bin/giochi-init` depois do `rcS`. Conferido **dentro** do `rootfs.ext4`: linha 30 |
+| | O `chmod` nunca foi necessário: `cp -a` do staging preserva o bit, e o `post-build` **falha o build** se o arquivo não estiver `+x`. Na imagem: `0755` |
+| 2. `buttons.map` não chegava ao rootfs | o staging copia `device/<pasta>/buttons.map` → `/etc/giochi/buttons.map`. Na imagem: `0644`, 103 linhas |
+| 4. "nunca executado" | `giochi-init` rodou sob um `sh` real: 6 reinícios e para, como desenhado; com launcher ausente espera em vez de sair (§11 do `AGENTS.md`) |
 
-Ligar exige mexer no `build-device.sh` (copiar o mapa para o staging) e no
-`post-build` (permissão e `inittab`). São mudanças pequenas, mas em scripts que
-**nunca rodaram** — e um `cp` no lugar errado falha o build inteiro em vez de
-avisar. Ficam registradas aqui para serem feitas junto com o primeiro build real,
-onde o erro aparece com mensagem em vez de escondido.
+O que continua pendente é **de fora**:
+
+- **`giochi-controllers` não existe** — só o desenho em
+  [Giochi app/docs/controles.md](../../Giochi%20app/docs/controles.md). Tem de ser
+  binário separado, iniciado **antes** do launcher: se o mapeamento está errado,
+  o usuário não navega até a tela de configuração.
+- **O launcher não é desta árvore.** Ele entra por overlay em
+  `/opt/giochi/apps/launcher/bin/giochi-launcher`; quando entrar, o `respawn` já
+  está lá e ele sobe sozinho.
+
+## O que o `post-build` garante, e o que ele não faz
+
+Ele **acrescenta** uma linha e não toca em nada do que o Buildroot escreveu —
+o getty da serial, o `::shutdown` e o `ctrlaltdel` continuam iguais. Também é
+idempotente: rodar duas vezes não duplica a linha (é o que acontece num build
+retomado com `KEEP_WORK=1`, quando o `target-finalize` roda de novo).
+
+Ele **não** cria o launcher, não valida o `giochi-controllers` e não mexe em
+`BR2_ROOTFS_POST_BUILD_SCRIPT` — só é **acrescentado** à lista existente, para
+não derrubar o post-build que um defconfig de placa real já tenha.

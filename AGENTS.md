@@ -63,9 +63,11 @@ Repositório: `https://github.com/xtrempkch-droid/GIOCHI-SYSTEM` — branch `mai
   RNDIS + `udhcpd` (PC recebe `10.55.0.1`, aparelho em `10.55.0.2`), OpenSSH com
   `PermitRootLogin yes` e `UseDNS no`, `config/common.busybox.fragment` com
   `udhcpd`/`nc`/`vi`/`ip`/`dmesg`. Ver [`docs/sistema-base.md`](docs/sistema-base.md).
-- **X35H definido**: DTS que herda o da X55, painel ST7703 no driver mainline,
-  sem rádio, `S96bootlog` gravando diagnóstico na FAT do cartão. Compila e gera
-  imagem; **não bootou em hardware**.
+- **X35H definido e bootado**: DTS que herda o da X55, painel ST7703 no driver
+  mainline, sem rádio onboard (com suporte a dongle USB, §12.31), `S96bootlog`
+  gravando diagnóstico na FAT do cartão. Compila, gera imagem e **bootou em
+  hardware com tela, `usb0` e SSH** (`docs/x35h-bringup.md`). Esse boot é de
+  antes do `respawn` incondicional — a imagem em `out/` não tem a linha.
 - Documentação em `docs/` (12 páginas) + template de issue para aparelho novo.
 
 ### Verificado nesta sessão de retomada
@@ -171,34 +173,38 @@ Tamanhos com `gzip -1`: rootfs 1 GiB → 52 MB; FAT de boot 256 MiB → 17 MB.
 
 ### Pendente de verdade
 
-**Estado do CI no fim desta sessão (18 execuções do build):**
+**Corrigido nesta revisão (estava errado aqui e em outros três lugares):**
 
-| Run | O quê | Resultado |
-| --- | --- | --- |
-| #15 | push, `qemu-aarch64` | **sucesso** — 22 min 45 s, artefato publicado |
-| #16 | push, `qemu-aarch64` | **cancelado** pelo push seguinte (rodava com cache quente) |
-| #17 | dispatch, `powkiddy-x55` | **falhou em 1 s** no `discover` — bug do `allow_draft`, corrigido em `d9e81aa` (§12.5) |
-| #18 | push `d9e81aa`, `qemu-aarch64` | em andamento no fim da sessão |
+| Afirmação antiga | Fato medido |
+| --- | --- |
+| "X55 nunca compilou" | compilou duas vezes: 03/11 (build completo) e 04/11 (retomado, com `assert-kernel-config` OK em 70 símbolos) |
+| "`/etc/inittab` não tem o `respawn`" | **tem**, linha 30, conferida com `debugfs` dentro do `rootfs.ext4` |
+| "SHA256 do Buildroot não é fixado" | é: `buildroot.sha256`, e o build imprime `sha256: OK` (§9) |
+| "`kernelPatches` não é lido por nenhum script" | é: `device-info.mjs kernelPatches` → `BR2_LINUX_KERNEL_PATCH`, com hash de estado (§12.11) |
+| "Nenhum aparelho real boota" | X55 e X35H bootaram com tela, `usb0` e SSH (§3, `docs/x35h-bringup.md`) |
 
-- **X55 nunca compilou.** A primeira tentativa morreu antes de compilar (bug do
-  `allow_draft`, não do aparelho). Falta reenviar o dispatch com
-  `device=powkiddy-x55` e `allow_draft=true`.
-- **ccache ainda sem prova de acerto**: o run #15 salvou o cache pela primeira
-  vez, e o #16 — que provaria — foi cancelado. O #18 repete o teste.
-- **O X55 ainda não tem `rocknix-joypad`, patches de DTS, `rtl8821cs_config.bin`
-  nem `genimage`.** É código e layout, não configuração. Ver
-  `device/powkiddy x55/README.md`.
-- `/etc/inittab` **não** tem a linha de `respawn` do `giochi-init`: o script está
-  no rootfs e ninguém o chama (§11).
-- `giochi-controllers` (configurador de controles) não existe: só o desenho, em
-  `Giochi app/docs/controles.md`.
-- `buildrootFragments`, `kernelPatches` e `firmwareFiles` estão **documentados**
-  em `device/README.md` mas não são lidos por nenhum script.
-- Nenhum aparelho real boota com esta árvore. X35S, X35H, R35S e Steam Deck são
-  drafts sem defconfig.
-- SHA256 do tarball do Buildroot não é fixado/verificado.
-- Sem GitHub Release; artefatos expiram em 14 dias.
-- Sem assinatura de imagem, OTA ou atualização.
+**Continua pendente:**
+
+- **`buildrootFragments` (plural)** e **`firmwareFiles`** seguem aceitos na
+  documentação e **não** lidos por script. O que existe e funciona é
+  `buildrootFragment` (singular) e `firmware-required.txt` (verificação de
+  presença, não download). Ou implementar, ou remover da doc.
+- **`rocknix-joypad`** (driver fora da árvore) não está empacotado — o X55 tem
+  16 botões via `gpio-keys` e 4 eixos via `adc-joystick`, sem ele.
+- **`genimage`** dentro do Buildroot, substituindo `make-sd-image.sh` como etapa
+  externa.
+- **`giochi-controllers`** (configurador de controles) não existe: só o desenho,
+  em `Giochi app/docs/controles.md`.
+- **ccache ainda sem prova de acerto** — o cache é salvo e reusado, mas nenhum
+  build seguido de mesmo commit foi cronometrado mostrando ganho.
+- **Partição de dados da loja** (piso 4 GiB + resto do cartão) não implementada;
+  ver as duas consequências de desenho em [`docs/flashing.md`](docs/flashing.md).
+- **`gles-probe`** escrito e não executado no aparelho.
+- **X55 com o launcher:** a imagem agora tem a linha do `respawn`, mas o
+  binário é do `Giochi app` e entra por overlay — falta a rodada deles.
+- SHA256 do **U-Boot e do kernel** não é fixado como o do Buildroot.
+- Sem GitHub Release; artefatos expiram em 14 dias. Sem assinatura, OTA ou
+  atualização.
 
 ## 4. Ambiente — o que dá e o que não dá para verificar
 
@@ -1488,7 +1494,7 @@ vez de apenas corrigidos.
 | `qemu-aarch64` | `qemu-aarch64/` | virtual | arm64 | **ready** | nada — é o smoke test do pipeline |
 | `powkiddy-x55` | `powkiddy x55/` | RK3566 | arm64 | draft | **boota com tela, áudio, Wi-Fi, BT e 16 botões + 4 eixos**; falta o launcher (do `Giochi app`) |
 | `powkiddy-x35s` | `powkiddy x35s/` | **RK3566** | arm64 | draft | DTS (compartilha com o X35H) e build |
-| `powkiddy-x35h` | `powkiddy x35h/` | **RK3566** | arm64 | draft | **compila e gera imagem**; falta **bootar**: tela ST7703, A/B, eixos |
+| `powkiddy-x35h` | `powkiddy x35h/` | **RK3566** | arm64 | draft | **boota com tela 640x480, `usb0` e SSH**; falta o launcher, o teste A/B de cartão e os eixos analógicos |
 | `r35s` | `r35s/` | RK3326 | arm64 | draft | pipeline RK3326 (BL31/DDR/U-Boot), joypad fora da árvore |
 | `steamdeck` | `steamdeck/` | x86_64 | x86_64 | draft | kernel, firmware, áudio, Wi-Fi, controle |
 
@@ -1554,9 +1560,12 @@ tem precedência histórica e a divergência precisa ser resolvida explicitament
 
 ## 17. Limitações conhecidas
 
-- O build completo do `qemu-aarch64` passou no CI (run #15); nenhum aparelho
-  real compilou ainda.
-- Nenhum aparelho real é inicializável; só o QEMU é `ready`.
+- **X55 e X35H bootam em hardware** (X55: tela, áudio, Wi-Fi, BT, 16 botões e 4
+  eixos; X35H: tela 640x480, `usb0` e SSH). Os dois continuam `draft` porque
+  `ready` exige a interface, que é do `Giochi app`.
+- X35S, R35S e Steam Deck nunca bootaram; X35S e R35S nem têm defconfig.
+- O build completo do `qemu-aarch64` passou no CI (run #15). O build local do X55
+  passou em 04/11, mas **nunca no CI** — o dispatch do X55 ainda não foi reenviado.
 - `bash -n` prova sintaxe, não comportamento; o `sh` local não é busybox ash.
 - `.config` interno em `work/` contém a senha real — não publique `work/`.
 - `buildroot.config` no artefato é redigido; o hash do `SHA256SUMS` é do arquivo
@@ -1565,33 +1574,37 @@ tem precedência histórica e a divergência precisa ser resolvida explicitament
 
 ## 18. Como retomar
 
-### Estado no fim da sessão de 03/11/2026 — leia isto primeiro
+### Estado no fim da sessão de 04/11/2026 — leia isto primeiro
 
-**A imagem do X55 com o `respawn` NÃO existe ainda.** O build foi interrompido de
-propósito, e o motivo é bom: ele passou por quatro falhas de ambiente que só
-aparecem em build do zero, e as quatro estão corrigidas e testadas — mas o build
-completo não chegou ao fim.
+**A imagem do X55 com o `respawn` EXISTE e foi verificada dentro do
+`rootfs.ext4`.** O build retomado com `KEEP_WORK=1` terminou com exit 0, o
+`post-build` reinseriu a linha e o `debugfs` a encontrou no arquivo que vai para
+o cartão — não só no `target/`.
 
 | Item | Estado |
 | --- | --- |
-| Código e configuração | **pronto** — 150/150 testes, tudo commitado e no `origin` |
-| Imagem X55 com `respawn` | **não existe** — build parado em `host-tar` (~5 % do caminho) |
-| `work/` do X55 | preservado em `/tmp/giochi-system-work/powkiddy-x55` (88 MB) |
-| Cartão SD no leitor | **não gravado** — intocado, com a imagem velha |
-| Imagem X35H em `out/` | intacta, é a última que bootou e falou SSH |
+| Código e configuração | **pronto** — 150/150 testes, tudo no `origin` |
+| Imagem X55 (`Image` + `rootfs.ext4` + DTB + bootloader) | **existe** em `out/powkiddy-x55/`, `built_at_utc=2026-11-04T21:05:13Z` |
+| `/etc/inittab` na imagem | **linha 30: `::respawn:/usr/bin/giochi-init`** — conferida com `debugfs` no `rootfs.ext4` |
+| `work/` do X55 | preservado em `~/.cache/giochi-system/work/powkiddy-x55` (17 GB, já com `target/` finalizado) |
+| Imagem X35H em `out/` | intacta — mas é de **antes** do `respawn`, então **não** tem a linha |
 
-**Para retomar, um comando** (o `work/` já tem os 4 correções de host aplicadas
-e validadas — o log desta sessão mostra `0` avisos de C++ e `0` erros):
+O comando que retoma (ou refaz a etapa final) sem recompilar tudo:
 
 ```bash
-KEEP_WORK=1 ALLOW_DRAFT=1 bash scripts/build-device.sh powkiddy-x55
+ALLOW_DRAFT=1 GIOCHI_SYSTEM_KEEP_WORK=1 bash scripts/build-in-container.sh powkiddy-x55
 ```
 
-Antes de gravar qualquer cartão, a verificação que a equipe do app pediu — e que
-é barata:
+Detalhe medido no retomado: **`KEEP_WORK=1` não pula o `target-finalize`.** O
+`make` do Buildroot chega ao fim em poucos minutos e o `post-build` roda de
+novo — é por isso que a linha do `respawn` entrou sem rebuild dos pacotes. Se o
+`work/` fosse apagado, seriam ~40 min.
+
+A verificação que a equipe do app pediu, e que é barata, roda sem root:
 
 ```bash
-debugfs -R "cat /etc/inittab" out/powkiddy-x55/rootfs.ext4 | grep giochi-init
+docker run --rm -v "$PWD/out/powkiddy-x55:/a:ro" --entrypoint bash giochi-builder:2 \
+  -c 'debugfs -R "cat /etc/inittab" /a/rootfs.ext4' | grep giochi-init
 ```
 
 Sem essa linha, a interface não sobe no boot e é exatamente o teste que eles não
@@ -1618,13 +1631,24 @@ sem medir o build completo.
 
 ### Pendências que não são de build
 
-1. **Três perguntas ao time do app, sem resposta:** Godot 4 Compatibility vs
-   Forward+; quanto de dados a loja precisa; Python vale o custo (eles já vetaram
-   `pygame` por licença — LGPL).
+1. **As três perguntas ao time do app foram respondidas** (04/11, no canal):
+   - **Godot 4 = Compatibility (GLES3).** Vulkan não se declara. Não é economia
+     de espaço, é contrato: `graphics_api_min: vulkan` no `forge.json` é sempre
+     recusado pelo validador, e Forward+ está fora por isso.
+   - **`python3` não entra no rootfs**, e o motivo não é o tamanho: `pygame` é
+     LGPL-2.1 e a regra de licença recusa LGPL na imagem assinada. Jogo que
+     precisa de Python vai pela loja (`distribution: store`), com o runtime no
+     `/user`.
+   - **Dados da loja: piso de 4 GiB + o resto do cartão.** É proposta deles, o
+     número é do dono do projeto — não implementado (item 3 abaixo).
 2. **`gles-probe`** escrito e não executado. Precisa do aparelho ligado:
-   `bash scripts/gles-probe.sh powkiddy-x35h --run`
-3. **Partição de dados da loja** — eles pediram piso de 4 GiB + resto do cartão.
-   Não implementado; é mudança de particionamento e apaga o cartão.
+   `bash scripts/gles-probe.sh powkiddy-x35h --run`. O resultado decide melonDS
+   e teto de shader, **não** o Godot: para `gles3`, 3.1 e 3.0 dão no mesmo.
+3. **Partição de dados da loja** — proposta de piso 4 GiB + resto do cartão. Não
+   implementado, e há duas consequências de desenho antes de codar: a `.img` tem
+   tamanho fixo (2 GiB hoje), então "o resto do cartão" só existe se a partição
+   crescer no primeiro boot; e gravar a imagem apaga os dados do usuário. Ver
+   [`docs/flashing.md`](docs/flashing.md).
 4. **Janela do chat: 08:00–18:50 (Brasília).** Fora dela não há troca de
    mensagem. Ver [`docs/mensagem-giochi-system.md`](docs/mensagem-giochi-system.md).
 
@@ -1633,7 +1657,7 @@ sem medir o build completo.
 | Aparelho | Estado | Consequência |
 | --- | --- | --- |
 | `powkiddy-x55` | **em uso pelo time do `Giochi app`** (launcher) | não usar para teste; **avisar com antecedência** se precisar |
-| `powkiddy-x35h` | disponível para teste | é o aparelho de bring-up agora |
+| `powkiddy-x35h` | **conectado, mas em uso** (04/11) | **indisponível momentaneamente** — nem SSH, nem serial, nem reboot |
 
 A X55 continua conectada (USB e TTL) mas está **ocupada**. Não rode nada nela
 sem combinar antes: um reboot ou uma gravação de cartão interrompe o trabalho de

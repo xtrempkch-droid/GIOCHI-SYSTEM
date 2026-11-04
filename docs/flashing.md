@@ -47,6 +47,28 @@ fixos. Verificado no aparelho pelo console serial:
 Um cartão só com `Image` e `rootfs.ext4` — o que o build entrega hoje — não
 boota: falta o firmware nos setores fixos e a partição de boot.
 
+### Partição de dados da loja (proposta, não implementada)
+
+A loja não pode morar no rootfs — rootfs assinado é read-only por desenho, e
+conteúdo comprado não pode depender de reimagem. O time do app propôs:
+
+| | |
+| --- | --- |
+| piso | **4 GiB** |
+| teto | **todo o espaço restante do cartão** |
+
+O número é do dono do projeto, não nosso — por isso ainda não está em script.
+Duas consequências decidem a implementação, e nenhuma é trivial:
+
+1. **A `.img` tem tamanho fixo** (2 GiB, com as duas partições acima). "O resto
+   do cartão" não cabe num arquivo de tamanho fixo: a partição de dados só chega
+   ao tamanho final se **crescer no primeiro boot** no aparelho, ou se o
+   `flash-sd.sh` particionar o cartão depois de gravar a imagem.
+2. **Gravar apaga os dados do usuário.** `dd` e `flash-sd.sh` não preservam
+   nada, e a partição de dados é a primeira a morrer. Aceitável em
+   desenvolvimento, inaceitável para usuário final — é mais um motivo para o
+   aviso antes de qualquer gravação.
+
 ### Gerar a imagem de cartão
 
 ```bash

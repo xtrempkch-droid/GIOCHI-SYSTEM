@@ -67,7 +67,9 @@ O veredito é **calculado**, nunca declarado. Compara `forge.json` × `device_pr
 - `Parcial` — algo entre 80% e 100% do recurso (`NEAR_LIMIT_RATIO = 0.80`), sinalizado como risco de swap;
 - `Incompatível` — alguma exigência não atendida.
 
-O veredito é o **pior caso** e lista **todas** as exigências não atendidas, nunca só a primeira. `vulkan` em `graphics_api_min` é sempre incompatível: o aparelho só tem GLES 3.0/2.0.
+O veredito é o **pior caso** e lista **todas** as exigências não atendidas, nunca só a primeira. `vulkan` em `graphics_api_min` é sempre incompatível: o aparelho só tem GLES 3.x (3.0 como piso; 3.1 é o esperado no panfrost, ainda não medido).
+
+**Decisão do time do app (04/11/2026):** o Godot 4 deles usa o renderizador **Compatibility (GLES3)**, e a imagem **não** declara Vulkan. Isso não é economia de espaço — é contrato: se algum `forge.json` declarar `graphics_api_min: vulkan`, o validador recusa o app, e esse é o comportamento desejado. Se o Godot só abrir em Forward+, o problema é de renderizador padrão deles, não da imagem.
 
 ## Estado
 

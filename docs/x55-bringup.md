@@ -675,3 +675,67 @@ docker run --rm --device=/dev/ttyUSB0 --entrypoint python3 giochi-serial:1 \
 ```
 
 Login: `root` / `giochi-dev` (ou `ROOT_PASSWORD` no build).
+
+## 04/11/2026 — a imagem entregue passou a chamar o `giochi-init`
+
+Rodada curta e de resultado único, mas é o que destrava a interface.
+
+O build de 03/11 tinha **concluído o `make`** (exit 0, `rootfs.tar` gerado) e
+morrido só na cópia de artefatos. Como `work/` foi preservado e o `post-build`
+mudou depois (commit `3601e73`, `respawn` incondicional), retomar com
+`KEEP_WORK=1` foi suficiente:
+
+```bash
+ALLOW_DRAFT=1 GIOCHI_SYSTEM_KEEP_WORK=1 bash scripts/build-in-container.sh powkiddy-x55
+```
+
+Levou ~7 min, e o motivo é que **`KEEP_WORK=1` não pula o `target-finalize`**: o
+`make` volta, reaplica os overlays, roda o `post-build` e regera as imagens. Não
+houve rebuild de pacote — os `.stamp_*` estavam todos lá.
+
+### Prova no arquivo que vai para o cartão
+
+Não basta ver a linha no `target/`; ela tem de estar no `rootfs.ext4`:
+
+```text
+$ debugfs -R "stat /usr/bin/giochi-init" out/powkiddy-x55/rootfs.ext4
+Mode: 0755                                  ← executável, senão o respawn falha
+
+$ debugfs -R "cat /etc/inittab" out/powkiddy-x55/rootfs.ext4 | grep -n giochi-init
+30:::respawn:/usr/bin/giochi-init
+```
+
+E o resto do contrato do sistema base na mesma imagem:
+
+| Arquivo | Estado |
+| --- | --- |
+| `/usr/bin/giochi-init` | `0755` |
+| `/usr/bin/giochi-selftest` | `0755` |
+| `/usr/bin/giochi-buttons` | `0755` |
+| `/etc/giochi/buttons.map` | `0644`, 103 linhas |
+| `/usr/sbin/sshd` + `/etc/ssh/sshd_config` | presentes |
+| `/usr/sbin/dropbear` | **ausente** — a troca por OpenSSH valeu (§12.27) |
+
+O `assert-kernel-config` desta rodada passou com **70 símbolos** e 2
+`allow-drop` justificados (`CONFIG_JOYSTICK_ROCKNIX`,
+`CONFIG_ARM_ROCKCHIP_CPUFREQ`).
+
+### Imagem de cartão gerada
+
+```text
+out/powkiddy-x55/giochi-system-powkiddy-x55-sd.img   2,0 GiB
+SHA256 d15d3241c95767720221e0935d3278b9a80a9756f7cf4cab6a961795766c1229
+cmdline: root=PARTUUID=47494f43-02 rootwait rw rootfstype=ext4
+         console=ttyS2,1500000n8 earlycon=uart8250,mmio32,0xfe660000 fbcon=rotate:3
+```
+
+A cmdline é composta do `device.json` (§12.24) e sai idêntica à que bootou em
+hardware. **O cartão não foi gravado nesta rodada** — a X55 está em uso pelo time
+do app, e gravar interrompe o trabalho de quem está nela.
+
+### O que falta para o launcher aparecer na tela
+
+Nada desta árvore. A linha do `respawn` está na imagem e o `giochi-init` espera
+em ciclos de 30 s procurando
+`/opt/giochi/apps/launcher/bin/giochi-launcher`. Quando o `Giochi app` puser o
+binário por overlay, ele sobe sozinho no próximo boot.
