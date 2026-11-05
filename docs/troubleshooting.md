@@ -179,6 +179,127 @@ rm -rf /tmp/giochi-system-work /tmp/giochi-system-cache/ccache
 df -h /tmp
 ```
 
+## Console serial: linha muda, ruído, ou adaptador caindo
+
+Três sintomas diferentes, e o primeiro passo é separar **"o aparelho não fala"**
+de **"o adaptador sumiu"**. Medido em 04/11/2026 no R35S.
+
+### O adaptador caiu do barramento
+
+Sintoma exato, na ordem em que aparece:
+
+```text
+1. leituras esparsas: 1 a 13 bytes, com minutos de silêncio entre elas
+2. SerialException: device reports readiness to read but returned no data
+   (device disconnected or multiple access on port?)
+3. /dev/ttyUSB0 deixa de existir — `ls /dev/ttyUSB*` volta vazio
+4. `lsusb | grep 1a86` não mostra mais o CH341
+```
+
+O item 3 é o que fecha o diagnóstico: **`multiple access on port` na mensagem é
+uma das duas causas possíveis, e não a que aconteceu**. Se a porta ainda existir
+e outro processo a tiver aberto, o erro é o mesmo. Conferir a existência do nó
+antes de acusar concorrência:
+
+```bash
+ls -la /dev/ttyUSB*          # sumiu = adaptador caiu
+lsusb | grep -i 1a86         # idem
+```
+
+**O que fazer:** desconectar e reconectar o adaptador. Ele **não** volta sozinho
+— esperado 30 s e nada. Se cair repetidamente:
+
+- porta USB que suspende (hub sem alimentação, ou `autosuspend`);
+- cabo USB ruim antes do adaptador;
+- alimentação do aparelho puxando do mesmo ponto.
+
+### Linha muda, e o padrão que diz por quê
+
+Com o adaptador presente e nenhum byte, a varredura de bauds responde:
+
+```bash
+docker run --rm --device=/dev/ttyUSB0 -v "$HOME/.cache/giochi-system/serial:/work/log" \
+  --entrypoint python3 giochi-serial-scan:2 \
+  /work/baud-scan.py /dev/ttyUSB0 3 1500000 115200 921600 57600
+```
+
+Assinaturas medidas:
+
+| O que chega | Significa |
+| --- | --- |
+| 0 bytes em todos os bauds | aparelho desligado, console não habilitado no U-Boot, ou TX/RX não ligados |
+| **muitos** bytes em todos os bauds | linha com sinal, baud errado — o certo é o que der TEXTO |
+| `0xFF` seguido de zeros, repetido | **linha RX flutuante**: nada está chegando do aparelho |
+| dezenas de bytes só num baud | é ali que o aparelho fala |
+
+O caso `0xFF 00 00 00 00 00` repetido é o mais enganoso: parece "tem dados", e
+não tem. É o UART lendo uma linha sem sinal — **GND solto produz exatamente
+isso**. Ligue o GND primeiro.
+
+### Armadilha ao gravar o log: decodificar destrói a evidência
+
+Medido: 47 bytes crus (`ff 00 00 00 ...`) foram gravados com
+`encoding="utf-8", errors="replace"` e viraram 4 caracteres `EF BF BD` mais 35
+zeros. O padrão que identifica **linha flutuante** desapareceu do arquivo.
+
+Regra: em diagnóstico de serial, grave os bytes **crus** (`.bin`) e, se quiser,
+o texto ao lado. `docker/serial-listen.py` e `docker/serial-watch.py` fazem isso.
+
+### O que foi medido no R35S em 04/11/2026 (antes da soldagem)
+
+Registro porque cada linha eliminou uma hipótese, e refazer custa uma noite.
+
+| Medida | Resultado | O que descarta |
+| --- | --- | --- |
+| Varredura de 12 bauds | só **ruído** em 1500000; 0 bytes nos outros | "é só baud errado" |
+| Loopback (escrever e reler) | **0 bytes** de volta | "o que volta é eco do meu `\r`" |
+| Escuta passiva de 8 s, sem escrever | **0 bytes** | "o texto que aparece é do aparelho" |
+| Padrão do ruído | `0xED` repetido, `0x00`, `0xFF` repetido | baud errado (que dá bytes **variados**) |
+| Adaptador | cai do barramento a cada 30–45 s, volta sozinho | cabo/porta do PC ruim, ou hub |
+
+**Por que `0xED` repetido não é baud errado:** baud errado produz bytes
+*variados*, porque a amostragem cai em pontos diferentes de cada bit. Byte
+constante repetido é nível elétrico — a linha está sendo lida num estado fixo, e
+`0xED`/`0xFF` é o que um UART entrega com RX flutuando ou sem terra.
+
+**Conclusão:** o problema está no **caminho elétrico entre o aparelho e o
+adaptador**, não em configuração. Fios soltos (jumpers, garras, pressão em
+pad) produzem exatamente esta assinatura: contato intermitente, ruído de um
+lado, silêncio do outro, e o adaptador caindo quando o nível flutua.
+
+Ordem de suspeita, do mais barato ao mais caro:
+
+1. **GND** — é o primeiro e o mais esquecido. Sem referência comum, o RX lê
+   lixo e o adaptador pode cair.
+2. **TX/RX cruzados** — TX do aparelho → RX do adaptador, e vice-versa. Trocar
+   os dois dá silêncio total, não ruído.
+3. **Ponto de solda no pad do aparelho** em vez de jumper/garra — é o que
+   elimina o contato intermitente.
+4. Fios longos sem blindagem ao lado de fonte chaveada (interferência).
+
+Depois de soldar, o primeiro teste **não** é escutar o boot — é o loopback do
+adaptador, que separa "o adaptador está bom" de "o caminho até o aparelho está
+bom". `serial-watch.py` avisa quando a porta cai, então serve de medidor de
+qualidade da conexão: se ele não cai em 5 minutos, a soldagem resolveu.
+
+### Ferramentas
+
+```bash
+# varre bauds e classifica o que chegou em cada um
+baud-scan.py <porta> <segundos> [baud...]
+
+# escuta N segundos, cutucando com Enter, gravando .log e .bin
+serial-listen.py <porta> <baud> <segundos> <arquivo.log> [intervalo_enter]
+
+# vigia: espera o adaptador voltar e captura na hora (deixar rodando
+# enquanto alguém mexe no cabo)
+serial-watch.py <porta> <baud> <arquivo.log> [segundos_por_janela]
+```
+
+O baud **não** é o mesmo em todo aparelho desta árvore: a X55 é
+`ttyS2 @ 1500000` (`docs/flashing.md`), e o R35S (RK3326/PX30) não tem baud
+documentado — por isso a varredura, em vez de chutar.
+
 ## Logs
 
 - `work/<device>/build.log` — compilação.

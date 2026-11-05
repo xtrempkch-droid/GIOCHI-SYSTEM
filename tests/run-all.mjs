@@ -23,6 +23,7 @@ import "./giochi-init.test.mjs";
 import "./launcher-deps.test.mjs";
 import "./graphics-stack.test.mjs";
 import "./bootlog.test.mjs";
+import "./serial-tools.test.mjs";
 import "./selftest-contract.test.mjs";
 import "./python-libs-study.test.mjs";
 import "./arcade-probe.test.mjs";
