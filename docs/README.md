@@ -32,6 +32,10 @@
   gamepad. Licença BSD-3/MIT e evdev **funcionam**; falta backend de janela em
   KMSDRM no pyglet (só há X11). O remendo de geometry shader foi **medido** em
   [`scripts/arcade-probe/`](../scripts/arcade-probe/README.md) e funciona.
+- [Driver de GPU: a decisão](gpu-drivers.md) — o que acontece se o panfrost
+  nunca tiver geometry shader. O driver bloqueia **exatamente uma** coisa
+  (arcade sem patch); launcher e Godot Compatibility passam. As três saídas e
+  a regra de licença do `libmali`: **fora** da imagem base.
 - [Mapas de botões](button-maps.md) — de onde vêm os códigos evdev de cada aparelho.
 - [Catálogo RK3326](rk3326-catalog.md) — 15 aparelhos extraídos de device tree.
 - [Painéis do R35S/R36S](../device/r35s/panels/README.md) — os **cinco** painéis

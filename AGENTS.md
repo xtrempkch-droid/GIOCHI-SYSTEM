@@ -4,7 +4,10 @@
 > Atualizado em: 06/11/2026 (revisão 5 — **o R35S falou**: a linha serial, que
 > devolvia só ruído em 04/11, ficou limpa depois da solda no TTL. Console
 > `ttyS2@1500000` medido e preso em teste; joypad com fonte GPL confirmada; o
-> desenho de partição de dados do ROCKNIX medido. Ver §13-A.)
+> desenho de partição de dados do ROCKNIX medido; os **cinco** painéis em texto
+> comparável; e a **decisão de driver de GPU** fechada — o panfrost custa
+> exatamente um item, e ele tem patch. Ver §13-A e
+> [`docs/gpu-drivers.md`](docs/gpu-drivers.md).)
 
 ---
 
@@ -1743,6 +1746,13 @@ meio). Vale como lembrete: teste que falha costuma estar certo.
 1. **Interface de jogos (produto, não sistema).** Os controles de hardware estão
    completos: 16 botões físicos + 4 eixos, medidos no aparelho. O que falta é o
    launcher, que é do `Giochi app` — este repositório entrega o sistema.
+
+   **A dúvida do driver de GPU não bloqueia este item.** Medido e decidido em
+   [`docs/gpu-drivers.md`](docs/gpu-drivers.md): o panfrost entrega GLES 3.1 com
+   compute e sem geometry shader, e **launcher, SDL2 e Godot 4 Compatibility não
+   precisam de geometry shader**. O driver custa exatamente uma coisa — arcade
+   sem o nosso patch — e essa já tem solução medida. Não reabrir a discussão sem
+   ler aquele documento.
 2. **~~Firmware de Bluetooth~~ — RESOLVIDO.** O `rtl_bt/rtl8821cs_fw.bin` **é
    oficial** e está no `linux-firmware-20240115`; o Buildroot 2024.02 é que não
    o instala (§12.19). No aparelho: `fw version 0x75b8f098`, `Controller
@@ -1759,6 +1769,16 @@ meio). Vale como lembrete: teste que falha costuma estar certo.
 
 ## 15. Decisões que não devem ser reabertas sem motivo
 
+- **GPU: Mesa/panfrost na imagem, blob da ARM fora dela.** O panfrost entrega
+  GLES 3.1 com compute e sem geometry shader; o `libmali` da ARM entrega 3.2 com
+  geometry shader e é proprietário (~59 MB, termos próprios).
+  Decidido em 06/11/2026, com o `features.txt` do Mesa 24.0.0 da própria árvore
+  lido e o hardware medido: [`docs/gpu-drivers.md`](docs/gpu-drivers.md).
+  O custo do panfrost é **um** item (arcade sem patch, e o patch existe);
+  launcher, SDL2 e Godot 4 Compatibility passam. O blob, se um dia for
+  necessário, vai **pela loja**, nunca na imagem base — o artefato de CI é
+  público e a pergunta de redistribuição não tem resposta nossa.
+  `tests/gpu-drivers.test.mjs` falha se alguém puser `libmali` num fragmento.
 - **Handheld renderiza em SDL2 + KMSDRM, sem servidor gráfico.** Avaliado o
   [Quiver Launcher](docs/evaluacao-quiver-launcher.md) em 04/11/2026 e
   **recusado** por quatro bloqueios independentes: licença BSL 1.1 (proíbe
