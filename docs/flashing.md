@@ -64,10 +64,62 @@ Duas consequências decidem a implementação, e nenhuma é trivial:
    do cartão" não cabe num arquivo de tamanho fixo: a partição de dados só chega
    ao tamanho final se **crescer no primeiro boot** no aparelho, ou se o
    `flash-sd.sh` particionar o cartão depois de gravar a imagem.
+   → **o segundo caminho existe desde 06/11/2026: `--grow`** (ver abaixo).
 2. **Gravar apaga os dados do usuário.** `dd` e `flash-sd.sh` não preservam
    nada, e a partição de dados é a primeira a morrer. Aceitável em
    desenvolvimento, inaceitável para usuário final — é mais um motivo para o
    aviso antes de qualquer gravação.
+
+### Crescer a última partição até o fim do cartão (`--grow`)
+
+```bash
+sudo bash scripts/flash-sd.sh out/<device>/giochi-system-<device>-sd.img /dev/sdX \
+     --expect-gib 116 --grow --yes
+```
+
+A `.img` tem tamanho fixo (2 GiB). Num cartão de 128 GB isso deixava 114 GB
+**sem tabela de partição** — espaço que nenhum `mkfs` nem app enxerga, porque não
+pertence a partição nenhuma.
+
+A alternativa óbvia seria gerar uma imagem maior (`--size-mib 118000`), e ela é
+pior por um motivo medido: `dd` escreve **todos** os bytes, inclusive os zeros.
+115 GiB a ~30 MB/s passam de uma hora de gravação, contra ~2 min da imagem de
+2 GiB mais alguns segundos de `resize2fs`. Gravar zeros não produz nada.
+
+**A ordem não é acidental.** O `--grow` roda **depois** da verificação de
+SHA256:
+
+```text
+1. dd da imagem                              (2 GiB, ~2 min)
+2. relê e compara SHA256 com a da imagem     ← prova que a gravação está íntegra
+3. sfdisk -N <última> ,+                     ← cresce a partição
+4. e2fsck -f -p && resize2fs                 ← cresce o sistema de arquivos
+```
+
+Depois do passo 3 o cartão **deixa de ser byte a byte igual à imagem** — e é
+correto que deixe. Verificar depois seria comparar com algo que já não existe, e
+o veredito seria sempre "cartão defeituoso".
+
+Só a **última** partição cresce (a que começa mais longe no disco), e só se for
+ext4. Crescer uma partição do meio exigiria mover as seguintes, que é a operação
+que apaga dados.
+
+Falha em crescer **não** derruba a execução: o cartão já está gravado e
+verificado, o sistema boota, e o que falta é só o espaço extra. O script avisa e
+segue — sair com erro aqui faria o operador regravar achando que a gravação
+falhou.
+
+Duas armadilhas do `sfdisk`, as duas com mensagem que esconde a causa, e as duas
+encontradas testando num arquivo em vez de num cartão:
+
+| Sintoma | Causa |
+| --- | --- |
+| `sfdisk: cannot open /dev/sdb2: No such file or directory` | `sfdisk -J` devolve o **nome** em `node`, não o número. `-N` espera o **número** — ele sai do índice na lista, escolhendo pelo maior `start` |
+| `blockdev: Comando desconhecido: --getstart` | a opção **não existe**. O início em setores vem do próprio `sfdisk -J` |
+
+`tests/flash-grow.test.mjs` fecha o contrato (7 testes): ordem, número pelo
+índice, ausência de `--getstart`, `p` para `mmcblk0`, só a última e só ext4, e
+falha que não derruba a gravação.
 
 ### Gerar a imagem de cartão
 

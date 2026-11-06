@@ -5,7 +5,8 @@
 # Uso:
 #   sudo bash scripts/flash-sd.sh out/<device>/giochi-system-<device>-sd.img /dev/sdX
 #   sudo bash scripts/flash-sd.sh <imagem> /dev/sdX --yes     # sem confirmação
-#   sudo bash scripts/flash-sd.sh <imagem> /dev/sdX --expect-gib 29   # cartão certo
+#   sudo bash scripts/flash-sd.sh <imagem> /dev/sdX --expect-gib 116  # cartão certo
+#   sudo bash scripts/flash-sd.sh <imagem> /dev/sdX --grow    # usa o cartão todo
 #   sudo bash scripts/flash-sd.sh <imagem> --list             # só lista candidatos
 #
 # Existe para impedir o acidente clássico: `dd` no disco errado. Antes de
@@ -22,9 +23,14 @@ TARGET=""
 ASSUME_YES=0
 LIST_ONLY=0
 EXPECT_GIB=""
+GROW=0
 
 usage() {
-  sed -n '2,15p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  # `sed` com dois delimitadores IGUAIS não funciona: ele fecha o intervalo no
+  # primeiro casamento e reabre no segundo, imprimindo o script inteiro. Medido
+  # aqui. O `awk` para na segunda linha de `# ====` e imprime só o meio.
+  awk '/^# ={10,}$/ { vistos++; if (vistos >= 3) exit; next } \
+       vistos >= 2 { sub(/^# ?/, ""); print }' "${BASH_SOURCE[0]}"
 }
 
 while (($#)); do
@@ -32,6 +38,7 @@ while (($#)); do
   case "$argument" in
     --yes|-y) ASSUME_YES=1 ;;
     --list) LIST_ONLY=1 ;;
+    --grow) GROW=1 ;;
     --expect-gib)
       shift
       EXPECT_GIB="${1:-}"
@@ -225,6 +232,125 @@ echo "  SHA256 confere: $ACTUAL_SHA"
 # O kernel do host precisa reler a tabela de partições; sem isso o cartão
 # aparece sem partições e a próxima etapa falha por um motivo que já foi
 # resolvido no cartão.
+partprobe "$TARGET" 2>/dev/null || true
+udevadm settle 2>/dev/null || true
+
+# ── crescer a última partição até o fim do cartão ────────────────────
+#
+# POR QUE ISTO EXISTE. A `.img` tem tamanho fixo (2 GiB), e o `docs/flashing.md`
+# registra a consequência: "o resto do cartão" não cabe num arquivo de tamanho
+# fixo. Num cartão de 128 GB isso deixava 114 GB sem tabela de partição — espaço
+# que nenhum `mkfs` nem app enxerga, porque não pertence a partição nenhuma.
+#
+# A alternativa seria `make-sd-image.sh --size-mib 118000`, e ela é pior por um
+# motivo medido: `dd` escreve TODOS os bytes, inclusive os zeros. 115 GiB a
+# ~30 MB/s são mais de uma hora de gravação, contra ~2 min da imagem de 2 GiB
+# mais alguns segundos de `resize2fs`. O trabalho de gravar zeros não produz
+# nada.
+#
+# ORDEM IMPORTA: isto roda DEPOIS da verificação de SHA256. Crescer muda a
+# tabela de partições e o superbloco, então o cartão deixa de ser byte a byte
+# igual à imagem — e é correto que deixe. Verificar depois seria comparar com o
+# que não existe mais.
+#
+# Só a ÚLTIMA partição (a que termina mais longe no disco), e só se for ext4:
+# crescer uma partição do meio exigiria mover as seguintes, que é a operação que
+# apaga dados.
+
+# Duas armadilhas medidas em 06/11/2026, as duas com o `sfdisk` deste host:
+#
+#   1. `sfdisk -J` devolve em `node` o NOME COMPLETO (`/dev/sdb2`), não o
+#      número. Passar isso para `-N` falha com "cannot open /dev/sdb2" e a
+#      mensagem não diz que o problema é o tipo do argumento. O número tem de
+#      sair do ÍNDICE na lista, com o `start` escolhendo a última.
+#   2. `blockdev --getstart` NÃO EXISTE (`blockdev: Comando desconhecido`);
+#      o início em setores vem do próprio `sfdisk -J`.
+numero_da_ultima_particao() {
+  local disco="$1"
+  sfdisk -J "$disco" 2>/dev/null | python3 -c '
+import json, sys
+partes = json.load(sys.stdin)["partitiontable"]["partitions"]
+if not partes:
+    sys.exit(1)
+# maior `start` = a que termina mais longe; o índice dá o número (1-based)
+i = max(range(len(partes)), key=lambda k: partes[k]["start"])
+print(i + 1)
+' 2>/dev/null
+}
+
+# /dev/sdb + 2 -> /dev/sdb2 ; /dev/mmcblk0 + 2 -> /dev/mmcblk0p2
+caminho_da_particao() {
+  local disco="$1" numero="$2"
+  case "$disco" in
+    *[0-9]) printf '%sp%s\n' "$disco" "$numero" ;;
+    *)      printf '%s%s\n' "$disco" "$numero" ;;
+  esac
+}
+
+cresce_ultima_particao() {
+  local disco="$1"
+
+  if ! command -v sfdisk >/dev/null 2>&1; then
+    echo "  AVISO: sem 'sfdisk' — o resto do cartão fica sem partição" >&2
+    echo "         use 'make-sd-image.sh --size-mib <N>' e grave a imagem maior" >&2
+    return 0
+  fi
+
+  local numero part
+  numero="$(numero_da_ultima_particao "$disco" || true)"
+  if [[ -z "$numero" ]]; then
+    echo "  AVISO: não consegui ler a tabela de partições; não vou crescer" >&2
+    return 0
+  fi
+  part="$(caminho_da_particao "$disco" "$numero")"
+
+  # O sistema de arquivos tem de ser ext4, e tem de passar no fsck ANTES de
+  # crescer: `resize2fs` num fs inconsistente espalha a inconsistência em vez
+  # de corrigi-la.
+  local tipo
+  tipo="$(blkid -o value -s TYPE "$part" 2>/dev/null || true)"
+  if [[ "$tipo" != "ext4" ]]; then
+    echo "  AVISO: $part é '${tipo:-sem fs}', não ext4 — não vou crescer" >&2
+    return 0
+  fi
+
+  local antes_gib
+  antes_gib="$(blockdev --getsize64 "$part" 2>/dev/null | awk '{printf "%.1f", $1/1024/1024/1024}')"
+  echo "  crescendo $part (${antes_gib} GiB → o resto do cartão)..."
+
+  # `,+` = do início atual até o fim do disco, com o alinhamento do próprio
+  # sfdisk. `--no-reread` porque a releitura é feita logo abaixo, com o
+  # `partprobe`, e o sfdisk sozinho falha quando o kernel não pode reler.
+  if ! echo ',+' | sfdisk --no-reread --force -N "$numero" "$disco" >/dev/null 2>&1; then
+    echo "  AVISO: sfdisk não cresceu $part; ficou com ${antes_gib} GiB" >&2
+    echo "         o sistema BOOTA assim — só não tem o espaço extra" >&2
+    return 0
+  fi
+  partprobe "$disco" 2>/dev/null || true
+  udevadm settle 2>/dev/null || true
+
+  # `-f` é obrigatório: o ext4 de um cartão recém-gravado está marcado como
+  # não-limpo, e o `resize2fs` se recusa a tocar nele sem isso.
+  e2fsck -f -p "$part" >/dev/null 2>&1 || true
+  if ! resize2fs "$part" >/dev/null 2>&1; then
+    echo "  AVISO: resize2fs falhou; a partição ficou com ${antes_gib} GiB" >&2
+    echo "         o sistema BOOTA assim — só não tem o espaço extra" >&2
+    return 0
+  fi
+
+  local depois_gib
+  depois_gib="$(blockdev --getsize64 "$part" 2>/dev/null | awk '{printf "%.1f", $1/1024/1024/1024}')"
+  echo "  $part agora tem ${depois_gib} GiB"
+  return 0
+}
+
+if ((GROW)); then
+  echo
+  cresce_ultima_particao "$TARGET"
+  echo "  (o cartão não é mais idêntico à imagem — o SHA acima foi"
+  echo "   verificado ANTES de crescer, sobre os bytes da imagem)"
+fi
+
 partprobe "$TARGET" 2>/dev/null || true
 udevadm settle 2>/dev/null || true
 
