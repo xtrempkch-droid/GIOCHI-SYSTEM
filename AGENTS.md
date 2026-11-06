@@ -461,6 +461,10 @@ Variáveis do build: `BUILDROOT_VERSION`, `ROOT_PASSWORD` (8–128; letras, núm
 `GIOCHI_SYSTEM_GROWTH_LIMIT_MIB` (4096), `GIOCHI_SYSTEM_OUT_DIR`, `JOBS`,
 `ALLOW_DRAFT=1`.
 
+Duas do wrapper de container: `GIOCHI_CONTAINER_CACHE` (onde fica o cache no
+host) e `GIOCHI_CONTAINER_SAME_PATHS=1` (monta o cache no **mesmo caminho
+absoluto** do host — §12.40).
+
 ## 10. Testes
 
 `node tests/run-all.mjs` → **106/106**:
@@ -1346,6 +1350,76 @@ silêncio — a mesma classe de problema do §12.1.
 Leia esse arquivo no início de uma sessão: o que está lá é o estado mais recente
 do que o app espera do sistema, e pode ter mudado depois deste documento.
 
+### 12.40 O Buildroot grava o caminho ABSOLUTO no RPATH — container e host não se misturam
+
+`work/<device>` construído fora do container **não pode** ser retomado dentro
+dele. O Buildroot grava o caminho absoluto de `host/lib` no `RPATH` de cada
+binário que produz, e `support/scripts/check-host-rpath` falha quando o valor não
+bate com o `host/lib` do momento. Medido em 06/11/2026 ao retomar o `work/r35s`:
+
+```text
+*** ERROR: package host-cmake installs executables without proper RPATH:
+***   /cache/work/r35s/build/host/sbin/sfdisk
+***   ... 238 binários ...
+make: *** [package/pkg-generic.mk:295: .../host-cmake-3.28.1/.stamp_host_installed] Error 1
+```
+
+A mensagem **acusa o pacote errado**: ela cita `host-cmake`, que é o pacote
+instalando naquele instante, e lista binários de outros pacotes (`sfdisk`,
+`nettle-hash`, `lscpu`…). Quem procura o problema no CMake perde a tarde. A causa
+é a mistura de layouts, e o número real está no `readelf`:
+
+```text
+$ readelf -d work/r35s/build/host/sbin/sfdisk | grep -i runpath
+ (RUNPATH)  [/home/charles/.cache/giochi-system/work/r35s/build/host/lib:...]
+```
+
+Dois caminhos para resolver, e a escolha depende do que se quer:
+
+| Situação | Use |
+| --- | --- |
+| build do zero | padrão (cache em `/cache` no container) — caminho curto e estável |
+| `work/` já construído no host, com poucas horas de build dentro | `GIOCHI_CONTAINER_SAME_PATHS=1`, que monta o cache no **mesmo caminho absoluto** |
+
+`GIOCHI_CONTAINER_SAME_PATHS=1` também torna container e build nativo
+intercambiáveis, o que é útil quando o host tem as dependências e o container é
+só conveniência. O que não se faz é **misturar**: um `work/` começado num layout e
+retomado no outro sempre falha, e o erro nunca cita o layout.
+
+### 12.41 A loja pede DUAS chaves, e iguais seria o mesmo que uma
+
+Pedido da equipe do app em 06/11/2026 10:20. São duas perguntas diferentes:
+
+| Arquivo | Pergunta |
+| --- | --- |
+| `/etc/giochi/loja-publica.pem` | "este pacote veio da Giochi?" |
+| `/etc/giochi/licenca-publica.pem` | "este aparelho pagou?" |
+
+A razão de separar é a que fecha a pirataria: se a assinatura do pacote fosse
+também a prova de compra, **um** arquivo copiado de um aparelho para outro
+serviria em todos. Com a licença separada, o `.giochi` não basta — a licença
+carrega a chave pública do aparelho que comprou, e outro aparelho recusa.
+
+Consequência direta para este repositório: `scripts/chave-da-loja.sh` agora trata
+**dois** pares (`loja` e `licenca`), e `--verificar` **falha** quando as duas
+públicas são iguais. Chaves iguais reproduzem exatamente o defeito que a
+separação existe para evitar, e o sintoma apareceria só na loja — pacote
+liberado de graça, nada no build indicando.
+
+O binário `verificador-ed25519` recebe o caminho da chave como **terceiro
+argumento** (`pacote sig chave`), então não muda nada nele para servir às duas.
+
+`/etc/giochi/pontos-de-montagem` entrou junto: um caminho absoluto por linha,
+`#` comenta. Inclui `/media` de propósito — sem essa linha a partição de dados
+aparece como mídia removível e os jogos de `/user` aparecem **duas vezes** na
+lista. `/user` ainda não existe na imagem (partição de dados não implementada),
+mas está declarado: caminho que falta numa lista de exclusão é jogo invisível,
+caminho que sobra é inofensivo.
+
+A terceira chave, `/user/.config/giochi/device.key`, **não** é gerada aqui: ela
+nasce no aparelho no primeiro boot. Quem a gera é o app, para não haver corrida
+entre launcher e loja.
+
 ### 12.32 CMake 4.x recusa pacote do Buildroot 2024.02 (só em build do zero)
 
 Buildroot 2024.02 é de fevereiro de 2024, e vários pacotes dela ainda declaram
@@ -1651,6 +1725,142 @@ Duas lições, e a segunda é a que vale:
 O teste que fecha isso não é sobre `#END`: é `round-trip` — a mesma descrição em
 texto e em NUL tem de produzir o mesmo painel, e `ended` tem de ser `true` nos
 quatro que fecham e `false` no único que não fecha.
+
+### 12.38 O menu do `extlinux` que não sai nunca — e o `not found` que engana
+
+Sintoma medido no R35S em 06/11/2026, o aparelho em `Enter choice:` para sempre:
+
+```text
+Giochi System
+1:	giochi
+Enter choice: 
+ not found
+Giochi System
+1:	giochi
+Enter choice: 
+ not found
+```
+
+Três coisas somadas produzem esse laço, e cada uma engana de um jeito:
+
+1. **`menu title` no `extlinux.conf` desliga o `timeout`.** A keyword `menu` faz
+   `cfg->prompt = 1` em `boot/pxe_utils.c` (`case T_MENU:`), e `common/menu.c`
+   documenta prompt=1 como "prompted for input REGARDLESS OF THE VALUE OF
+   TIMEOUT". Com `timeout 30` logo acima, o countdown simplesmente não vale.
+2. **Qualquer CR vira uma tentativa de escolha.** `menu_interactive_choice()`
+   chama `cli_readline_into_buffer("Enter choice: ", cbuf, m->timeout)`; com
+   linha vazia, `menu_item_by_key(m, "")` devolve `NULL` e ele imprime
+   `printf("%s not found\n", cbuf)` — daí o **espaço antes de `not found`**.
+   Esse espaço é a assinatura do defeito: não é nome de arquivo nem de label.
+3. **Depois de uma escolha inválida o menu deixa de expirar.** Duas linhas abaixo,
+   `if (!choice_item) m->timeout = 0;`. O timeout que já não valia agora é zero
+   explícito: o laço é definitivo.
+
+O ruído do adaptador serial injeta CRs sozinho, então o laço se auto-alimenta:
+cada byte repetido emite mais um `not found`.
+
+**O que ele custou:** eu estava perseguindo `mmc read ... 0 blocks read: ERROR` e
+`## Unknown partition table type 0`, que apareciam no mesmo log — e que eram
+**sintoma**, não causa. O `bootflow scan mmc0` já tinha encontrado
+`mmc@ff370000.bootdev.part_1` e lido o `extlinux.conf`. Li as mensagens de erro
+na ordem em que apareceram no arquivo em vez de na ordem em que aconteceram no
+boot.
+
+Regra: `prompt=1` e `timeout` são **mutuamente exclusivos** no U-Boot, e o
+`extlinux.conf` desta árvore não usa `menu title` por isso.
+`tests/rk3326-legacy-boot.test.mjs` prende a ausência.
+
+### 12.39 Driver fora da árvore que ninguém compila
+
+Medido no cartão gravado em 06/11/2026, olhando o rootfs **do cartão** (não o
+`target/`): 1285 `.ko` em `/lib/modules/6.12.0`, e **zero** `rocknix-*`.
+
+O DTS declara:
+
+```dts
+joypad: odroidgo3-joypad {
+        compatible = "rocknix-singleadc-joypad";
+```
+
+e o fonte estava versionado em `device/r35s/kernel-modules/rocknix-joypad/`
+desde a extração do aparelho. Faltava o elo: **nenhum script levava o `.c` para
+dentro da árvore do kernel**. O `Buildroot` só copia para lá o que vem em
+`BR2_LINUX_KERNEL_CUSTOM_DTS_PATH`, e isso vale apenas para DTS.
+
+A imagem que isso produz é da pior classe: boota, mostra o login do `getty`, e
+os 16 botões e os 4 eixos simplesmente não existem. O kernel **não reclama** de
+um `compatible` que ninguém atende — o nó fica órfão em silêncio. É o §12.15 na
+forma mais cara: não é um device node pela metade, são dezesseis botões que nunca
+aparecem.
+
+Correção em quatro peças, cada uma com teste:
+
+| Peça | Por quê |
+| --- | --- |
+| `scripts/gerar-patch-joypad.mjs` | gera o patch a partir do fonte; o `.c` continua sendo a fonte da verdade |
+| `device/r35s/patches/0002-…patch` | leva os arquivos e **liga** `Kconfig`/`Makefile` — arquivo na árvore sem gancho não compila |
+| `CONFIG_JOYSTICK_ODROIDGO3=y` | `=y` e não `=m`: módulo que depende do `S15modules` é gamepad que pode não existir no boot |
+| `kernel-required.txt` | se o patch parar de aplicar, o símbolo some e o build **falha** em vez de gerar imagem sem botão |
+
+#### O símbolo tem o nome do fornecedor, não um nome bonito
+
+O driver é o mesmo da ROCKNIX, e a config do kernel do aparelho
+(`device/r35s/extracted/kernel-config.gz`, md5 `93bf213f…`) tem:
+
+```text
+CONFIG_JOYSTICK_ODROIDGO2=y
+CONFIG_JOYSTICK_ODROIDGO3=y
+CONFIG_JOYSTICK_RGB20S=y
+CONFIG_JOYSTICK_XU10=y
+```
+
+`ODROIDGO3` é a variante de **um** canal de SARADC atrás de multiplexador — a do
+R35S, cujo nó no DTS do vendor se chama `odroidgo3-joypad`. Nomear diferente
+("`JOYSTICK_ROCKNIX_SINGLEADC`", que foi minha primeira tentativa) quebra a
+única regra que torna o fragmento verificável: **todo símbolo pedido tem de ter
+sido observado no aparelho**. O teste do vendor me acusou na hora —
+`símbolos inventados: JOYSTICK_ROCKNIX_SINGLEADC` — e estava certo. Nome feio com
+prova vale mais que nome bom com exceção.
+
+#### O `ifeq` do Makefile do fornecedor compila a variante errada
+
+```make
+ifeq ($(DEVICE),$(filter $(DEVICE), S922X RK3588))
+	obj-m := rocknix-joypad.o
+else ifeq ($(DEVICE),$(filter $(DEVICE), H700 RK3399))
+	obj-m := rocknix-singleadc-joypad.o
+```
+
+Dentro do kernel, `DEVICE` nunca está definido. `$(filter ,...)` também é vazio,
+então `ifeq (,)` é **verdadeiro** e a primeira variante ganha — sempre. O
+resultado seria módulo presente, `modprobe` sem erro, e nenhum botão: o modo de
+falha que este repositório existe para não ter. O patch substitui o `ifeq` por
+dois símbolos de Kconfig independentes.
+
+#### A regra que faltava no método
+
+O defeito só apareceu porque a verificação foi feita **no cartão**, montando o
+`rootfs.ext4` gravado, e não no `target/` do build. O `out/r35s/` tinha `Image`,
+DTB e `rootfs.ext4` íntegros; nada nele dizia "falta driver". Quem descobre isso
+é `find /lib/modules -name '*joypad*'` no sistema de arquivos que vai para o
+aparelho — a mesma lição do §12.27, aplicada ao conteúdo em vez da config.
+
+#### Integrar driver fora da árvore: três armadilhas em sequência
+
+Levar um `.c` de fora da árvore do kernel por patch tem um caminho de falha
+próprio, e as três primeiras tentativas falharam por motivos diferentes. Ficam
+registradas porque cada uma custou um build:
+
+| Sintoma | Causa | Regra |
+| --- | --- | --- |
+| `Hunk #1 FAILED at 31` | o patch foi gerado contra uma árvore que **já tinha** o patch, então o `a/` do diff continha as linhas que ele mesmo insere | gere sempre contra fonte limpa; o gerador tem guard que recusa árvore patcheada |
+| `No rule to make target '…/rocknix-singleadc-joypad.o'` | `obj-$(CONFIG_X) += foo.o` procura o `.o` em `drivers/input/joystick/`, mas ele nasce em `drivers/input/joystick/rocknix-joypad/` | o caminho do subdiretório é **obrigatório** na linha do Makefile: `+= rocknix-joypad/foo.o`, como `stmm/tee_stmm_efi.o` |
+| `modpost: "símbolo" undefined` | dois `.c` num mesmo diretório, cada um como módulo próprio, compartilhando símbolo | um variante por símbolo de Kconfig, nunca os dois juntos |
+
+A terceira já era conhecida do README do aparelho; as duas primeiras não. E
+nenhuma das três é detectável por `bash -n` nem por teste de metadados — só um
+`patch --dry-run` e um build de verdade pegam. Por isso o teste do patch faz o
+dry-run: custa 1 s e teria evitado dois builds.
 
 ## 13. Aparelhos
 

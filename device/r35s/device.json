@@ -29,6 +29,7 @@
   },
   "docs": "README.md",
   "kernelPatches": [
-    "patches/0001-giochi-system-r35s-dts-e-painel.patch"
+    "patches/0001-giochi-system-r35s-dts-e-painel.patch",
+    "patches/0002-giochi-joypad-singleadc.patch"
   ]
 }

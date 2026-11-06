@@ -17,7 +17,10 @@ import { createHash } from "node:crypto";
 import { test } from "node:test";
 
 const ROOT = new URL("..", import.meta.url).pathname;
-const PUBLICA = `${ROOT}device/common/rootfs-overlay/etc/giochi/loja-publica.pem`;
+const DIR_CHAVES = `${ROOT}device/common/rootfs-overlay/etc/giochi`;
+const PUBLICA = `${DIR_CHAVES}/loja-publica.pem`;
+const PUBLICA_LICENCA = `${DIR_CHAVES}/licenca-publica.pem`;
+const PONTOS = `${DIR_CHAVES}/pontos-de-montagem`;
 const FONTE_C = `${ROOT}device/common/verificador/verificador-ed25519.c`;
 const POST_BUILD = readFileSync(`${ROOT}scripts/post-build.sh`, "utf8");
 const SCRIPT_CHAVE = readFileSync(`${ROOT}scripts/chave-da-loja.sh`, "utf8");
@@ -57,7 +60,7 @@ test("NENHUMA chave privada no repositório", () => {
   assert.match(SCRIPT_CHAVE, /CHAVES=.*cache/);
   assert.match(SCRIPT_CHAVE, /chmod 600/);
   // Nunca sobrescrever: regerar invalidaria todo pacote já assinado.
-  assert.match(SCRIPT_CHAVE, /já existe chave privada/);
+  assert.match(SCRIPT_CHAVE, /já existe: \$nome/);
 });
 
 test("o fonte do verificador é o da equipe e está vendorizado", () => {
@@ -114,4 +117,85 @@ test("a chave versionada confere com o que o script espera", () => {
   // arquivo é estável e não muda por acidente de formatação.
   assert.equal(pem.toString("utf8").trim().split("\n").length, 3, "PEM Ed25519 tem 3 linhas");
   assert.ok(hash.length === 64);
+});
+
+// ── as DUAS chaves (pedido da equipe do app, 06/11/2026 10:20) ─────────────
+//
+// Antes era uma: `loja-publica.pem`. Agora são duas, porque são duas perguntas
+// diferentes — "este pacote veio da Giochi?" e "este aparelho pagou?". O ponto
+// de separar é justamente que copiar o pacote não basta.
+
+test("as duas chaves públicas existem, em /etc/giochi, e são Ed25519", () => {
+  for (const [nome, caminho] of [["loja", PUBLICA], ["licenca", PUBLICA_LICENCA]]) {
+    assert.ok(existsSync(caminho), `falta ${caminho}`);
+    const pem = readFileSync(caminho, "utf8");
+    assert.match(pem, /-----BEGIN PUBLIC KEY-----/, `${nome}: não é PEM`);
+    assert.match(pem, /MCowBQYDK2Vw/, `${nome}: não é Ed25519`);
+    assert.ok(
+      Buffer.byteLength(pem) < 300,
+      `${nome}: ${Buffer.byteLength(pem)} B — maior que esperado para Ed25519`,
+    );
+  }
+});
+
+test("as duas chaves são DIFERENTES — iguais seriam uma só", () => {
+  // Se a assinatura do pacote também provasse a compra, um arquivo copiado
+  // serviria em todo aparelho. Chaves iguais reproduzem exatamente esse defeito,
+  // e o sintoma apareceria só na loja, com pacote liberado de graça.
+  const a = readFileSync(PUBLICA, "utf8");
+  const b = readFileSync(PUBLICA_LICENCA, "utf8");
+  assert.notEqual(a, b, "loja e licença não podem compartilhar o mesmo par");
+});
+
+test("o script recusa gerar chave igual e sabe conferir as duas", () => {
+  assert.match(SCRIPT_CHAVE, /CHAVES_NOMES=\(loja licenca\)/, "registro das duas");
+  assert.match(SCRIPT_CHAVE, /IGUAIS na imagem/, "a checagem de igualdade tem de existir");
+  // --gerar aceita o nome; sem nome, cria todas as que faltam.
+  assert.match(SCRIPT_CHAVE, /cmd_gerar "?\$\{1:-\}"?/);
+});
+
+test("nenhuma privada da licença no repositório", () => {
+  // A privada da licença é a que emite a prova de compra: vazada, qualquer um
+  // emite licença para qualquer aparelho.
+  assert.ok(
+    !existsSync(`${DIR_CHAVES}/licenca-privada.pem`),
+    "a privada da licença não pode estar no overlay",
+  );
+  const script = readFileSync(`${ROOT}scripts/chave-da-loja.sh`, "utf8");
+  // As privadas vão para o cache do usuário, nunca para a árvore.
+  assert.match(script, /privada_de\(\)\s*\{\s*printf '%s\/%s-privada\.pem' "\$CHAVES"/);
+});
+
+// ── /etc/giochi/pontos-de-montagem ─────────────────────────────────────────
+
+test("pontos-de-montagem existe e é parseável como o app espera", () => {
+  // Contrato proposto pela equipe do app: um caminho absoluto por linha,
+  // '#' inicia comentário, linha em branco ignorada. Se este arquivo existir e
+  // o formato divergir, o app exclui o caminho errado e o jogo não aparece —
+  // sem mensagem, porque a lista de exclusão é silenciosa por natureza.
+  assert.ok(existsSync(PONTOS), `falta ${PONTOS}`);
+  const linhas = readFileSync(PONTOS, "utf8")
+    .split("\n")
+    .map((l) => l.replace(/#.*$/, "").trim())
+    .filter((l) => l.length > 0);
+  assert.ok(linhas.length >= 2, `só ${linhas.length} caminho(s)`);
+  for (const l of linhas) {
+    assert.match(l, /^\/[A-Za-z0-9._/-]*$/, `caminho inválido: ${JSON.stringify(l)}`);
+    assert.ok(!l.includes("//"), `barra dupla em ${l}`);
+    assert.ok(!l.endsWith("/"), `barra final em ${l}`);
+  }
+  // O comentário NÃO pode vazar para a lista — é o defeito do §12.37, em outro
+  // arquivo: marcador que começa com o caractere de comentário.
+  assert.deepEqual(linhas, ["/user", "/opt/giochi", "/media"]);
+});
+
+test("pontos-de-montagem inclui /media, e isso evita a duplicata", () => {
+  // A equipe do app explicou a diferença: SEM /media a partição de dados
+  // aparece como mídia removível e os jogos de /user aparecem duas vezes.
+  // A escolha é aparecer uma vez.
+  const txt = readFileSync(PONTOS, "utf8");
+  const linhas = txt.split("\n").map((l) => l.replace(/#.*$/, "").trim());
+  assert.ok(linhas.includes("/media"), "sem /media os jogos aparecem duplicados");
+  assert.ok(linhas.includes("/opt/giochi"), "programas do aparelho, não disco de jogos");
+  assert.ok(linhas.includes("/user"), "dados do usuário, incluindo jogos da loja");
 });

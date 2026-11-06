@@ -362,6 +362,33 @@ A correção é de uma linha e está no próprio fonte vendorizado, com o motivo
 escrito ao lado: o símbolo é só escrito e nunca lido, então defini-lo não muda
 comportamento.
 
+**3. Compilar não é o mesmo que estar na imagem.** Este foi o defeito que só
+apareceu olhando o cartão gravado, não o `target/` do build: em
+`/lib/modules/6.12.0` havia 1285 `.ko` e **nenhum** `rocknix-*`. O fonte estava
+vendorizado desde a extração, os dois módulos compilavam contra o 6.12, o DTS
+declarava `compatible = "rocknix-singleadc-joypad"` — e **nenhum script levava o
+`.c` para dentro da árvore do kernel**. O Buildroot só copia para lá o que vem
+em `BR2_LINUX_KERNEL_CUSTOM_DTS_PATH`, e isso vale apenas para DTS.
+
+O resultado seria: o aparelho boota, mostra o login, e os dezesseis botões e os
+quatro eixos não existem. O kernel **não reclama** de um `compatible` sem driver.
+
+A integração, agora com quatro peças e um teste para cada:
+
+| Peça | Papel |
+| --- | --- |
+| [`scripts/gerar-patch-joypad.mjs`](../../scripts/gerar-patch-joypad.mjs) | gera o patch a partir de `kernel-modules/`; o `.c` continua sendo a fonte da verdade |
+| [`patches/0002-giochi-joypad-singleadc.patch`](patches/0002-giochi-joypad-singleadc.patch) | leva os arquivos e **liga** `Kconfig`/`Makefile` — arquivo na árvore sem gancho não compila |
+| `CONFIG_JOYSTICK_ODROIDGO3=y` em [`linux.fragment`](linux.fragment) | `=y`, não `=m`: módulo que depende do `S15modules` é gamepad que pode não existir no boot |
+| `CONFIG_JOYSTICK_ODROIDGO3=y` em [`kernel-required.txt`](kernel-required.txt) | se o patch parar de aplicar, o símbolo some e o build **falha** |
+
+O símbolo tem o nome do fornecedor (`ODROIDGO3`) porque é o nome **medido** na
+config do aparelho (`extracted/kernel-config.gz`): `ODROIDGO3` é a variante de um
+canal de SARADC atrás de multiplexador — a nossa. O nó do DTS do vendor também se
+chama `odroidgo3-joypad`. Inventar `JOYSTICK_ROCKNIX_SINGLEADC` quebraria a regra
+de que todo símbolo pedido foi observado no hardware, e o teste do vendor acusou
+na hora.
+
 ### O painel: do overlay para o DTS
 
 O ROCKNIX aplica o painel por `.dtbo` em `FDTOVERLAYS` no extlinux. Nós **não

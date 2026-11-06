@@ -101,12 +101,42 @@ esac
 
 mkdir -p "$CACHE_HOST/work" "$CACHE_HOST/downloads" "$CACHE_HOST/ccache"
 
+# ## Onde montar o cache de build
+#
+# Por padrão em `/cache`, um caminho curto e estável — funciona e é o que os
+# builds desta árvore usaram até aqui.
+#
+# Mas o Buildroot grava o CAMINHO ABSOLUTO do `host/` no `RPATH` de cada binário
+# que produz, e o `support/scripts/check-host-rpath` falha o build quando o RPATH
+# não bate com o `host/lib` do momento. Consequência: um `work/` construído com
+# um layout não pode ser retomado com outro. Medido em 06/11/2026, ao tentar
+# retomar o `work/r35s` (construído com o caminho do host no RPATH):
+#
+#   *** ERROR: package host-cmake installs executables without proper RPATH:
+#   ***   /cache/work/r35s/build/host/sbin/sfdisk
+#   (... 238 binários, todos com RUNPATH /home/charles/...)
+#
+# Note que a mensagem acusa o pacote que acabou de instalar (`host-cmake`) e
+# lista binários de OUTROS pacotes — o culpado não é o pacote citado, é a
+# mistura de layouts.
+#
+# `GIOCHI_CONTAINER_SAME_PATHS=1` monta o cache no MESMO caminho absoluto do
+# host, o que torna container e build nativo intercambiáveis. Use quando o
+# `work/<device>` já existir e não se quiser pagar um build do zero (~1 h só de
+# toolchain).
+if [[ "${GIOCHI_CONTAINER_SAME_PATHS:-0}" =~ ^(1|true|yes|on)$ ]]; then
+  CACHE_IN_CONTAINER="$CACHE_HOST"
+  echo "cache:     $CACHE_HOST (mesmo caminho do host — GIOCHI_CONTAINER_SAME_PATHS)"
+else
+  CACHE_IN_CONTAINER=/cache
+fi
+
 # As variáveis chegam do ambiente do host e são repassadas explicitamente:
 # `docker run` não herda o ambiente da chamada.
 PASS_ENV=(
-  -e "GIOCHI_SYSTEM_WORK_DIR=/cache/work"
-  -e "GIOCHI_SYSTEM_CACHE_DIR=/cache"
-  -e "GIOCHI_SYSTEM_CCACHE_DIR=/cache/ccache"
+  -e "GIOCHI_SYSTEM_WORK_DIR=$CACHE_IN_CONTAINER/work"
+  -e "GIOCHI_SYSTEM_CACHE_DIR=$CACHE_IN_CONTAINER"
+  -e "GIOCHI_SYSTEM_CCACHE_DIR=$CACHE_IN_CONTAINER/ccache"
 )
 for name in BUILDROOT_VERSION ROOT_PASSWORD JOBS ALLOW_DRAFT \
   GIOCHI_SYSTEM_MIN_FREE_GB GIOCHI_SYSTEM_ABORT_FREE_GIB \
@@ -128,7 +158,7 @@ run_container() {
     ${RUN_EXTRA[@]+"${RUN_EXTRA[@]}"} \
     --user "${RUN_USER:-$(id -u):$(id -g)}" \
     -v "$ROOT:/work" \
-    -v "$CACHE_HOST:/cache" \
+    -v "$CACHE_HOST:$CACHE_IN_CONTAINER" \
     -w /work \
     "${PASS_ENV[@]}" \
     "$IMAGE_TAG" \

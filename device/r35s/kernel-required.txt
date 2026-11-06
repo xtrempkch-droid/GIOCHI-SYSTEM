@@ -36,6 +36,12 @@ CONFIG_INPUT_EVDEV=y
 CONFIG_JOYSTICK_ADC=y
 CONFIG_ROCKCHIP_SARADC=y
 
+# O driver que de fato atende o nó `rocknix-singleadc-joypad` do DTS. Não é do
+# mainline: vem do patch `0002-giochi-joypad-singleadc.patch`. Se o patch parar
+# de aplicar, este símbolo some — e o `assert-kernel-config` falha o build em vez
+# de entregar uma imagem sem botão nenhum.
+CONFIG_JOYSTICK_ODROIDGO3=y
+
 # USB: canal de shell (RNDIS) e a única porta para dongle de rádio.
 CONFIG_USB_GADGET=y
 CONFIG_USB_CONFIGFS=y

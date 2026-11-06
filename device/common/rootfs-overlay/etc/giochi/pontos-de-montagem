@@ -1,0 +1,36 @@
+# /etc/giochi/pontos-de-montagem
+#
+# Contrato com o Giochi app (equipe do app, 06/11/2026 10:20).
+#
+# Um caminho ABSOLUTO por linha. Linha em branco e '#' sao ignorados. O app usa
+# esta lista para saber quais pontos de montagem sao NOSSOS, e portanto nao
+# devem ser confundidos com "o disco do Giochi".
+#
+# Se este arquivo nao existir, o app cai na inferencia antiga (excluir o disco
+# que sustenta `/`) e DIZ que inferiu. Ou seja: o arquivo e aditivo, e uma
+# imagem antiga sem ele continua funcionando.
+#
+# ## Por que cada linha esta aqui
+#
+# /opt/giochi   programas do aparelho (launcher em /opt/giochi/apps/launcher/bin
+#               e o verificador em /opt/giochi/apps/bin). Fica no rootfs, e o
+#               disco do rootfs NUNCA e o disco de jogos.
+#
+# /user         dados do usuario, incluindo jogos instalados pela loja. Particao
+#               separada, proposta com piso de 4 GiB + o resto do cartao. AINDA
+#               NAO IMPLEMENTADA — declarada aqui para que a lista nao precise
+#               mudar quando ela entrar. Caminho que nao existe e inofensivo
+#               numa lista de exclusao; caminho que falta e jogo invisivel.
+#
+# /media        convencao acordada para o cartao de dados: `/media/<LABEL>`, pelo
+#               rotulo do filesystem. O numero do dispositivo NAO serve: o R35S
+#               tem dois controladores SD e o numero depende da ordem de probe,
+#               entao `mmcblk0` num boot pode ser o cartao do sistema e no boot
+#               seguinte o de jogos (medido no DTB, ver device/r35s/README.md).
+#
+#               Esta linha e a que evita a duplicata: SEM ela a particao de dados
+#               aparece como midia removivel e os jogos de /user aparecem duas
+#               vezes na lista.
+/user
+/opt/giochi
+/media

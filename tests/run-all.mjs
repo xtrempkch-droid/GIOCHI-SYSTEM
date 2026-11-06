@@ -36,4 +36,5 @@ import "./gpu-drivers.test.mjs";
 import "./device-r35s-port.test.mjs";
 import "./build-device-vars.test.mjs";
 import "./rk3326-legacy-boot.test.mjs";
+import "./joypad-driver.test.mjs";
 import "./chave-da-loja.test.mjs";

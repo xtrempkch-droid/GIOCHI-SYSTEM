@@ -67,6 +67,22 @@ CONFIG_KEYBOARD_GPIO=y
 CONFIG_IIO=y
 CONFIG_ROCKCHIP_SARADC=y
 
+# ── joypad fora da árvore ───────────────────────────────────
+# O R35S lê os 16 botões e os 4 eixos por UM canal do SARADC, atrás de um
+# multiplexador analógico. O `adc-joystick` do mainline exige um canal por eixo
+# e não atende; quem atende é o `rocknix-singleadc-joypad`, trazido para dentro
+# da árvore pelo patch `patches/0002-giochi-joypad-singleadc.patch`.
+#
+# `=y` e não `=m` de propósito: o `S15modules` só carrega o que está em
+# `/etc/modules`, e um driver de gamepad que depende disso é um gamepad que
+# pode não existir no boot. Medido na X55: módulo presente, nada carregado,
+# botões mortos e build verde (§3 daquele bring-up).
+#
+# Sem este símbolo o DTS declara `compatible = "rocknix-singleadc-joypad"` e
+# nenhum driver responde — o aparelho boota, mostra o login e não tem botão
+# nenhum, sem uma linha de erro (é o §12.15 na forma mais cara).
+CONFIG_JOYSTICK_ODROIDGO3=y
+
 # ── áudio ───────────────────────────────────────────────────
 # Medido no aparelho: card `rk817_int`, codec no PMIC RK817.
 # `SIMPLE_AMPLIFIER` fica `=m` como no vendor; se o card depender dele em
