@@ -539,6 +539,84 @@ não diz qual peça faltou. O `make-sd-image.sh` passou a **preferir**
 usa nesta placa, mas o U-Boot é o nosso (2024.10) e não o deles (2025.10 com
 patches; o `rk3326-handheld_defconfig` deles **não existe no upstream**).
 
+## O boot principal: U-Boot carrega e morre no ADC do Odroid-Go
+
+**Medido no aparelho em 06/11/2026**, depois de corrigir o baud do console. O
+U-Boot sobe **inteiro**:
+
+```text
+DDR3, 333MHz
+BW=32 Col=10 Bk=8 CS0 Row=15 CS=1 Die BW=16 Size=1024MB
+U-Boot SPL 2024.10 (Nov 06 2026 - 08:27:25 -0300)
+Trying to boot from MMC1
+...
+U-Boot 2024.10
+
+Model: ODROID-GO Advance
+DRAM:  1 GiB (effective 1022 MiB)
+PMIC:  RK817 (on=0x80, off=0x04)
+Core:  276 devices, 23 uclasses, devicetree: separate
+MMC:   mmc@ff370000: 0
+In:    serial@ff160000
+Out:   serial@ff160000
+Err:   serial@ff160000
+Model: ODROID-GO Advance
+Unable to detect device type: -6
+initcall failed at call 0000000000203c24 (err=-6: No such device or address)
+### ERROR ### Please RESET the board ###
+```
+
+Ou seja: **DDR 333 MHz, 1 GiB, PMIC RK817, MMC e console funcionam**. O loader
+não está quebrado. Ele para na última etapa.
+
+### A causa: o U-Boot acha que esta placa é um Odroid-Go
+
+`board/hardkernel/odroid_go2/go2.c` define um `rk_board_late_init` que lê o
+**canal 0 do SARADC** e compara com uma tabela de resistores das placas
+Hardkernel, com tolerância de ±50:
+
+```c
+ret = adc_channel_single_shot("saradc@ff288000", 0, &adc_info);
+...
+for (i = 0; i < ARRAY_SIZE(oga_model_details); i++) {
+    u32 adc_min = oga_model_details[i].adc_value - 50;
+    u32 adc_max = oga_model_details[i].adc_value + 50;
+    if (adc_min < adc_info && adc_max > adc_info) { board_id = i; break; }
+}
+if (board_id < 0) return board_id;          /* → -6 */
+```
+
+O R35S não tem esse resistor. O ADC devolve valor fora da tabela, e
+`rk_board_late_init` **aborta o boot**:
+
+```text
+### ERROR ### Please RESET the board ###
+```
+
+Tela preta, LED aceso, aparelho parado. Não há próxima etapa — o U-Boot desiste.
+
+### O conserto
+
+[`uboot-patches/0001-giochi-odroid-go2-adc-nao-fatal.patch`](uboot-patches/)
+transforma a falha em **aviso**: se o aparelho for um Odroid-Go de verdade, o
+`board`/`fdtfile` são definidos como antes; se não for, seguimos com o device
+tree que veio no FIT. O DTB já foi escolhido na compilação, então não há como
+confundir as duas placas.
+
+Aplicado por `BR2_TARGET_UBOOT_PATCH` no defconfig, com staging (o caminho do
+aparelho pode ter espaço) e **verificado** no binário:
+
+```bash
+strings out/r35s/u-boot-rockchip.bin | grep -c 'seguindo com o device tree'   # 1
+strings out/r35s/u-boot-rockchip.bin | grep -c 'Unable to detect device type' # 0
+```
+
+> **Armadilha que custou um rebuild:** com `KEEP_WORK=1`, o pacote `uboot` já
+> construído tem `.stamp_patched` e o Buildroot **pula a fase de patch
+> inteira** (§12.11). O build ficou verde e o binário continuou com a mensagem
+> antiga — conferir no `strings` foi o que revelou. Para patch novo de U-Boot:
+> `rm -rf work/<device>/build/build/uboot-*`.
+
 ## Estado
 
 **Confirmado no aparelho (06/11/2026):**

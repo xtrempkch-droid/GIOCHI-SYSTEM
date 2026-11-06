@@ -9,7 +9,7 @@
 // A ROCKNIX usa o caminho legacy nesta placa há anos. Este teste prende a
 // receita, para que o script não derive em silêncio.
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 
 const ROOT = new URL("..", import.meta.url).pathname;
@@ -157,4 +157,39 @@ test("a verificação do cartão tenta duas vezes antes de acusar hardware", () 
     !/Cartão defeituoso/.test(primeiraMsg),
     "não acusar cartão antes de tentar de novo",
   );
+});
+
+test("o patch do ADC do Odroid-Go existe e torna a falha NAO-FATAL", () => {
+  // Medido no R35S: o U-Boot carrega inteiro (DDR 333MHz, 1 GiB, PMIC RK817,
+  // MMC, console em serial@ff160000) e morre em `rk_board_late_init` porque o
+  // ADC do canal 0 não casa com a tabela de resistores Hardkernel:
+  //
+  //   Unable to detect device type: -6
+  //   initcall failed at call ... (err=-6: No such device or address)
+  //   ### ERROR ### Please RESET the board ###
+  //
+  // Tela preta, LED aceso. O caminho é esse `return ret` matando o boot.
+  const dir = `${ROOT}device/r35s/uboot-patches`;
+  assert.ok(existsSync(dir), "falta a pasta de patches de U-Boot");
+  const files = readdirSync(dir).filter((f) => f.endsWith(".patch"));
+  assert.ok(files.length >= 1, "nenhum patch de U-Boot");
+
+  const patch = readFileSync(`${dir}/${files[0]}`, "utf8");
+  assert.match(patch, /board\/hardkernel\/odroid_go2\/go2\.c/);
+  // O que muda: `return ret` (aborta) vira `return 0` (segue).
+  assert.match(patch, /^-.*return ret;/m, "o patch tem de remover o return que aborta");
+  assert.match(patch, /^\+.*return 0;/m, "e devolver 0");
+});
+
+test("o build aplica os patches de U-Boot, com staging e sem silêncio", () => {
+  const build = readFileSync(`${ROOT}scripts/build-device.sh`, "utf8");
+  assert.match(build, /__UBOOT_PATCH_DIR__/);
+  assert.match(build, /uboot-patches/);
+  const trecho = build.slice(build.indexOf("__UBOOT_PATCH_DIR__"));
+  assert.match(trecho.slice(0, 900), /exit 1/, "pasta ausente tem de ser erro");
+});
+
+test("o defconfig pede os patches de U-Boot", () => {
+  const defconfig = readFileSync(`${ROOT}device/r35s/defconfig`, "utf8");
+  assert.match(defconfig, /^BR2_TARGET_UBOOT_PATCH="__UBOOT_PATCH_DIR__"$/m);
 });

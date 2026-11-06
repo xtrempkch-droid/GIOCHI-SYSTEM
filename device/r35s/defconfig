@@ -87,6 +87,20 @@ BR2_TARGET_UBOOT_NEEDS_ROCKCHIP_RKBIN=y
 # (staging), como faz com os fragmentos de kernel e busybox.
 # Sem ponto-e-vírgula no fim do arquivo, o Buildroot acrescenta a linha.
 BR2_TARGET_UBOOT_CONFIG_FRAGMENT_FILES="__UBOOT_FRAGMENT__"
+# Patch que torna NAO-FATAL a deteccao de modelo por ADC do Odroid-Go.
+#
+# Medido no R35S (06/11/2026): o U-Boot carregava inteiro — DDR 333MHz, 1 GiB,
+# PMIC RK817, MMC, console em serial@ff160000 — e morria em `rk_board_late_init`
+# porque o ADC do canal 0 nao casa com a tabela de resistores das placas
+# Hardkernel:
+#
+#   Unable to detect device type: -6
+#   initcall failed at call 0000000000203c24 (err=-6: No such device or address)
+#   ### ERROR ### Please RESET the board ###
+#
+# Tela preta, LED aceso, aparelho parado. O caminho e' absoluto no staging,
+# porque o Buildroot le, e a pasta do aparelho pode ter espaco (§12.6).
+BR2_TARGET_UBOOT_PATCH="__UBOOT_PATCH_DIR__"
 # O BootROM do RK3326 lê do setor 64 — mesmo offset do RK3566. O
 # `u-boot-rockchip.bin` já vem com idbloader + u-boot.itb concatenados, que é o
 # layout que o BootROM espera a partir do setor 64.

@@ -313,6 +313,21 @@ if [[ -f "$DEVICE_DEFCONFIG" ]]; then
     sed -i "s#__UBOOT_FRAGMENT__#$WORK_DIR/uboot.fragment#" "$BR2_DIR/configs/$DEFCONFIG"
     echo "  uboot:     fragmento aplicado ($(grep -c '^CONFIG_' "$WORK_DIR/uboot.fragment") símbolos)"
   fi
+
+  # Patches de U-Boot: mesmo problema de caminho com espaço, e o Buildroot
+  # aceita DIRETÓRIO (aplica todo *.patch em ordem).
+  if grep -q '__UBOOT_PATCH_DIR__' "$BR2_DIR/configs/$DEFCONFIG"; then
+    UBOOT_PATCH_SRC="$DEVICE_DIR/uboot-patches"
+    if [[ ! -d "$UBOOT_PATCH_SRC" ]]; then
+      echo "ERRO: o defconfig pede patches de U-Boot, mas não existe:" >&2
+      echo "      $UBOOT_PATCH_SRC" >&2
+      exit 1
+    fi
+    rm -rf "$WORK_DIR/uboot-patches"
+    cp -a "$UBOOT_PATCH_SRC" "$WORK_DIR/uboot-patches"
+    sed -i "s#__UBOOT_PATCH_DIR__#$WORK_DIR/uboot-patches#" "$BR2_DIR/configs/$DEFCONFIG"
+    echo "  uboot:     $(find "$WORK_DIR/uboot-patches" -name '*.patch' | wc -l) patch(es) de U-Boot"
+  fi
 fi
 if ! make -C "$BR2_DIR" O="$BUILD_DIR" "$DEFCONFIG" >"$WORK_DIR/defconfig.log" 2>&1; then
   tail -n 120 "$WORK_DIR/defconfig.log" >&2

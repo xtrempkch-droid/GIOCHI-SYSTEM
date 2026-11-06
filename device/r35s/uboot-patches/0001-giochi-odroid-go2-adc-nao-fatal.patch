@@ -1,0 +1,37 @@
+diff -ruN a/board/hardkernel/odroid_go2/go2.c b/board/hardkernel/odroid_go2/go2.c
+--- a/board/hardkernel/odroid_go2/go2.c	2026-11-06 08:43:12.632384392 -0300
++++ b/board/hardkernel/odroid_go2/go2.c	2026-11-06 08:43:20.931962133 -0300
+@@ -97,10 +97,31 @@
+ {
+ 	int ret;
+ 
++	/*
++	 * Giochi System: a deteccao por ADC e' do Odroid-Go (resistor no canal 0
++	 * do SARADC identifica o modelo Hardkernel). Placas que apenas reaproveitam
++	 * o alvo `odroid-go2` do U-Boot NAO tem esse resistor, e o ADC devolve um
++	 * valor fora da tabela.
++	 *
++	 * Antes, qualquer valor fora da tabela abortava o boot:
++	 *
++	 *   Unable to detect device type: -6
++	 *   initcall failed at call ... (err=-6: No such device or address)
++	 *   ### ERROR ### Please RESET the board ###
++	 *
++	 * Medido no Powkiddy R35S: o U-Boot carregava inteiro (DRAM, PMIC, MMC,
++	 * console) e morria aqui, com tela preta e o aparelho parado.
++	 *
++	 * Agora a falha e' AVISO: se o aparelho for um Odroid-Go de verdade, o
++	 * `board`/`fdtfile` sao definidos como antes; se nao for, seguimos com o
++	 * device tree que veio no FIT. Nao ha como confundir as duas placas — o DTB
++	 * e' escolhido antes, na compilacao.
++	 */
+ 	ret = oga_detect_device();
+ 	if (ret) {
+-		printf("Unable to detect device type: %d\n", ret);
+-		return ret;
++		printf("ADC de modelo fora da tabela do Odroid-Go (%d);", ret);
++		printf(" seguindo com o device tree do FIT\n");
++		return 0;
+ 	}
+ 
+ 	return 0;
