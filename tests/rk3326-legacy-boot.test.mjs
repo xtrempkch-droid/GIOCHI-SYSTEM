@@ -79,6 +79,24 @@ test("o gerador de imagem prefere o legacy ao mainline", () => {
   assert.ok(legacy < rockchip, "legacy tem de ser testado ANTES do mainline");
 });
 
+test("o caminho de saída é resolvido para ABSOLUTO antes do cd", () => {
+  // Bug medido em 06/11/2026, e o sintoma foi o pior tipo: `cp` reportava
+  // sucesso, o script imprimia "-> arquivo (16777216 bytes)", e o arquivo não
+  // existia.
+  //
+  // Causa: o script faz `cd "$TMP"` para trabalhar, e um OUT relativo passava a
+  // apontar para dentro do TMP — que o `trap 'rm -rf "$TMP"' EXIT` apaga no fim.
+  // Com caminho absoluto funcionava; relativo evaporava.
+  assert.match(source, /case "\$OUT" in/);
+  assert.match(source, /OUT="\$\(pwd\)\/\$OUT"/);
+  // E a resolução tem de vir ANTES do mktemp/trap.
+  const resolve = source.indexOf('OUT="$(pwd)/$OUT"');
+  const tmp = source.indexOf("TMP=\"$(mktemp -d)\"");
+  assert.ok(resolve > 0, "falta a resolução para absoluto");
+  assert.ok(tmp > 0, "falta o mktemp");
+  assert.ok(resolve < tmp, "resolver depois do mktemp não protege do cd+trap");
+});
+
 test("o legacy está declarado nos artefatos do aparelho", () => {
   assert.ok(
     device.artifacts.includes("u-boot-legacy.bin"),

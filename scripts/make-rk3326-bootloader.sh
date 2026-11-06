@@ -94,6 +94,14 @@ for tool in "$MKIMAGE" "$LOADERIMAGE" "$TRUST_MERGER"; do
 done
 
 OUT="${OUT:-$WORK/u-boot-legacy.bin}"
+# Resolver para ABSOLUTO antes de qualquer `cd`. O script entra em `$TMP` para
+# trabalhar, e um caminho relativo passaria a apontar para dentro dele — onde o
+# `trap` apaga no fim. O sintoma era o pior tipo: o `cp` reportava sucesso, o
+# "-> arquivo (16777216 bytes)" aparecia, e o arquivo não existia.
+case "$OUT" in
+  /*) ;;
+  *) OUT="$(pwd)/$OUT" ;;
+esac
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
