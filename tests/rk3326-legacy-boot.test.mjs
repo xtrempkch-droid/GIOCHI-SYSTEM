@@ -219,6 +219,28 @@ test("o extlinux.conf NÃO pode ter `menu title`", () => {
   assert.match(conteudo, /^default \w+$/m, "e o default também");
 });
 
+test("o boot.scr NÃO crava o número do controlador SD", () => {
+  // No R35S o cartão enumera como mmc 0 (um dos dois controladores SD do PX30
+  // fica vazio). Um `load mmc 1:1` ali falha, e um `load` que falha dentro de
+  // um boot.scr não imprime nada de útil — o sintoma é "o script não faz nada".
+  //
+  // O número não é dedutível do build: depende da ordem de probe dos dois
+  // controladores, que vem do DTS. Então o script tem de tentar os dois.
+  const script = readFileSync(`${ROOT}scripts/make-sd-image.sh`, "utf8");
+  const bloco = script.slice(script.indexOf('cat >"$WORK/boot.cmd"'));
+  const conteudo = bloco.slice(0, bloco.indexOf("\nEOF\n"));
+  assert.ok(
+    !/\bload mmc [01]:1\b/.test(conteudo),
+    "`load mmc <N>:1` com N fixo quebra no aparelho cujo cartão é outro controlador",
+  );
+  assert.match(
+    conteudo,
+    /for dev in 0 1/,
+    "o boot.scr tem de tentar os dois controladores SD",
+  );
+  assert.match(conteudo, /\$\{dev\}:1/, "e usar a variável do laço no load");
+});
+
 test("o bootcmd fixa mmc0 — o scan genérico não acha o cartão", () => {
   // boot_targets padrão = "mmc1 mmc0 nvme scsi usb pxe dhcp spi". O cartão é o
   // mmc0, então `bootflow scan` começa por um device que não existe e desiste

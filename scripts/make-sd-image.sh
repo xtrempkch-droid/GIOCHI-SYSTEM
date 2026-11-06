@@ -229,13 +229,17 @@ fi
 if ((LOOP_MODE)); then
   LOOP="$BOOT_LOOP"
   echo "  loop:    $BOOT_LOOP (p1) / $ROOT_LOOP (p2)"
-  mkfs.vfat -n GIOCHI_BOOT "$BOOT_LOOP" >/dev/null
+  # -F 32 explícito: sem ele o mkfs escolhe pelo tamanho e 256 MiB dá FAT16,
+  # enquanto a MBR diz type=c (FAT32 LBA). O U-Boot lê o BPB e funciona, mas
+  # qualquer ferramenta que confie no byte de tipo vê um filesystem diferente
+  # do anunciado. Coerência custa uma flag.
+  mkfs.vfat -F 32 -n GIOCHI_BOOT "$BOOT_LOOP" >/dev/null
   mkfs.ext4 -q -L GIOCHI -F "$ROOT_LOOP"
 else
   # FAT de trabalho, do tamanho exato da partição, dentro de $WORK.
   BOOT_IMAGE="$WORK/boot.fat"
   truncate -s "${BOOT_PART_MIB}M" "$BOOT_IMAGE"
-  mkfs.vfat -n GIOCHI_BOOT "$BOOT_IMAGE" >/dev/null
+  mkfs.vfat -F 32 -n GIOCHI_BOOT "$BOOT_IMAGE" >/dev/null
 fi
 
 # PARTUUID do MBR segue o formato <id-do-disco>-<numero>. O id é fixado no
@@ -340,11 +344,23 @@ EOF
 # boot.scr é para o U-Boot cujo bootcmd procura script: é o caso do U-Boot que
 # está no aparelho hoje, que reclama "nenhum boot.scr legivel" e para no prompt.
 # O extlinux.conf atende o U-Boot mainline com distro boot. Os dois convivem.
+#
+# NÃO crave o número do controlador SD aqui. Com um aparelho só, `mmc 1:1` era
+# inofensivo; no R35S o cartão enumera como **mmc 0** (um dos dois controladores
+# SD do PX30 fica sem cartão), e o script morria em `load` sem dizer por quê —
+# e um `load` que falha dentro de um `boot.scr` NÃO imprime nada de útil. A
+# ordem de probe dos dois controladores depende do DTS, então o número não é
+# dedutível do build: o script tenta os dois e usa o que responder.
 cat >"$WORK/boot.cmd" <<EOF
 setenv bootargs $KERNEL_CMDLINE
-load mmc 1:1 \${kernel_addr_r} /Image
-load mmc 1:1 \${fdt_addr_r} /dtbs/$DTB_NAME.dtb
-booti \${kernel_addr_r} - \${fdt_addr_r}
+for dev in 0 1; do
+  if load mmc \${dev}:1 \${kernel_addr_r} /Image; then
+    load mmc \${dev}:1 \${fdt_addr_r} /dtbs/$DTB_NAME.dtb
+    echo "giochi: bootando de mmc \${dev}:1"
+    booti \${kernel_addr_r} - \${fdt_addr_r}
+  fi
+done
+echo "giochi: nenhuma particao de boot legivel em mmc 0/1"
 EOF
 mkimage -C none -A arm64 -T script -d "$WORK/boot.cmd" "$WORK/boot.scr" >/dev/null
 if ((LOOP_MODE)); then
