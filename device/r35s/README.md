@@ -431,6 +431,15 @@ Estrutura verificada byte a byte:
 cmdline: root=PARTUUID=47494f43-02 rootwait rw rootfstype=ext4 console=ttyS2,1500000n8
 ```
 
+**Gravada no cartão** do aparelho em 06/11/2026 (116 GiB, `Multi-Reader`), 39,8 MB/s,
+com releitura e SHA256 conferido pelo `flash-sd.sh`. Verificado no cartão depois:
+`FAT1` na p1 com `IMAGE`, `DTBS`, `EXTLINUX`, `BOOT.SCR`; `53ef` na p2;
+`console=ttyS2,1500000n8` e `rk3326-gameconsole-r36s-giochi.dtb` presentes.
+
+> O cartão tem 116 GiB e a imagem usa **2 GiB** — os ~114 GiB restantes ficam
+> **sem partição**. É a pendência do "piso + resto do cartão" (AGENTS §18), não
+> um defeito da gravação. O aparelho boota assim; o espaço só não é aproveitado.
+
 Do build: `assert-config: OK — 20 símbolos`, `assert-kernel-config: OK — 68
 símbolos`.
 
