@@ -154,6 +154,7 @@ falta para texto fora do Godot. Vale confirmar contra o `forge.json` do app
 | mapa de botões | `/etc/giochi/buttons.map` (por aparelho) |
 | ferramenta de teste de controle | `giochi-buttons` |
 | log do boot | `giochi-boot.log` na partição FAT (aparelhos com marcador) |
+| estado do mixer do aparelho | `/etc/giochi/asound.state` (só onde o roteamento exige) |
 
 Caminho combinado para o binário (usado pelo `giochi-init` e pelo `post-build`):
 
@@ -179,6 +180,72 @@ Sem launcher o custo é zero: o `giochi-init` espera em intervalos de
 
 Regra que fica: **não condicione o artefato entregue à presença de algo que o
 cliente da imagem é quem instala.**
+
+## O que muda para o launcher: `GL_RENDERER`, e por quê
+
+Medido no R35S em 06/11/2026 (detalhe em `AGENTS.md` §12.51). A imagem que
+estava no aparelho saía com `CONFIG_DRM_PANFROST=m`, e o rootfs do Buildroot não
+tem `/etc/modules` nem `modules-load` — ninguém carregava o driver. Resultado:
+**sem render node**, e a Mesa caía no `swrast`.
+
+O que torna isso perigoso do lado do app é que **a resposta não muda**:
+
+```text
+com panfrost:  GL_RENDERER = Mali-G31 (Panfrost)   GL_VERSION = OpenGL ES 3.1 Mesa 24.0.0
+sem panfrost:  GL_RENDERER = softpipe              GL_VERSION = OpenGL ES 3.1 Mesa 24.0.0
+```
+
+Mesma `GL_VERSION`, mesmo "GLES respondeu", e o mesmo `kmscube` rodando. A
+diferença é só o campo que ninguém lê. Um launcher que valida "tem GLES 3.1?"
+declara o aparelho pronto e entrega 15 fps na CPU de 1 GB.
+
+**Contrato para o launcher:**
+
+1. **Não conclua nada de `GL_VERSION`.** Leia `glGetString(GL_RENDERER)` e
+   registre no log (e no `--dump-frame`, e no diagnóstico).
+2. Trate `softpipe` / `llvmpipe` como **degradação**, não como sucesso: avise na
+   tela ou no log, com o texto do renderer.
+3. Não bloqueie por isso — o jogo roda, só mal. Quem conserta é a imagem
+   (`CONFIG_DRM_PANFROST=y`), não o app.
+
+Detecção em uma linha, para o diagnóstico:
+
+```sh
+ls /dev/dri/renderD128 || echo "sem render node — 3D na CPU"
+```
+
+### Estado por imagem
+
+| Imagem | GPU | O que o launcher vai ver |
+| --- | --- | --- |
+| `779fc64` (no cartão, estado anterior) | panfrost `=m`, sem autoload | `softpipe` |
+| `dc030b0` (gerada em 06/11, `out/r35s/`) | panfrost `=y` | `Mali-G31 (Panfrost)` |
+
+Se o renderer disser `softpipe` num aparelho com a imagem nova, o problema não é
+configuração — é outro, e vale abrir com a gente.
+
+## Áudio: o `Playback Mux` agora é por aparelho
+
+O controle `Playback Mux` do RK817 (`HP` | `SPK`) é virtual: nenhum registrador
+guarda o valor e o driver não lê nada do device tree — quem escolhe é userspace,
+e o default é `HP`.
+
+No **R35S** isso está errado: o DTS roteia `Speaker -> SPKO`, e em `HP` só
+HPOL/HPOR recebem o DAC, então o falante fica mudo. Corrigido com
+`/etc/giochi/asound.state` por aparelho + `/etc/init.d/S51mixer`, que restaura o
+estado **se o aparelho declarar um** (X55 e X35H não declaram e ficam no default,
+que é o certo neles).
+
+Para o launcher e o app:
+
+1. **Não assuma `HP`.** Se for mexer no mixer, leia o valor atual e restaure o
+   que estava, em vez de escrever uma constante.
+2. **Não sobrescreva `/etc/giochi/asound.state`** com um estado salvo do aparelho
+   de vocês: o arquivo é declarativo, vem da imagem, e é por aparelho.
+3. O volume (`Master Playback Volume`, 0–255) é livre para vocês — o
+   `asound.state` traz 255/255, e o `S51mixer` só roda no boot.
+
+Referência do roteamento de cada placa: `device/<aparelho>/README.md`.
 
 ## Coisas que vão morder, em ordem de probabilidade
 
