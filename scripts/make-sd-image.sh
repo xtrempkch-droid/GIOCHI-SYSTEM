@@ -321,9 +321,14 @@ write_file() {
   fi
 }
 
+# ATENÇÃO: NÃO coloque a linha `menu title`. Ela não é cosmética: no
+# `boot/pxe_utils.c` do U-Boot, a keyword `menu` faz `cfg->prompt = 1`, e o
+# `common/menu.c` documenta que prompt=1 "will be prompted for input REGARDLESS
+# OF THE VALUE OF TIMEOUT". Medido no R35S em 06/11/2026: o menu aparecia e
+# ficava em "Enter choice:" para sempre, com o `timeout 30` ali ao lado sem
+# efeito nenhum. Com prompt=0 o countdown vale e ele boota sozinho.
 write_file "extlinux/extlinux.conf" <<EOF
 default giochi
-menu title Giochi System
 timeout 30
 
 label giochi

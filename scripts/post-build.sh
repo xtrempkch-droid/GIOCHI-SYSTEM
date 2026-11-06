@@ -45,9 +45,69 @@
 set -eu
 
 TARGET_DIR="${TARGET_DIR:-${1:-}}"
+# O .c do verificador mora ao lado deste script: device/common/verificador/.
+POST_BUILD_DIR="$(cd "$(dirname "$0")/.." && pwd)/device/common"
 if [ -z "$TARGET_DIR" ]; then
     echo "post-build: TARGET_DIR não definido" >&2
     exit 1
+fi
+
+# ── verificador de assinatura da loja ───────────────────────
+#
+# O instalador do `Giochi app` procura este binário em
+# /opt/giochi/apps/bin/verificador-ed25519. Sem ele, o instalador AVISA que não
+# verificou a assinatura e segue — o pacote entra sem prova de origem.
+#
+# Compilado aqui, com a toolchain do próprio build, e não versionado como
+# binário: assim o `libcrypto` que ele pede é o que está nesta imagem, e não o de
+# uma máquina que compilou meses antes. Fonte em device/common/verificador/,
+# cedido pela equipe do app (única peça em C do repo deles).
+VERIFICADOR_SRC="$POST_BUILD_DIR/verificador/verificador-ed25519.c"
+if [ -f "$VERIFICADOR_SRC" ]; then
+    # ARMADILHA MEDIDA: o Buildroot NÃO exporta HOST_DIR, STAGING_DIR nem
+    # TARGET_CROSS para post-build. O `EXTRA_ENV` dele (package/Makefile.in:342)
+    # tem só PATH, BR2_DL_DIR, BUILD_DIR, CONFIG_DIR e O. Eu tinha escrito a
+    # busca por TARGET_CROSS e o script avisou "toolchain ausente
+    # (…/host/bin/gcc)" a cada build — o aviso funcionou, a variável é que nunca
+    # existiu.
+    #
+    # O que existe é `BUILD_DIR` (e `$O`, o mesmo valor). A árvore é
+    #   <build>/target   <build>/host   <build>/host/<triple>/sysroot
+    # então dá para derivar tudo daí. O triple é descoberto pelo nome do gcc, em
+    # vez de adivinhar a arquitetura.
+    # `O` é o diretório de saída do Buildroot (…/build), e é a variável certa:
+    # HOST_DIR = $O/host. `BUILD_DIR` é $O/build, um nível fundo demais — usar
+    # ele dava "…/build/build/host" e o gcc não existia lá.
+    # `${TARGET_DIR}/../..` cobre o caso de rodar o script à mão.
+    if [ -n "${O:-}" ]; then
+        HOST_DIR="$O/host"
+    elif [ -n "${BUILD_DIR:-}" ]; then
+        HOST_DIR="$BUILD_DIR/../host"
+    else
+        HOST_DIR="$(cd "$TARGET_DIR/../.." && pwd)/host"
+    fi
+    STAGING_DIR="$(echo "$HOST_DIR"/*-buildroot-linux-gnu/sysroot 2>/dev/null | awk '{print $1}')"
+    GCC_BIN="$(echo "$HOST_DIR"/bin/*-buildroot-linux-gnu-gcc 2>/dev/null | awk '{print $1}')"
+    DESTINO="$TARGET_DIR/opt/giochi/apps/bin"
+    if [ ! -x "$GCC_BIN" ]; then
+        echo "post-build: toolchain ausente ($GCC_BIN) — verificador não compilado" >&2
+        echo "post-build: a loja vai instalar sem verificar assinatura" >&2
+    else
+        mkdir -p "$DESTINO"
+        if "$GCC_BIN" -O2 -Wall -Wextra \
+                -o "$DESTINO/verificador-ed25519" "$VERIFICADOR_SRC" \
+                -I"$STAGING_DIR/usr/include" \
+                -L"$STAGING_DIR/usr/lib" -lcrypto 2>"$TARGET_DIR/.verif.log"; then
+            chmod 0755 "$DESTINO/verificador-ed25519"
+            echo "post-build: verificador-ed25519 compilado"
+        else
+            echo "post-build: FALHOU compilar o verificador:" >&2
+            sed 's/^/  /' "$TARGET_DIR/.verif.log" >&2
+            rm -f "$DESTINO/verificador-ed25519" "$TARGET_DIR/.verif.log"
+            exit 1
+        fi
+        rm -f "$TARGET_DIR/.verif.log"
+    fi
 fi
 
 INITTAB="$TARGET_DIR/etc/inittab"

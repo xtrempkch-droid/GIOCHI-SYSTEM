@@ -193,3 +193,38 @@ test("o defconfig pede os patches de U-Boot", () => {
   const defconfig = readFileSync(`${ROOT}device/r35s/defconfig`, "utf8");
   assert.match(defconfig, /^BR2_TARGET_UBOOT_PATCH="__UBOOT_PATCH_DIR__"$/m);
 });
+
+test("o extlinux.conf NÃO pode ter `menu title`", () => {
+  // Medido no R35S (06/11/2026): o menu ficava em "Enter choice:" para sempre,
+  // com `timeout 30` logo acima, sem efeito.
+  //
+  // Causa, no fonte do U-Boot: a keyword `menu` faz `cfg->prompt = 1`
+  // (boot/pxe_utils.c), e o common/menu.c documenta que prompt=1 "will be
+  // prompted for input REGARDLESS OF THE VALUE OF TIMEOUT".
+  //
+  // Ou seja: `menu title` desliga o timeout. Não é cosmético.
+  const script = readFileSync(`${ROOT}scripts/make-sd-image.sh`, "utf8");
+  // Recortar a partir do `write_file`, não do primeiro "extlinux" do arquivo —
+  // há comentários acima que citam o nome, e o recorte errado pegava o texto
+  // errado (o teste falhou por isso antes de rodar uma vez sequer).
+  const bloco = script.slice(script.indexOf('write_file "extlinux/extlinux.conf"'));
+  // `indexOf("EOF")` acha o proprio `<<EOF`; o terminador e o marcador sozinho.
+  const fim = bloco.indexOf("\nEOF\n");
+  const conteudo = bloco.slice(0, fim);
+  assert.ok(
+    !/^menu title/m.test(conteudo),
+    "`menu title` força prompt=1 e ignora o timeout — o menu nunca expira",
+  );
+  assert.match(conteudo, /^timeout \d+$/m, "o timeout tem de estar lá");
+  assert.match(conteudo, /^default \w+$/m, "e o default também");
+});
+
+test("o bootcmd fixa mmc0 — o scan genérico não acha o cartão", () => {
+  // boot_targets padrão = "mmc1 mmc0 nvme scsi usb pxe dhcp spi". O cartão é o
+  // mmc0, então `bootflow scan` começa por um device que não existe e desiste
+  // na rede. Medido: "Net: No ethernet found." e prompt `=>`.
+  const fragment = readFileSync(`${ROOT}device/r35s/uboot.fragment`, "utf8");
+  assert.match(fragment, /^CONFIG_BOOTCOMMAND="bootflow scan mmc0"$/m);
+  // E sysboot como ferramenta de resgate.
+  assert.match(fragment, /^CONFIG_CMD_SYSBOOT=y$/m);
+});

@@ -32,3 +32,29 @@ CONFIG_DEBUG_UART_BAUDRATE=1500000
 # entre "o U-Boot morreu antes do console" e "o U-Boot está vivo e o problema é
 # o baud". Sem esta linha não há como distinguir os dois.
 CONFIG_DEBUG_UART_ANNOUNCE=y
+
+# ## bootcmd: o `mmc0` explícito não é redundância
+#
+# O padrão do board é `bootflow scan` (CONFIG_BOOTSTD_BOOTCOMMAND), e o
+# `boot_targets` herdado é "mmc1 mmc0 nvme scsi usb pxe dhcp spi". O cartão do
+# R35S é o **mmc0**, então o scan genérico começa por mmc1 (que não existe),
+# passa por nvme/scsi/usb/pxe/dhcp e desiste — medido no aparelho:
+#
+#   Net:   No ethernet found.
+#   Hit any key to stop autoboot:  2   0
+#   =>
+#
+# Já `bootflow scan mmc0`, digitado na mão, encontrou e iniciou o bootflow:
+#
+#   ** Booting bootflow 'mmc@ff370000.bootdev.part_1' with extlinux
+#
+# Fixar o device no bootcmd é a diferença entre "não boota" e "boota", e não há
+# placa sem MMC nesta árvore.
+CONFIG_BOOTCOMMAND="bootflow scan mmc0"
+
+# `sysboot` é o comando clássico que lê o extlinux.conf direto. Não é usado no
+# boot normal (o bootcmd acima cuida disso), mas é o que salva um diagnóstico
+# pelo console quando o bootstd se comporta de forma estranha:
+#   => sysboot mmc 0:1 any /extlinux/extlinux.conf
+# Sem ele, "Unknown command 'sysboot'" e não sobra ferramenta.
+CONFIG_CMD_SYSBOOT=y

@@ -617,6 +617,68 @@ strings out/r35s/u-boot-rockchip.bin | grep -c 'Unable to detect device type' # 
 > antiga — conferir no `strings` foi o que revelou. Para patch novo de U-Boot:
 > `rm -rf work/<device>/build/build/uboot-*`.
 
+## Dois bloqueios do U-Boot resolvidos, um de cada vez
+
+### 1. O U-Boot morria numa checagem do Odroid-Go (resolvido)
+
+Depois do patch do ADC, o U-Boot passa do ponto onde morria:
+
+```text
+ADC de modelo fora da tabela do Odroid-Go (-6); seguindo com o device tree do FIT
+Net:   No ethernet found.
+
+Hit any key to stop autoboot:  2   0
+=>
+```
+
+### 2. `bootflow scan` não achava o cartão (resolvido)
+
+O `bootcmd` herdado é `bootflow scan`, e o `boot_targets` padrão é
+`mmc1 mmc0 nvme scsi usb pxe dhcp spi`. O cartão é o **mmc0**, então o scan
+começa por um device que não existe e vai para rede.
+
+Medido pelo console:
+
+| Comando | Resultado |
+| --- | --- |
+| `mmc list` | `mmc@ff370000: 0 (SD)` |
+| `ls mmc 0:1 /` | `Image`, `dtbs/`, `extlinux/`, `boot.scr` |
+| `bootflow scan` (do bootcmd) | tenta rede, desiste, cai no `=>` |
+| `bootflow scan mmc0` | **`** Booting bootflow '...part_1' with extlinux`** |
+
+Correção: `CONFIG_BOOTCOMMAND="bootflow scan mmc0"`. O device explícito é a
+diferença entre não bootar e bootar. Também habilitei `CONFIG_CMD_SYSBOOT`
+(`sysboot mmc 0:1 any /extlinux/extlinux.conf`), que é a ferramenta de resgate
+quando o bootstd se comporta de forma estranha.
+
+### 3. `menu title` prendia o menu para sempre (resolvido)
+
+Este foi o mais sutil. O `extlinux.conf` tinha `timeout 30`, e o menu ainda
+assim ficava em `Enter choice:` esperando tecla. Não era o timeout.
+
+No `boot/pxe_utils.c` do U-Boot:
+
+```c
+case T_MENU:
+    cfg->prompt = 1;      /* a keyword `menu` liga o modo interativo */
+```
+
+E no `common/menu.c`, documentado:
+
+> prompt — If 0, the user will not be prompted for input regardless of the value
+> of timeout. If 1, the user will be prompted for input **regardless of the
+> value of timeout**.
+
+Ou seja: `menu title Giochi System` forçava `prompt=1`, e `prompt=1` **ignora o
+timeout**. O sintoma parecia "timeout não funciona", mas o timeout nunca foi
+consultado.
+
+Removido. Com `prompt=0`, o countdown vale e ele boota sozinho. A alternativa
+`prompt 0` explícito faria o mesmo — o que não se pode é deixar `menu title`.
+
+**Lição de método:** dois comandos com nomes parecidos (`timeout` e `menu`) e um
+deles desliga o outro. Ler o parser, e não o resultado, foi o que resolveu.
+
 ## Estado
 
 **Confirmado no aparelho (06/11/2026):**
