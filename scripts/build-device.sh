@@ -292,6 +292,27 @@ DEVICE_DEFCONFIG="$DEVICE_DIR/defconfig"
 if [[ -f "$DEVICE_DEFCONFIG" ]]; then
   cp -a "$DEVICE_DEFCONFIG" "$BR2_DIR/configs/$DEFCONFIG"
   echo "  defconfig: fornecido pelo aparelho (device/$DEVICE_FOLDER/defconfig)"
+
+  # `BR2_TARGET_UBOOT_CONFIG_FRAGMENT_FILES` é lista separada por ESPAÇO, e o
+  # defconfig do aparelho mora numa pasta que pode ter espaço no nome. O
+  # placeholder `__UBOOT_FRAGMENT__` existe para o defconfig continuar legível
+  # (e versionável) sem caminho absoluto escrito à mão; aqui ele vira o caminho
+  # do staging, que é sem espaço.
+  #
+  # Mesma armadilha dos fragmentos de kernel e de busybox (§12.6): sem isto o
+  # Buildroot lê "device/r35s/uboot.fragment" como um caminho válido, não
+  # encontra e o U-Boot compila com a config padrão — em silêncio.
+  if grep -q '__UBOOT_FRAGMENT__' "$BR2_DIR/configs/$DEFCONFIG"; then
+    UBOOT_FRAGMENT_SRC="$DEVICE_DIR/uboot.fragment"
+    if [[ ! -f "$UBOOT_FRAGMENT_SRC" ]]; then
+      echo "ERRO: o defconfig pede fragmento de U-Boot, mas não existe:" >&2
+      echo "      $UBOOT_FRAGMENT_SRC" >&2
+      exit 1
+    fi
+    cp -a "$UBOOT_FRAGMENT_SRC" "$WORK_DIR/uboot.fragment"
+    sed -i "s#__UBOOT_FRAGMENT__#$WORK_DIR/uboot.fragment#" "$BR2_DIR/configs/$DEFCONFIG"
+    echo "  uboot:     fragmento aplicado ($(grep -c '^CONFIG_' "$WORK_DIR/uboot.fragment") símbolos)"
+  fi
 fi
 if ! make -C "$BR2_DIR" O="$BUILD_DIR" "$DEFCONFIG" >"$WORK_DIR/defconfig.log" 2>&1; then
   tail -n 120 "$WORK_DIR/defconfig.log" >&2

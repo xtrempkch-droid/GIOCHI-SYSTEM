@@ -322,6 +322,30 @@ solda — e o diagnóstico com o adaptador no barramento é o mesmo de antes.
 Regra que fica: **antes de culpar o aparelho, olhar o padrão dos bytes.** Texto
 limpo = aparelho falando. `0xED`/`0xFF` repetido = o fio, quase sempre o GND.
 
+### A verificação do cartão pode falhar sem o cartão estar ruim
+
+Medido em 06/11/2026, e o custo do erro é mandar trocar hardware que está bom.
+
+`flash-sd.sh` grava, relê o cartão e compara SHA256. Numa gravação:
+
+```text
+esperado: fdde78e0...
+lido:     f0b6c23d...
+```
+
+Investigando **por MB**, só o **MB 64** divergia — e reescrever aquele MB com o
+**mesmo conteúdo** da imagem fez ele passar a conferir. O FTL do cartão servia um
+bloco obsoleto até receber uma escrita nova. Não era gravação interrompida nem
+cartão defeituoso.
+
+**Correção aplicada:** o script tenta **duas passadas** e só acusa o cartão se a
+divergência persistir. Um `dd` com `iflag=direct` também fura o cache do kernel e
+é útil para diagnosticar.
+
+Lição de método, que é a mesma do §12.34: **uma verificação que reprova não é o
+mesmo que um defeito**. Antes de acusar o hardware, perguntar se a medida está
+medindo o que se pensa.
+
 ### Quando o serial não dá, a tela responde
 
 Vale registrar porque economiza uma noite: em placa de handheld, **a tela é um

@@ -187,14 +187,37 @@ echo "Gravando..."
 dd if="$IMAGE" of="$TARGET" bs=4M conv=fsync status=progress
 sync
 
-echo "Relendo o cartão para conferir..."
-ACTUAL_SHA="$(dd if="$TARGET" bs=4M count=$(( (IMAGE_BYTES + 4194304 - 1) / 4194304 )) status=none | head -c "$IMAGE_BYTES" | sha256sum | awk '{print $1}')"
 EXPECTED_SHA="$(sha256sum "$IMAGE" | awk '{print $1}')"
+
+# Confere lendo o cartão. Duas passadas, porque a primeira pode falhar por um
+# motivo que NÃO é cartão defeituoso.
+#
+# Medido em 06/11/2026: a gravação de 2 GiB passou, e a releitura devolveu um
+# SHA diferente. Investigando por MB, só o MB 64 divergia — e reescrever aquele
+# MB com o mesmo conteúdo da imagem fez ele passar a conferir. Ou seja: o FTL do
+# cartão servia um bloco obsoleto até receber uma escrita nova. Não era cartão
+# ruim, não era gravação interrompida.
+#
+# Dizer "cartão defeituoso" nesse caso é falso negativo, e o custo é alto: manda
+# trocar hardware que está bom. Então: segunda passada e só então falha.
+verify_card() {
+  dd if="$TARGET" bs=4M count=$(( (IMAGE_BYTES + 4194304 - 1) / 4194304 )) status=none \
+    | head -c "$IMAGE_BYTES" | sha256sum | awk '{print $1}'
+}
+
+ACTUAL_SHA="$(verify_card)"
 if [[ "$ACTUAL_SHA" != "$EXPECTED_SHA" ]]; then
-  echo "ERRO: o que está no cartão não confere com a imagem." >&2
+  echo "  divergiu na primeira passada; regravando antes de acusar o cartão..."
+  dd if="$IMAGE" of="$TARGET" bs=4M conv=fsync status=none
+  sync
+  ACTUAL_SHA="$(verify_card)"
+fi
+
+if [[ "$ACTUAL_SHA" != "$EXPECTED_SHA" ]]; then
+  echo "ERRO: o que está no cartão não confere, mesmo depois de regravar." >&2
   echo "  esperado: $EXPECTED_SHA" >&2
   echo "  lido:     $ACTUAL_SHA" >&2
-  echo "Cartão defeituoso, falso ou a gravação foi interrompida." >&2
+  echo "Aí sim: cartão defeituoso, falso, ou a gravação não está concluindo." >&2
   exit 1
 fi
 echo "  SHA256 confere: $ACTUAL_SHA"

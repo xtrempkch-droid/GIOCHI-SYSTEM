@@ -1,0 +1,34 @@
+# R35S — fragmento de configuração do U-BOOT
+#
+# Aplicado ao `.config` do U-Boot via `BR2_TARGET_UBOOT_CONFIG_FRAGMENT_FILES`.
+# NÃO é fragmento de kernel nem de Buildroot: são símbolos `CONFIG_*` do U-Boot.
+#
+# ## Por que este arquivo existe
+#
+# Medido no aparelho em 06/11/2026, com o caminho mainline (idbloader TPL+SPL +
+# u-boot.itb): o TPL roda, o DDR é inicializado, o BL31 imprime a 1500000 e
+# entrega o controle ao U-Boot em 0x200000 — e daí em diante há **silêncio
+# absoluto**, nem a 1500000 nem a 115200.
+#
+# O `odroid-go2_defconfig` do U-Boot 2024.10 é do Odroid-Go2, um aparelho cujo
+# console é 115200. O Debug UART aponta para a UART certa do RK3326
+# (`0xFF160000` = a mesma do R35S), mas o **baudrate do console** ficou em 115200
+# enquanto a linha desta placa é 1500000. Se o U-Boot reconfigurar a UART para
+# 115200, tudo depois disso sai ilegível — e o sintoma é indistinguível de
+# "U-Boot não subiu".
+#
+# Isso não explica sozinho o silêncio total (testamos 115200 e também não veio
+# nada), mas é uma divergência real e barata de eliminar antes de investigar
+# mais fundo.
+
+# Console na velocidade da placa, não a do Odroid-Go2.
+CONFIG_BAUDRATE=1500000
+
+# O Debug UART do RK3326 já está em 0xFF160000 (correto), mas o baudrate do
+# debug herda o padrão e precisa acompanhar.
+CONFIG_DEBUG_UART_BAUDRATE=1500000
+
+# Imprime "debug uart enabled" na inicialização. Custa nada e é a diferença
+# entre "o U-Boot morreu antes do console" e "o U-Boot está vivo e o problema é
+# o baud". Sem esta linha não há como distinguir os dois.
+CONFIG_DEBUG_UART_ANNOUNCE=y

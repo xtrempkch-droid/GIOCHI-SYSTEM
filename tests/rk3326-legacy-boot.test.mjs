@@ -109,7 +109,15 @@ test("o build GERA o legacy — não é passo manual", () => {
   // produzia a imagem com o firmware mainline: o aparelho travaria em 0x200000
   // com o build inteiro verde. É a classe do §12.27 (arquivo que existe só
   // enquanto ninguém limpa).
-  assert.equal(device.bootloader, "rockchip-legacy", "o aparelho tem de declarar");
+  // O aparelho declara quando o legacy é o escolhido. Hoje NÃO é: medido em
+  // 06/11/2026, o legacy deixou o console MUDO desde o início (miniloader), o
+  // que é pior que o mainline — que ao menos imprime BL31 e prova que TPL/DDR/
+  // BL31 funcionam. O que precisa continuar verdade é que o build SAIBA gerar
+  // o legacy quando for declarado.
+  assert.ok(
+    device.bootloader === undefined || device.bootloader === "rockchip-legacy",
+    `bootloader inesperado: ${device.bootloader}`,
+  );
   const build = readFileSync(`${ROOT}scripts/build-device.sh`, "utf8");
   assert.match(build, /bootloader/, "build-device.sh não lê o campo");
   assert.match(build, /make-rk3326-bootloader\.sh/, "build-device.sh não chama o gerador");
@@ -125,4 +133,28 @@ test("bootloader desconhecido é ERRO no schema, não aviso", () => {
   const schema = readFileSync(`${ROOT}scripts/lib/devices.mjs`, "utf8");
   assert.match(schema, /rockchip-legacy/);
   assert.match(schema, /bootloader \"\$\{device.bootloader\}\" desconhecido/);
+});
+
+test("a verificação do cartão tenta duas vezes antes de acusar hardware", () => {
+  // Medido em 06/11/2026: gravação de 2 GiB passou, releitura devolveu SHA
+  // diferente. Por MB, só o MB 64 divergia — e reescrever aquele MB com o
+  // MESMO conteúdo da imagem fez passar a conferir. FTL servindo bloco
+  // obsoleto até receber escrita nova. Não era cartão ruim.
+  //
+  // Acusar "cartão defeituoso" nesse caso é falso negativo, e o custo é
+  // mandar trocar hardware que está bom.
+  const flash = readFileSync(`${ROOT}scripts/flash-sd.sh`, "utf8");
+  assert.match(flash, /verify_card\(\)/);
+  const segunda = flash.indexOf("regravando antes de acusar");
+  assert.ok(segunda > 0, "falta a segunda passada");
+  assert.ok(
+    flash.indexOf("verify_card") < segunda,
+    "a primeira verificação tem de vir antes da segunda passada",
+  );
+  // E a mensagem final não pode acusar hardware na primeira divergência.
+  const primeiraMsg = flash.slice(0, segunda);
+  assert.ok(
+    !/Cartão defeituoso/.test(primeiraMsg),
+    "não acusar cartão antes de tentar de novo",
+  );
 });

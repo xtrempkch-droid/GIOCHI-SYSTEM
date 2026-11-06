@@ -82,6 +82,11 @@ BR2_TARGET_UBOOT_NEEDS_PYELFTOOLS=y
 BR2_TARGET_UBOOT_NEEDS_UTIL_LINUX=y
 BR2_TARGET_UBOOT_NEEDS_GNUTLS=y
 BR2_TARGET_UBOOT_NEEDS_ROCKCHIP_RKBIN=y
+# Fragmento de U-Boot (baud do console). O caminho é ABSOLUTO porque é o
+# Buildroot que lê; o build-device.sh o troca por um caminho sem espaço
+# (staging), como faz com os fragmentos de kernel e busybox.
+# Sem ponto-e-vírgula no fim do arquivo, o Buildroot acrescenta a linha.
+BR2_TARGET_UBOOT_CONFIG_FRAGMENT_FILES="__UBOOT_FRAGMENT__"
 # O BootROM do RK3326 lê do setor 64 — mesmo offset do RK3566. O
 # `u-boot-rockchip.bin` já vem com idbloader + u-boot.itb concatenados, que é o
 # layout que o BootROM espera a partir do setor 64.

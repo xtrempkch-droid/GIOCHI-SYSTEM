@@ -22,7 +22,7 @@
   "runner": "ubuntu-24.04",
   "timeoutMinutes": 300,
   "status": "draft",
-  "bootNotes": "SoC RK3326 (nao RK3566): sem NPU, Mali-G31, 1 GB de RAM. Medido no aparelho em 06/11/2026 pela console serial: painel 640x480 em card0-DSI-1, gamepad r36s_Gamepad (js0+event3), 981 MiB visiveis. Os dois drivers (rocknix-singleadc-joypad e o painel generic-dsi) sao GPL, estao vendorizados em kernel-modules/ e COMPILAM contra o nosso kernel 6.12. O DTS vendorizado tambem compila (patch 0001). Carregador: U-Boot mainline 2024.10 (odroid-go2) + rkbin PX30 — a imagem e' geravel, mas NAO bootou em hardware ainda; o antecessor teve tela preta sem print no serial com mainline.",
+  "bootNotes": "SoC RK3326 (nao RK3566): sem NPU, Mali-G31, 1 GB de RAM. Medido no aparelho: painel 640x480, gamepad r36s_Gamepad (js0+event3), 981 MiB visiveis. DTS e drivers GPL vendorizados COMPILAM no kernel 6.12. BOOT: com o caminho mainline (idbloader TPL+SPL + u-boot.itb) o aparelho executa TPL, DDR e BL31 e para ao saltar para o U-Boot em 0x200000, com console mudo. Com o caminho legacy da Rockchip (miniloader) o console fica MUDO desde o inicio — pior para diagnosticar. Mainline e' o padrao enquanto a causa do crash em 0x200000 nao for isolada.",
   "kernelCmdline": {
     "console": "ttyS2",
     "baud": 1500000
@@ -30,6 +30,5 @@
   "docs": "README.md",
   "kernelPatches": [
     "patches/0001-giochi-system-r35s-dts-e-painel.patch"
-  ],
-  "bootloader": "rockchip-legacy"
+  ]
 }

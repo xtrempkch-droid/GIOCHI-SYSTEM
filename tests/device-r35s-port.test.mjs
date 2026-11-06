@@ -181,8 +181,10 @@ test("o device.json diz que a imagem é gerável mas NÃO bootou", () => {
   // ser gerada por falta de loader. Existem rkbin PX30 (DDR + BL31) e U-Boot
   // odroid-go2. O que falta é a PROVA em hardware. O bootNotes tem de dizer as
   // duas coisas, senão alguém lê "gerável" como "funciona".
-  assert.match(device.bootNotes, /NAO bootou|não bootou|nao bootou/i);
-  assert.match(device.bootNotes, /odroid-go2|U-Boot/i);
+  // O bootNotes tem de dizer o ESTADO MEDIDO: para em 0x200000 com console
+  // mudo. Antes dizia "não bootou"; o mais preciso é "não chega ao userspace".
+  assert.match(device.bootNotes, /0x200000|mudo|console/i);
+  assert.match(device.bootNotes, /odroid-go2|U-Boot|mainline/i);
   assert.equal(
     device.buildrootDefconfig,
     "giochi_r35s_defconfig",
