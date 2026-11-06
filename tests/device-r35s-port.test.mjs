@@ -246,3 +246,49 @@ test("os dois drivers do aparelho são declarados como módulos", () => {
   assert.match(fragment, /^CONFIG_JOYSTICK_ADC=y$/m);
   assert.match(fragment, /^CONFIG_ROCKCHIP_SARADC=y$/m);
 });
+
+// ── armazenamento: medido no DTB, não suposto ───────────────
+
+test("o R35S não tem eMMC — o controlador 8-bit está disabled", async () => {
+  // O dono do projeto avisou que "alguns aparelhos têm dois slots de SD e ainda
+  // eMMC". O R35S NÃO é um deles, e isso é fato do DTB que vai para o cartão:
+  //   mmc@ff390000  status=disabled  bus-width=8  sem cd-gpios
+  //
+  // Responder "eMMC" para o R35S seria inventar layout de dados a partir de um
+  // aviso sobre OUTROS aparelhos. Este teste impede a generalização.
+  const { parseFdt, walkFdt } = await import("../scripts/lib/fdt.mjs");
+  const dtb = `${ROOT}out/r35s/rk3326-gameconsole-r36s-giochi.dtb`;
+  if (!existsSync(dtb)) return; // CI de config não builda o DTB; o build local cobre
+  const raiz = parseFdt(readFileSync(dtb));
+  const status = new Map();
+  walkFdt(raiz, (no, caminho) => {
+    if (!/^\/mmc@/.test(caminho)) return;
+    const p = no.props;
+    status.set(caminho, p.has("status") ? String(p.get("status")).replace(/\0+$/, "") : "(herdado)");
+  });
+  assert.equal(status.get("/mmc@ff390000"), "disabled", "se virar okay, há eMMC e o layout muda");
+});
+
+test("o R35S habilita DOIS controladores SD removíveis", async () => {
+  // Medido: mmc@ff370000 (alias mmc0) e mmc@ff380000 (alias mmc1), os dois
+  // "okay", 4 bits, com cd-gpios próprio. O U-Boot só listou um — o outro só
+  // aparece com cartão enfiado.
+  //
+  // Consequência prática, e o motivo de estar num teste: o NÚMERO do cartão
+  // depende da ordem de probe, não do conector. Um catálogo que guarde
+  // `/mnt/cartao1` pode abrir o cartão errado depois de um boot. Por isso a
+  // convenção proposta com a equipe do app é `/media/<LABEL>`, não `/mnt/cartaoN`.
+  const { parseFdt, walkFdt } = await import("../scripts/lib/fdt.mjs");
+  const dtb = `${ROOT}out/r35s/rk3326-gameconsole-r36s-giochi.dtb`;
+  if (!existsSync(dtb)) return;
+  const raiz = parseFdt(readFileSync(dtb));
+  const removiveis = [];
+  walkFdt(raiz, (no, caminho) => {
+    if (!/^\/mmc@/.test(caminho)) return;
+    const p = no.props;
+    const ok = p.has("status") && String(p.get("status")).replace(/\0+$/, "") === "okay";
+    if (ok && p.has("cd-gpios") && !p.has("non-removable")) removiveis.push(caminho);
+  });
+  assert.equal(removiveis.length, 2, `esperava 2 controladores com cartão: ${removiveis}`);
+  assert.deepEqual(removiveis.sort(), ["/mmc@ff370000", "/mmc@ff380000"]);
+});

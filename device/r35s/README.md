@@ -275,6 +275,38 @@ um aparelho de 1 GB.
 
 Não implementado aqui; é prior art medido, para decidir com número na mão.
 
+#### Quantos slots, e se tem eMMC — lido do DTB, não do aviso
+
+O dono do projeto avisou que **alguns** aparelhos têm dois slots de SD e ainda
+eMMC. O R35S não é um deles, e a resposta está no DTB que vai para o cartão:
+
+| Nó | Alias | `status` | `bus-width` | `cd-gpios` |
+| --- | --- | --- | --- | --- |
+| `mmc@ff370000` | `mmc0` (`sdio`) | **okay** | 4 | gpio3 PB6 |
+| `mmc@ff380000` | `mmc1` (`sdmmc`) | **okay** | 4 | gpio0 PA3 |
+| `mmc@ff390000` | — (`emmc`) | **disabled** | 8 | — |
+
+Duas leituras:
+
+- **sem eMMC.** O controlador 8-bit nasce `disabled` e não tem detecção de
+  cartão. Dizer "os jogos vão para o eMMC" no R35S seria inventar layout a partir
+  de um aviso sobre outras placas.
+- **dois controladores SD habilitados, cada um com o seu `cd-gpios`.** O U-Boot
+  listou só um (`mmc list` → `mmc@ff370000: 0 (SD)`) porque o outro só aparece com
+  cartão enfiado. Se o segundo tem conector no plástico, é o caso "dois slots" — e
+  **não afirmo que tem** sem ver o cartão aparecer no `dmesg`.
+
+Consequência que não é óbvia e que muda contrato: com dois controladores, o
+**número** do cartão depende da ordem de probe, não do conector. `mmcblk0` num
+boot pode ser o cartão do sistema e, no boot seguinte, o cartão de jogos. Por isso
+um catálogo não pode guardar `/mnt/cartao1`; a convenção acordada com a equipe do
+app é `/media/<LABEL>` (rótulo do filesystem), que sobrevive a trocar de slot e de
+aparelho.
+
+`tests/device-r35s-port.test.mjs` prende os dois fatos: se alguém habilitar o
+eMMC ou desligar um dos controladores, o teste acusa em vez de o layout de dados
+mudar em silêncio.
+
 ### Resto
 
 ```text
