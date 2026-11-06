@@ -200,7 +200,8 @@ Tamanhos com `gzip -1`: rootfs 1 GiB → 52 MB; FAT de boot 256 MiB → 17 MB.
   build seguido de mesmo commit foi cronometrado mostrando ganho.
 - **Partição de dados da loja** (piso 4 GiB + resto do cartão) não implementada;
   ver as duas consequências de desenho em [`docs/flashing.md`](docs/flashing.md).
-- **`gles-probe`** escrito e não executado no aparelho.
+- **`gles-probe`** escrito; executado em 06/11/2026 **no R35S com ROCKNIX**, que
+  usa o blob da ARM — mede o hardware, não o nosso panfrost (§18, item 2).
 - **X55 com o launcher:** a imagem agora tem a linha do `respawn`, mas o
   binário é do `Giochi app` e entra por overlay — falta a rodada deles.
 - SHA256 do **U-Boot e do kernel** não é fixado como o do Buildroot.
@@ -281,6 +282,7 @@ Giochi system/
 │   ├── validate-devices.mjs, list-devices.mjs, device-info.mjs
 │   ├── dtb-inspect.mjs, dtb-buttons.mjs, dtb-catalog.mjs
 │   ├── panel-inspect.mjs, lib/dsi-panel.mjs   # painel MIPI-DSI (R35S)
+│   ├── gles-probe.py                          # GLES/EGL por ctypes, sem compilar
 │   ├── check-host.sh                   # pré-voo: dependências, disco, hash
 │   ├── build-in-container.sh           # build sem root no host (docker)
 │   ├── make-sd-image.sh                # imagem de cartão com offsets do RK3566
@@ -288,6 +290,7 @@ Giochi system/
 │   ├── assert-kernel-config.mjs         # CONFIG_* do kernel (o gap do §12.9)
 │   └── lib/{devices,assert-config,assert-kernel-config,fdt}.mjs
 ├── docker/{builder,serial,serial-logger}.Dockerfile + scripts de serial
+│   (serial-push.py envia arquivo ao aparelho por base64 em blocos)
 ├── tests/{devices,assert-config,assert-kernel-config,fdt,prepare-config,buildroot-hash}.test.mjs + run-all.mjs
 ├── .github/
 │   ├── workflows/{build-linux-arm64,validate}.yml
@@ -437,6 +440,9 @@ bash scripts/build-in-container.sh powkiddy-x55 # build sem dependências no hos
 bash scripts/build-in-container.sh --sd-image powkiddy-x55   # imagem de cartão
 bash scripts/flash-sd.sh --list                 # discos removíveis
 bash scripts/gles-probe.sh powkiddy-x35h --run   # GLES/EGL reais, sem pacote novo
+python3 scripts/gles-probe.py                    # idem sem compilar (usa o python3 da imagem)
+docker run --rm --privileged -v /dev:/dev -v ./docker:/work/push:ro ... \
+  /work/push/serial-push.py /dev/ttyUSB0 1500000 <arquivo> '<comando>'  # enviar por serial
 bash scripts/build-device.sh qemu-aarch64       # só em Linux/CI
 ALLOW_DRAFT=1 bash scripts/build-device.sh powkiddy-x55   # rascunho, de propósito
 ```
@@ -1875,9 +1881,26 @@ sem medir o build completo.
      `/user`.
    - **Dados da loja: piso de 4 GiB + o resto do cartão.** É proposta deles, o
      número é do dono do projeto — não implementado (item 3 abaixo).
-2. **`gles-probe`** escrito e não executado. Precisa do aparelho ligado:
-   `bash scripts/gles-probe.sh powkiddy-x35h --run`. O resultado decide melonDS
-   e teto de shader, **não** o Godot: para `gles3`, 3.1 e 3.0 dão no mesmo.
+2. **~~`gles-probe` nunca executado~~ — EXECUTADO em 06/11/2026 no R35S**, pela
+   variante em Python (`scripts/gles-probe.py`) porque o aparelho não tem
+   compilador. Resultado medido, e o que ele **não** prova:
+
+   ```text
+   GL_RENDERER = Mali-G31 · GL_VERSION = OpenGL ES 3.2 · MAX_SAMPLES = 4
+   GL_OES_geometry_shader = SIM   (104 extensões)
+   ```
+
+   Esse número é do **blob da ARM** (`libmali-bifrost-g31-g29p1.so`, 59 MB,
+   `mali_kbase` carregado), que é o que o ROCKNIX entrega. **O nosso sistema
+   entrega Mesa/panfrost**, e é o panfrost que não expõe geometry shader. A
+   diferença não é de chip, é de driver empacotado — ver
+   [`docs/evaluacao-pyglet-arcade.md`](docs/evaluacao-pyglet-arcade.md).
+
+   Continua pendente o que o probe foi escrito para responder: **o número do
+   nosso stack** (Mesa 24.x do Buildroot 2024.02, `panfrost`). Para isso é
+   preciso a nossa imagem num aparelho livre, ou o A/B `rmmod mali_kbase` +
+   `modprobe panfrost` — que **não foi feito** porque congelaria a tela de um
+   aparelho que não é nosso e estava em uso.
 3. **Partição de dados da loja** — proposta de piso 4 GiB + resto do cartão. Não
    implementado, e há duas consequências de desenho antes de codar: a `.img` tem
    tamanho fixo (2 GiB hoje), então "o resto do cartão" só existe se a partição

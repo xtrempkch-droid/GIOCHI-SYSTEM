@@ -10,6 +10,12 @@ Gerado por `scripts/dtb-catalog.mjs` a partir dos DTBs do release ROCKNIX.
    sem o driver compilado, nenhum botão funciona.
 3. Crie `device/<pasta>/` com `device.json`, `buildroot.fragment`, `linux.fragment`,
    `buttons.map` e `rootfs-overlay/` (ver [adding-a-device.md](adding-a-device.md)).
+
+> **O catálogo não diz qual é o painel.** Ele sai do DTB, e DSI não tem EDID —
+> o mesmo modelo de aparelho sai de fábrica com telas diferentes (o R35S tem
+> **cinco**). Para os painéis do R35S/R36S, que estão medidos e em texto
+> comparável, ver [`device/r35s/panels/`](../device/r35s/panels/README.md) e
+> `node scripts/panel-inspect.mjs`.
 4. Copie o `.dtb` para `device/<pasta>/dts/` para o build ser reproduzível.
 5. Confirme no aparelho com `evtest` — o DTB diz o que o kernel registra.
 

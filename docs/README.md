@@ -34,6 +34,11 @@
   [`scripts/arcade-probe/`](../scripts/arcade-probe/README.md) e funciona.
 - [Mapas de botões](button-maps.md) — de onde vêm os códigos evdev de cada aparelho.
 - [Catálogo RK3326](rk3326-catalog.md) — 15 aparelhos extraídos de device tree.
+- [Painéis do R35S/R36S](../device/r35s/panels/README.md) — os **cinco** painéis
+  que saem de fábrica, em texto comparável: formato `panel_description`, a conta
+  `refresh = clock ÷ (htotal × vtotal)` validada contra o comentário `# 60`, e o
+  motivo de `size` ser (lado curto, lado longo). Ferramenta:
+  `node scripts/panel-inspect.mjs`.
 - `giochi-buttons` — ferramenta de teste de botões e eixos (`giochi-buttons --list`).
 - [`giochi-init`](giochi-init.md) — a camada de boot e o que falta para ligá-la.
 

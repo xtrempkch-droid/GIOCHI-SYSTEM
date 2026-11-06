@@ -31,3 +31,4 @@ import "./dongle.test.mjs";
 import "./host-compat.test.mjs";
 import "./device-r35s-console.test.mjs";
 import "./dsi-panel.test.mjs";
+import "./gles-probe-py.test.mjs";

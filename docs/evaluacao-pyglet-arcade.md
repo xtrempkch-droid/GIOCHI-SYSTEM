@@ -155,6 +155,56 @@ $ grep -i "geometry_shader" mesa/docs/features.txt
 por isso que a equipe do arcade verificou o Pi 4 e o 5 e o nosso aparelho não está
 na lista. **`panfrost` não aparece.**
 
+### Medido no hardware: a GPU consegue, o panfrost não expõe
+
+Em 06/11/2026 medi um **R35S** (Mali-G31, mesmo silício da família RK3326) pela
+console serial, com `scripts/gles-probe.py` — EGL + GLES por `ctypes`, sem
+compilar nada:
+
+```text
+EGL_VENDOR   = ARM
+EGL_VERSION  = 1.5 Bifrost-"g29p1-12eac0"
+GL_RENDERER  = Mali-G31
+GL_VERSION   = OpenGL ES 3.2 v1.g29p1-12eac0
+GLSL_VERSION = OpenGL ES GLSL ES 3.20
+MAX_SAMPLES  = 4
+EXTENSOES = 104
+  GL_OES_geometry_shader      SIM
+  GL_EXT_geometry_shader      SIM
+```
+
+O hardware **suporta** geometry shader e GLES 3.2. Então a conclusão "a GPU é
+limitada" está errada.
+
+**Mas esse número é do blob da ARM, não do Mesa.** A prova está no mesmo aparelho:
+
+```text
+/usr/lib/libmali-bifrost-g31-g29p1.so -> libmali.so.1    (59 MB)
+lsmod                     -> mali_kbase   (o blob reivindicou a GPU)
+zcat /proc/config.gz      -> CONFIG_DRM_PANFROST=m       (existe, NÃO carregado)
+/usr/lib/dri/panfrost_dri.so                              (userspace existe)
+```
+
+Ou seja: ROCKNIX entrega **`libmali`** (proprietário) e por isso tem GLES 3.2 com
+geometry shader. **O nosso sistema entrega Mesa/panfrost**, e é isso que não
+expõe a extensão. A diferença não é de chip, é de **driver empacotado**.
+
+Implicação prática, e ela é de licença antes de ser técnica:
+
+| Caminho | Geometry shader | Custo |
+| --- | --- | --- |
+| Mesa/panfrost (o que usamos) | **não** | patch do arcade obrigatório |
+| `libmali` da ARM (o que o ROCKNIX usa) | **sim**, GLES 3.2 | biblioteca proprietária (59 MB), termos de redistribuição próprios |
+
+Não estou propondo trocar o panfrost por blob. Estou registrando que **a decisão
+existe**, e que ela não é "o hardware não consegue" — é "não conseguimos com
+software livre". Isso muda a conversa com quem pedir GLES 3.2 no aparelho.
+
+O A/B definitivo (mesmo aparelho, `rmmod mali_kbase` + `modprobe panfrost`)
+**não foi executado**: congelaria a tela de um aparelho que não é nosso e que
+estava em uso. Fica como experimento definido para quando houver uma unidade
+livre.
+
 ### Por que isso é pior que "colisão mais lenta"
 
 O `Context` do arcade carrega os programas com geometry shader
