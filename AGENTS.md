@@ -1,9 +1,10 @@
 # AGENTS.md — Giochi System
 
 > Handoff técnico do repositório. Leia antes de continuar o trabalho.
-> Atualizado em: 03/11/2026 (revisão 4 — **o X55 bootou**: sistema instalado por
-> serial + U-Boot, login na console, tela 720x1280 ativa. Ver
-> `docs/x55-bringup.md` para o registro medido.)
+> Atualizado em: 06/11/2026 (revisão 5 — **o R35S falou**: a linha serial, que
+> devolvia só ruído em 04/11, ficou limpa depois da solda no TTL. Console
+> `ttyS2@1500000` medido e preso em teste; joypad com fonte GPL confirmada; o
+> desenho de partição de dados do ROCKNIX medido. Ver §13-A.)
 
 ---
 
@@ -279,6 +280,7 @@ Giochi system/
 │   ├── assert-config.mjs              # falha se símbolo pedido sumiu (núcleo em lib/)
 │   ├── validate-devices.mjs, list-devices.mjs, device-info.mjs
 │   ├── dtb-inspect.mjs, dtb-buttons.mjs, dtb-catalog.mjs
+│   ├── panel-inspect.mjs, lib/dsi-panel.mjs   # painel MIPI-DSI (R35S)
 │   ├── check-host.sh                   # pré-voo: dependências, disco, hash
 │   ├── build-in-container.sh           # build sem root no host (docker)
 │   ├── make-sd-image.sh                # imagem de cartão com offsets do RK3566
@@ -427,6 +429,8 @@ node scripts/device-info.mjs qemu-aarch64 json
 node scripts/dtb-inspect.mjs device/r35s/dts/rk3326-gameconsole-r36s.dtb joypad
 node scripts/dtb-buttons.mjs <arquivo.dtb> --out device/r35s/buttons.map
 node scripts/dtb-catalog.mjs                    # regenera docs/rk3326-catalog.*
+node scripts/panel-inspect.mjs device/r35s/panels/*.txt   # compara os 5 painéis
+node scripts/panel-inspect.mjs --extract <arquivo.dtbo>   # painel → texto
 bash scripts/check-host.sh                      # pré-voo, sem root, não instala nada
 bash scripts/build-in-container.sh --check      # o mesmo dentro do container
 bash scripts/build-in-container.sh powkiddy-x55 # build sem dependências no host
@@ -1565,6 +1569,40 @@ o texto do `PASS` diz qual foi usada:
 O que **não** se faz é transformar "não deu para medir" em `FAIL`: `FAIL` falso
 custa confiança no bloco inteiro (§12.34).
 
+### 12.37 `#END` começa com `#`, então um parser de comentário o apaga
+
+Ao ler `panel_description` (o formato do painel DSI do R35S, §13-A) escrevi:
+
+```js
+const { body, comment } = splitComment(line);   // separa em `#`
+if (body.length === 0) continue;                // descarta linha vazia
+if (body === "#END" || line === "#END") { ended = true; continue; }
+```
+
+`#END` não tem corpo: tudo nele é comentário. A linha era descartada no `continue`
+antes de chegar ao teste, e `ended` ficava `false` **para os cinco painéis**,
+inclusive os quatro que têm `#END` de verdade.
+
+O que isso produzia não era erro: era o relatório imprimindo
+`init 155 comandos, 220 ms de espera (SEM #END)` em todos — uma informação
+plausível, errada, e visível na saída que eu tinha acabado de gerar. Eu li e não
+questionei, porque "uns painéis podem não fechar a sequência" soa razoável. O
+teste (`as linhas vêm separadas por NUL`) pegou.
+
+Duas lições, e a segunda é a que vale:
+
+1. marcador que começa com o caractere de comentário tem de ser testado **antes**
+   da separação de comentário;
+2. **eu tinha a saída na frente e não conferi.** O defeito não estava no parser —
+   estava em tratar saída plausível como saída verificada. É a mesma família do
+   §12.30 ("o teste perguntou a coisa errada") e do §12.35 (o BMP prova o
+   conteúdo, não a posição): a ferramenta respondeu, e a resposta não foi lida
+   com desconfiança.
+
+O teste que fecha isso não é sobre `#END`: é `round-trip` — a mesma descrição em
+texto e em NUL tem de produzir o mesmo painel, e `ended` tem de ser `true` nos
+quatro que fecham e `false` no único que não fecha.
+
 ## 13. Aparelhos
 
 | ID | Pasta | SoC | Arch | Status | Falta |
@@ -1573,7 +1611,7 @@ custa confiança no bloco inteiro (§12.34).
 | `powkiddy-x55` | `powkiddy x55/` | RK3566 | arm64 | draft | **boota com tela, áudio, Wi-Fi, BT e 16 botões + 4 eixos**; falta o launcher (do `Giochi app`) |
 | `powkiddy-x35s` | `powkiddy x35s/` | **RK3566** | arm64 | draft | DTS (compartilha com o X35H) e build |
 | `powkiddy-x35h` | `powkiddy x35h/` | **RK3566** | arm64 | draft | **boota com tela 640x480, `usb0` e SSH**; imagem de 04/11 já tem o `respawn`. Falta o launcher, o teste A/B de cartão e os eixos analógicos |
-| `r35s` | `r35s/` | RK3326 | arm64 | draft | pipeline RK3326 (BL31/DDR/U-Boot), joypad fora da árvore |
+| `r35s` | `r35s/` | RK3326 | arm64 | draft | pipeline RK3326 (BL31/DDR/U-Boot), joypad fora da árvore. **Console serial medido** (§13-A) |
 | `steamdeck` | `steamdeck/` | x86_64 | x86_64 | draft | kernel, firmware, áudio, Wi-Fi, controle |
 | `generic-x64` | `generic-x64/` | x86_64 | x86_64 | draft | **nunca compilado**; `pc_x86_64_efi_defconfig` declarado para permitir dispatch com `allow_draft` |
 
@@ -1587,6 +1625,112 @@ Mapas de botão: saem do **DTS**, não de banco público (`docs/button-maps.md`)
 O R35S é o que está mais avançado nisso: o DTB real está versionado em
 `device/r35s/dts/` e o `buttons.map` saiu dele. Confirmação final só com
 `evtest` no aparelho.
+
+## 13-A. O R35S medido pela serial (06/11/2026)
+
+Primeira leitura real desta placa. O firmware que estava no cartão é **ROCKNIX
+(kernel 7.1.2)**, não o nosso — mas é a única referência de hardware que existe,
+e ela é medida, não deduzida. Registro completo em
+[`device/r35s/README.md`](device/r35s/README.md).
+
+```text
+cmdline    boot=UUID=04BC-500B quiet console=ttyS2,1500000 console=tty0
+           systemd.debug_shell=ttyS2 uboot.hwid_adc=a,r33s
+compatible gameconsole,r35s gameconsole,r36s rockchip,rk3326
+model      Game Console R36S
+painel     640x480, só card0-DSI-1
+entrada    r36s_Gamepad -> js0 + event3
+RAM        981 MiB de 1 GB
+```
+
+O que isso corrige ou resolve:
+
+| Achado | Consequência |
+| --- | --- |
+| `/chosen/stdout-path = "serial2:1500000n8"` → `0xff160000` | o console **estava no DTB versionado** desde sempre. A varredura de 12 bauds de 04/11 procurou o que já estava no repositório. Agora está em `device.json` e num teste |
+| `compatible` da unidade == o do DTB em `dts/` | confirmado que é o device tree dela, não um parecido da pasta rk3326 |
+| `modinfo` → `license: GPL`, `author: ROCKNIX` | o joypad **tem fonte**. Não é caixa-preta; é trabalho de portar |
+| o `.ko` é do kernel 7.1.2 | não serve para nós (6.12, `vermagic` diferente). O caminho é o fonte |
+| `/` é `loop0` (1,2 GiB) dentro da FAT, e `p2` leva 114 GiB | **prior art** para a partição de dados pendente (ver abaixo) |
+| `lsblk` não existe nessa imagem | usar `/proc/partitions` e `df` |
+
+**Herança para a decisão da partição de dados** (o "piso 4 GiB + resto do
+cartão" que segue como proposta do dono do projeto): o ROCKNIX resolve o
+problema do tamanho fixo **não** tendo o rootfs como partição. A raiz é um
+arquivo dentro da FAT de 2 GiB, montado por `loop`; o resto do cartão é uma
+partição de dados inteira. Assim a imagem não precisa crescer no primeiro boot,
+e o A/B fica trivial (dois arquivos, o extlinux escolhe). Custo medido: escrever
+no rootfs exige remontar em `rw`, e o `loop` consome RAM num aparelho de 1 GB.
+
+### Os cinco painéis, medidos
+
+O aparelho sai de fábrica com painéis diferentes. Os cinco overlays do ROCKNIX
+foram lidos e guardados em texto em
+[`device/r35s/panels/`](device/r35s/panels/README.md) — texto e não `.dtbo`
+porque binário no Git não mostra o que mudou.
+
+O driver `rocknix,generic-dsi` **não tem timing no código**: recebe a descrição
+como dado, na propriedade `panel_description`, separada por **NUL** (procurar
+`\n` devolve tudo numa linha e o parse falha em silêncio).
+
+| Painel | `size` mm | refresh (calc.) | modos | init |
+| --- | --- | --- | --- | --- |
+| `r36s_clone` | 153×85 | 58,50 Hz | 12 | 24 |
+| `r36s-panel1` | 52×70 | 68,54 Hz | 3 | 25 |
+| `r36s-panel2` | 52×70 | 77,38 Hz | 3 | 187 |
+| `r36s-panel3` | 52×70 | 77,38 Hz | 3 | 188 |
+| `r36s-panel4` | 52×70 | **59,94 Hz** | 3 | 155 |
+
+A conta é `refresh = clock ÷ (htotal × vtotal)`. Validação obtida: o `panel4` é o
+único que declara o refresh pretendido em comentário (`# 60`, `# 50`, `# 75`), e
+a conta dá 59,94 / 50,02 / 75,03 — fecha nos três. Sem essa conferência o modelo
+seria só plausível.
+
+**`size` é (lado curto, lado longo), não (largura, altura).** Medido: 70/52 =
+1,346 contra 640/480 = 1,333 confere; lido ao contrário daria 0,743 e acusaria
+erro em quatro painéis corretos. A checagem de geometria é sem rotação de
+propósito.
+
+Avisos que ficam como aviso (o dado não permite decidir):
+
+| Achado | Por que não é `FAIL` |
+| --- | --- |
+| `r36s_clone`: `size=153,85` (16:9, ~7") com todos os modos 4:3, e é o único **sem `#END`** | 35% de divergência; parece descrição de outro clone, mas não se prova |
+| `panel1/2/3` a 29 MHz dão 68,5 e 77,4 Hz, não 60 | pode ser refresh real ou clock para outro alvo; sem datasheet não se resolve |
+| `panel2` e `panel3` diferem em um comando | são painéis diferentes; "tanto faz" está errado |
+
+Armadilha medida: o `panel4` tem **dois** `0x11` e **dois** `0x29` (um par no meio
+com payload, outro no fim). Procurar "existe 0x11" acha o do meio e o teste passa
+a verificar a coisa errada. O que vale é **os dois últimos comandos, nesta
+ordem**: `0x29` antes do `0x11` deixa a tela apagada com o driver reportando
+sucesso.
+
+Isso **não** permite identificar o painel de um aparelho sem ligá-lo — DSI não
+tem EDID. O que passou a existir é comparação: "o panel4 é o de 60 Hz com 155
+comandos" em vez de "tenta o panel3".
+
+O material tem valor mesmo com driver diferente: nós usamos mainline (`hx8394` na
+X55, `st7703` na X35H), e o caro de obter não é o driver, são as **sequências de
+inicialização** — 155 a 188 comandos DCS por painel, agora em texto portável.
+
+**Pendência sem resposta:** `uboot.hwid_adc` desta unidade reporta **`r33s`**,
+divergindo do `compatible` (`r35s`/`r36s`) e do `model` (R36S). Não se sabe se é
+a tabela do U-Boot ou reaproveitamento. Enquanto não estiver entendido, **não**
+usar esse ADC para escolher overlay de painel — seria a mesma classe de falha do
+§12.26 (herdar premissa de outro aparelho e não perceber).
+
+**O teste que prende isso:** `tests/device-r35s-console.test.mjs` (7 casos) lê o
+DTB versionado e exige que `device.json` declare o mesmo console. Mexer num sem o
+outro falha ali, não num aparelho com tela preta. Ele já pegou uma sutileza: com
+`#address-cells = 2` o `reg` é endereço de 64 bits, e ler só o primeiro u32
+devolve zero — teste que passaria sem testar nada.
+
+E `tests/dsi-panel.test.mjs` (16 casos) prende os cinco painéis: identidade,
+refresh declarado contra calculado, geometria sem rotação, e a armadilha dos dois
+`0x11`. Os dois testes que falharam na primeira execução eram **bug meu no
+parser** (`#END` começava com `#` e era descartado como comentário vazio, então
+todo painel saía "SEM #END") e uma premissa errada (`.find()` pegava o `0x11` do
+meio). Vale como lembrete: teste que falha costuma estar certo.
 
 ## 14. Próximos passos, por ordem de risco
 
@@ -1650,7 +1794,10 @@ tem precedência histórica e a divergência precisa ser resolvida explicitament
 - **X55 e X35H bootam em hardware** (X55: tela, áudio, Wi-Fi, BT, 16 botões e 4
   eixos; X35H: tela 640x480, `usb0` e SSH). Os dois continuam `draft` porque
   `ready` exige a interface, que é do `Giochi app`.
-- X35S, R35S e Steam Deck nunca bootaram; X35S e R35S nem têm defconfig.
+- X35S e Steam Deck nunca bootaram; X35S nem tem defconfig.
+- **O R35S boota, mas com o firmware de fábrica (ROCKNIX 7.1.2), não com o
+  nosso** — não há defconfig nem pipeline RK3326. A serial foi medida (§13-A) e o
+  console está declarado; o que falta é o loader do PX30 e o joypad portado.
 - O build completo do `qemu-aarch64` passou no CI (run #15). O build local do X55
   passou em 04/11, mas **nunca no CI** — o dispatch do X55 ainda não foi reenviado.
 - `bash -n` prova sintaxe, não comportamento; o `sh` local não é busybox ash.

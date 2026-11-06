@@ -103,15 +103,43 @@ console=ttyS2,1500000n8 earlycon=uart8250,mmio32,0xff160000
 > Receita: [`docs/troubleshooting.md`](../../docs/troubleshooting.md) § *Console
 > serial: linha muda, ruído, ou adaptador caindo*.
 
-## O painel é uma loteria de lote
+## O painel é uma loteria de lote — agora com os cinco medidos
 
 O mesmo aparelho sai de fábrica com telas diferentes. Não há detecção automática
-(painel DSI não tem EDID), e o U-Boot da ROCKNIX lê ADC para descobrir o **modelo
-da placa**, não o painel.
+(painel DSI **não tem EDID**), e o U-Boot lê ADC para descobrir o **modelo da
+placa**, não o painel.
 
-O caminho que funciona: overlay `mipi-panelN.dtbo` na partição de boot.
-A unidade de referência é **panel4** (52×70 mm, 29 MHz). Se a tela ficar preta, é
-o overlay — trocar até ligar, não mexer no resto.
+O caminho que funciona continua sendo overlay `mipi-panelN.dtbo` na partição de
+boot e trocar até ligar. O que mudou é que agora os cinco estão descritos em
+texto, com números, em [`panels/`](panels/README.md):
+
+```bash
+node scripts/panel-inspect.mjs device/r35s/panels/*.txt
+```
+
+| Painel | `size` | refresh (calc.) | modos | comandos de init |
+| --- | --- | --- | --- | --- |
+| `r36s_clone` | 153×85 | 58,50 Hz | 12 | 24 |
+| `r36s-panel1` | 52×70 | 68,54 Hz | 3 | 25 |
+| `r36s-panel2` | 52×70 | 77,38 Hz | 3 | 187 |
+| `r36s-panel3` | 52×70 | 77,38 Hz | 3 | 188 |
+| `r36s-panel4` | 52×70 | **59,94 Hz** | 3 | 155 |
+
+Todos 640×480, 4 lanes, `rgb888`. O **panel4** é a unidade de referência, e é o
+único que declara o refresh pretendido em comentário (`# 60`, `# 50`, `# 75`) —
+o que permitiu **validar a conta** `refresh = clock ÷ (htotal × vtotal)` contra a
+intenção do autor: 59,94 / 50,02 / 75,03 Hz. Fecha nos três.
+
+Dois avisos que saíram daí, e que ficam como aviso porque o dado não deixa
+decidir:
+
+- `r36s_clone` declara painel 16:9 (`size=153,85`) com todos os modos 4:3, e é o
+  único **sem `#END`** — provavelmente descrição de outro clone, não desta placa;
+- `panel1`/`panel2`/`panel3` a 29 MHz dão 68,5 e 77,4 Hz, não 60. Pode ser real
+  ou clock escolhido para outro alvo; sem datasheet não se resolve.
+
+O que isso **não** resolve: dizer qual painel está dentro de um aparelho sem
+ligá-lo. Não existe consulta para isso em DSI.
 
 ## Áudio: cuidado, é diferente da X55
 
@@ -279,8 +307,9 @@ TrustZone. `lsblk` **não existe** nessa imagem; `/proc/partitions` e `df` sim.
   deu tela preta. Nada disso foi reproduzido por nós.
 - **Trazer o joypad para a árvore** — o fonte é GPL e existe, mas ainda não foi
   compilado contra o nosso kernel 6.12. Sem ele, **nenhum botão funciona**.
-- **Overlay de painel** — a loteria de lote continua: esta unidade aceita
-  `panel4`, a próxima pode não aceitar.
+- **Overlay de painel** — a loteria de lote continua, mas agora com os cinco
+  descritos em texto e comparáveis ([`panels/`](panels/README.md)). O `panel4` é
+  a referência; a próxima unidade pode não aceitar.
 - **genimage** e validação de build.
 
 **Riscos medidos, ainda não resolvidos:**
