@@ -138,3 +138,77 @@ test("o nome da raiz do repositório é ROOT, e REPO_ROOT não existe", () => {
   const wrong = [...body.matchAll(/.*\$\{?REPO_ROOT.*/g)].map((m) => m[0].trim());
   assert.deepEqual(wrong, [], `REPO_ROOT não existe neste script: ${wrong.join(" | ")}`);
 });
+
+// ── falha silenciosa sob `set -euo pipefail` ────────────────────────────────
+//
+// O teste acima pega VARIÁVEL não definida. Este pega o irmão dele: comando que
+// falha e derruba o script sem mensagem, porque o erro foi para `/dev/null`.
+//
+// Medido no CI do commit dc030b0 (`Build qemu-aarch64`): o script imprimiu o
+// cabeçalho — device, arch, work, out — e saiu com código 1 **sem mais nenhuma
+// linha**. Causa: `sha256sum "$DEVICE_DIR/linux.fragment"` num aparelho que não
+// tem fragmento de kernel (o `qemu-aarch64` usa o config default). Com
+// `pipefail`, a atribuição devolve não-zero, e `set -e` mata o script. O
+// `2>/dev/null` garantia que ninguém visse o motivo.
+//
+// A verificação é por EXECUÇÃO, não por texto: extrai o bloco entre os marcadores
+// `giochi-system:kernel-fragment-state:{begin,end}` do próprio script e roda num
+// bash real, com `set -euo pipefail`, contra dois diretórios de aparelho — um com
+// fragmento, outro sem. Texto não pegaria: `bash -n` passa nos dois casos.
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { execFileSync } from "node:child_process";
+
+function extractBlock() {
+  const begin = "giochi-system:kernel-fragment-state:begin";
+  const end = "giochi-system:kernel-fragment-state:end";
+  const lines = SCRIPT.split("\n");
+  const from = lines.findIndex((line) => line.includes(begin));
+  const to = lines.findIndex((line) => line.includes(end));
+  assert.ok(from > 0 && to > from, "marcadores do bloco de fragmento ausentes no script");
+  return lines.slice(from + 1, to).join("\n");
+}
+
+function runBlock({ withFragment }) {
+  const root = mkdtempSync(join(tmpdir(), "giochi-frag-"));
+  const deviceDir = join(root, "device");
+  const workDir = join(root, "work");
+  const buildDir = join(root, "build");
+  mkdirSync(deviceDir, { recursive: true });
+  mkdirSync(workDir, { recursive: true });
+  // Simula um kernel já configurado: é o caso em que o bloco tomaria decisão.
+  mkdirSync(join(buildDir, "build", "linux-6.12"), { recursive: true });
+  writeFileSync(join(buildDir, "build", "linux-6.12", ".stamp_configured"), "");
+
+  if (withFragment) writeFileSync(join(deviceDir, "linux.fragment"), "CONFIG_FOO=y\n");
+
+  const harness = [
+    "set -euo pipefail",
+    `DEVICE_DIR=${JSON.stringify(deviceDir)}`,
+    `WORK_DIR=${JSON.stringify(workDir)}`,
+    `BUILD_DIR=${JSON.stringify(buildDir)}`,
+    "FORCE_KERNEL_REBUILD=0",
+    "KERNEL_REBUILD_REASON=",
+    extractBlock(),
+    'printf "FORCE=%s\\n" "${FORCE_KERNEL_REBUILD}"',
+    'printf "STATE=%s\\n" "$(cat "$KERNEL_FRAGMENT_STATE_FILE" 2>/dev/null || echo vazio)"',
+  ].join("\n");
+
+  return execFileSync("bash", ["-c", harness], { encoding: "utf8" });
+}
+
+test("o bloco do fragmento sobrevive a aparelho SEM linux.fragment", () => {
+  // O caso exato do qemu-aarch64, que derrubou o CI.
+  const output = runBlock({ withFragment: false });
+  assert.match(output, /FORCE=0/, "sem fragmento não há o que comparar nem limpar");
+  assert.match(output, /STATE=vazio/, "sem fragmento não se grava estado");
+});
+
+test("o bloco do fragmento limpa o kernel quando o hash muda", () => {
+  // Com fragmento e kernel já configurado, o primeiro run grava estado e pede
+  // rebuild — é o comportamento que existe para o §12.11 não morder.
+  const output = runBlock({ withFragment: true });
+  assert.match(output, /FORCE=1/, "fragmento novo com kernel já configurado pede dirclean");
+  assert.match(output, /STATE=[0-9a-f]{64}/, "o hash do fragmento tem de ser gravado");
+});

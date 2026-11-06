@@ -166,13 +166,24 @@ fi
 # Medido em 06/11/2026 ao trocar `CONFIG_DRM_PANFROST` de `=m` para `=y`: o
 # fragmento novo pedia `=y`, o `.config` do kernel ainda tinha `=m`, e o build
 # parou no assert. Limpar o pacote resolve, e é o que este bloco faz sozinho.
+#
+# giochi-system:kernel-fragment-state:begin
 KERNEL_FRAGMENT_STATE_FILE="$WORK_DIR/kernel-fragment.state"
+CURRENT_FRAGMENT=""
 # O hash é do arquivo em `device/`, NÃO da cópia em `work/`: este bloco roda antes
 # do staging (que acontece na parte de preparação, mais abaixo). Hashear a cópia
 # deixava a comparação um build atrasada — medido em 06/11/2026, o build seguinte
 # a uma mudança sempre via "fragmento mudou" e limpava o kernel sem necessidade,
 # porque o estado gravado era do arquivo velho e a cópia já estava atualizada.
-CURRENT_FRAGMENT="$(sha256sum "$DEVICE_DIR/linux.fragment" 2>/dev/null | awk '{print $1}')"
+#
+# A guarda `-f` não é zelo: com `set -euo pipefail`, `sha256sum` de arquivo
+# inexistente derruba o script **em silêncio** (o `2>/dev/null` esconde o erro e
+# não há linha de diagnóstico). Aconteceu no CI do commit dc030b0: o
+# `qemu-aarch64` não tem `linux.fragment` e o build morreu em 0 s, depois de
+# imprimir o cabeçalho e nada mais. §12.53.
+if [[ -f "$DEVICE_DIR/linux.fragment" ]]; then
+  CURRENT_FRAGMENT="$(sha256sum "$DEVICE_DIR/linux.fragment" | awk '{print $1}')"
+fi
 PREVIOUS_FRAGMENT="$(cat "$KERNEL_FRAGMENT_STATE_FILE" 2>/dev/null || true)"
 if [[ -n "$CURRENT_FRAGMENT" && "$CURRENT_FRAGMENT" != "$PREVIOUS_FRAGMENT" ]]; then
   if compgen -G "$BUILD_DIR/build/linux-*/.stamp_configured" >/dev/null; then
@@ -181,6 +192,7 @@ if [[ -n "$CURRENT_FRAGMENT" && "$CURRENT_FRAGMENT" != "$PREVIOUS_FRAGMENT" ]]; 
   fi
   printf '%s' "$CURRENT_FRAGMENT" >"$KERNEL_FRAGMENT_STATE_FILE" 2>/dev/null || true
 fi
+# giochi-system:kernel-fragment-state:end
 
 # Pacote REMOVIDO da config continua no target/ e entra na imagem.
 #

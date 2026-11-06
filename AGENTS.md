@@ -77,7 +77,7 @@ Repositório: `https://github.com/xtrempkch-droid/GIOCHI-SYSTEM` — branch `mai
 
 | Verificação | Resultado |
 | --- | --- |
-| `node tests/run-all.mjs` | **397/397** (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, devices 13, assert-config 12, fdt 11, …) |
+| `node tests/run-all.mjs` | **402/402** (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, devices 13, assert-config 12, fdt 11, …) |
 | `node scripts/validate-devices.mjs` | OK — 7 devices, 1 habilitado |
 | `node scripts/list-devices.mjs --github-matrix` | matriz com `qemu-aarch64` |
 | matriz com `--device powkiddy-x55 --allow-draft` | devolve **só** o X55 |
@@ -426,7 +426,7 @@ si (§12.4), mas provavelmente **não** era a causa dos 3 s.
 
 ```bash
 node scripts/validate-devices.mjs
-node tests/run-all.mjs                          # 397 testes
+node tests/run-all.mjs                          # 402 testes
 node scripts/list-devices.mjs
 node scripts/list-devices.mjs --github-matrix
 node scripts/list-devices.mjs --github-matrix --device powkiddy-x55 --allow-draft
@@ -466,7 +466,7 @@ absoluto** do host — §12.40).
 
 ## 10. Testes
 
-`node tests/run-all.mjs` → **397/397**:
+`node tests/run-all.mjs` → **402/402**:
 
 | Arquivo | Testes | Cobre |
 | --- | --- | --- |
@@ -2536,6 +2536,68 @@ parece dado ausente e é ferramenta errada. Trocado por glob de shell em dois
 níveis, que funciona — e é o que responde a pergunta. Detectado só porque o teste
 foi feito no aparelho, não no desktop.
 
+### 12.53 `set -euo pipefail` + `2>/dev/null` = build morre em 0 s, sem dizer nada
+
+Encontrado pelo **CI**, não localmente — e essa é a parte que vale registrar.
+
+O commit `dc030b0` passou aqui (build do R35S verde, 79 símbolos de kernel
+verificados, testes 400/400) e **falhou no CI em zero segundo**:
+
+```text
+2026-11-06T22:38:07Z Giochi System
+2026-11-06T22:38:07Z   device:    qemu-aarch64 (QEMU AArch64 Virt)
+2026-11-06T22:38:07Z   arch:      arm64
+2026-11-06T22:38:07Z   buildroot: 2024.02
+2026-11-06T22:38:07Z   work:      …/work/qemu-aarch64
+2026-11-06T22:38:07Z   cache:     …/.cache
+2026-11-06T22:38:07Z   out:       …/out/qemu-aarch64
+2026-11-06T22:38:07Z ##[error]Process completed with exit code 1.
+```
+
+O cabeçalho, e mais nada. Nenhuma linha de erro, nenhum nome de arquivo — a
+assinatura de comando que falhou com o `stderr` redirecionado para `/dev/null`.
+
+A linha era minha, do §12.51:
+
+```bash
+CURRENT_FRAGMENT="$(sha256sum "$DEVICE_DIR/linux.fragment" 2>/dev/null | awk '{print $1}')"
+```
+
+O `qemu-aarch64` **não tem** `linux.fragment` (usa o config default do
+`qemu_aarch64_virt_defconfig`). Sem `pipefail`, a atribuição devolveria o status
+do `awk` — zero — e o script seguiria com `CURRENT_FRAGMENT` vazio. Com
+`pipefail`, a pipeline inteira devolve o não-zero do `sha256sum`, e o `set -e`
+mata o script. O `2>/dev/null` garantia que ninguém visse por quê.
+
+**Por que passou local e falhou no CI:** aqui eu buildei o **R35S**, que tem
+fragmento de kernel; o CI builda o **qemu-aarch64**, que não tem. Um caso de cada
+lado, e o de lá é o único aparelho habilitado — ou seja, era o caminho principal
+que eu nunca exercitei com aquela linha.
+
+Correção, e o que ela evita:
+
+```bash
+CURRENT_FRAGMENT=""
+if [[ -f "$DEVICE_DIR/linux.fragment" ]]; then
+  CURRENT_FRAGMENT="$(sha256sum "$DEVICE_DIR/linux.fragment" | awk '{print $1}')"
+fi
+```
+
+Guarda explícita, não `|| true`: com `-f` na frente não há status não-zero para
+ignorar, e o `stderr` pode voltar a aparecer.
+
+**A lição de método** é a mesma do §12.34 com outra roupa: o teste perguntou pela
+coisa errada. Aqui não foi um teste — foi **um build só**. "Build verde" num
+aparelho não diz nada sobre o outro, e o `qemu-aarch64` é justamente o que
+sustenta o pipeline enquanto não há hardware.
+
+`tests/build-device-vars.test.mjs` ganhou o par executável: extrai o bloco entre
+`giochi-system:kernel-fragment-state:{begin,end}` do próprio script e roda num
+bash real com `set -euo pipefail`, contra um aparelho **com** fragmento e outro
+**sem**. Verificado nos dois sentidos — reintroduzir a linha sem guarda faz o
+teste falhar (4/5), e era isso que faltava. `bash -n` passa nos dois casos, então
+sintaxe nunca ia pegar.
+
 ## 13. Aparelhos
 
 | ID | Pasta | SoC | Arch | Status | Falta |
@@ -2898,7 +2960,7 @@ o cartão — não só no `target/`.
 
 | Item | Estado |
 | --- | --- |
-| Código e configuração | **pronto** — 397/397 testes |
+| Código e configuração | **pronto** — 402/402 testes |
 | Imagem X55 (`Image` + `rootfs.ext4` + DTB + bootloader) | **existe** em `out/powkiddy-x55/`, `built_at_utc=2026-11-04T21:05:13Z` |
 | `/etc/inittab` na imagem | **linha 30: `::respawn:/usr/bin/giochi-init`** — conferida com `debugfs` no `rootfs.ext4` |
 | `work/` do X55 | preservado em `~/.cache/giochi-system/work/powkiddy-x55` (17 GB, já com `target/` finalizado) |
@@ -3016,7 +3078,7 @@ Ordem sugerida para a próxima sessão (nada aqui precisa da X55):
 
 ```bash
 node scripts/validate-devices.mjs      # 7 devices, 1 habilitado
-node tests/run-all.mjs                 # 397/397
+node tests/run-all.mjs                 # 402/402
 node scripts/list-devices.mjs --github-matrix
 ```
 
@@ -3082,7 +3144,7 @@ as duas correções (`uboot-patches/0001-…-adc-nao-fatal.patch` +
 
 ```bash
 cd /home/charles/Giochi/GIOCHI-SYSTEM
-node tests/run-all.mjs                                   # esperado: 397/397
+node tests/run-all.mjs                                   # esperado: 402/402
 git add device/r35s/README.md AGENTS.md
 git commit -m "r35s: o U-Boot mainline liga; a frase do README estava desatualizada
 
