@@ -1420,6 +1420,220 @@ A terceira chave, `/user/.config/giochi/device.key`, **não** é gerada aqui: el
 nasce no aparelho no primeiro boot. Quem a gera é o app, para não haver corrida
 entre launcher e loja.
 
+### 12.42 USB gadget no RK3326: `dr_mode = "otg"` não funciona, `peripheral` sim
+
+Medido no R35S em 06/11/2026, cabo plugado na única porta USB. **Duas** peças
+faltavam, e as duas são invisíveis em mensagem de erro:
+
+| Peça | Estado no DTS do vendor | Efeito |
+| --- | --- | --- |
+| `u2phy_otg` (`otg-port` do PHY) | `status = "disabled"` | nenhum PHY criado; `phys = <&u2phy_otg>` fica pendurado |
+| `&usb20_otg` | `dr_mode = "otg"` | dwc2 espera `bvalid` do PHY antes de conectar o pullup |
+
+Com as duas corrigidas (`otg-port` okay **e** `dr_mode = "peripheral"`):
+
+```text
+/sys/class/udc/ff300000.usb/state   ->  configured
+usb0                                ->  <BROADCAST,MULTICAST,UP,LOWER_UP> state UP
+dmesg (aparelho)                    ->  dwc2: new device is high-speed / new address 13
+dmesg (PC)                          ->  rndis_host 2-2:1.0 usb0: register 'rndis_host'
+                                        Product: Giochi System / Manufacturer: Giochi
+ping 10.55.0.2                      ->  0% loss, 0,5 ms
+porta 22                            ->  SSH-2.0-OpenSSH_9.6
+```
+
+E o PC recebe `10.55.0.1` por DHCP sozinho — o `udhcpd` do `usb0` funciona sem
+configurar nada no host, como o `docs/sistema-base.md` promete.
+
+**Ligar só o `otg-port` não bastou, e isso foi medido:** depois de corrigir o
+`status`, o PHY passou a existir (o IRQ do dwc2 mudou de 61 para 63, sinal de que
+o port foi inicializado) e o estado continuou `not attached`. Ou seja, o
+`otg-port` é condição necessária e **não suficiente**.
+
+#### O que `bvalid` tem a ver com o carregador
+
+Em modo `otg` o dwc2 consulta o `bvalid` do PHY — o sinal de que há 5 V no pino
+VBUS — antes de conectar o pullup de D+. Neste aparelho esse sinal não chega: a
+alimentação entra pelo carregador do PMIC `rk817`, não pelo pino VBUS do
+controlador. Em modo `peripheral` o `dwc2_hsotg_pullup`
+(`drivers/usb/dwc2/gadget.c`) conecta o pullup **sem esperar VBUS**, e o host
+enumera.
+
+#### A consequência que dói, e é de hardware
+
+Com `peripheral` esta porta **não funciona como host**. O R35S não tem rádio
+onboard, então **dongle Wi-Fi/USB não é opção nesta placa** — a regra do §12.31
+("hardware fornecido pelo usuário também se empacota") não se aplica aqui porque
+não há porta para ele. Fica o shell por USB, que é o canal do sistema base.
+
+Duas conclusões de método que valem além desta placa:
+
+1. **`dr_mode` não é preferência de configuração, é o que o hardware consegue
+   fazer.** `otg` é o valor "certo" no papel e o que não funciona aqui.
+2. **Duas peças, um sintoma.** `otg-port` desligado e `dr_mode` errado dão
+   exatamente o mesmo `NO-CARRIER`, e corrigir uma não move o sintoma — o que
+   faz parecer que a correção estava errada. Foi preciso corrigir as duas e
+   reiniciar para o link subir.
+
+### 12.42-A `status = "disabled"` num subnó de PHY é USB morto, sem erro
+
+Medido no R35S em 06/11/2026, com o cabo plugado na porta OTG:
+
+```text
+/sys/class/udc/ff300000.usb/state      ->  not attached
+/sys/kernel/config/usb_gadget/*/UDC    ->  ff300000.usb      (gadget vinculado)
+ip link show usb0                      ->  NO-CARRIER, com 10.55.0.2 atribuído
+dmesg                                  ->  "bound driver configfs-gadget.giochi"
+```
+
+O gadget estava armado, o UDC existia, o endereço de IP estava lá — e o link
+nunca subia. Nenhuma mensagem de erro em lugar nenhum.
+
+A causa está no DTS do vendor, e não parece um defeito:
+
+```dts
+&u2phy {
+	status = "okay";
+	host-port { status = "okay"; };
+
+	u2phy_otg: otg-port {
+		status = "disabled";      /* <- aqui */
+	};
+};
+```
+
+`rockchip_usb2phy_probe` percorre os filhos com `for_each_available_child_of_node`
+(`drivers/phy/rockchip/phy-rockchip-inno-usb2.c`), que **pula** nó `disabled`.
+Resultado: **nenhum PHY é criado** para o OTG. E o controlador pede exatamente
+esse PHY:
+
+```text
+usb@ff300000   phys = <&u2phy_otg>   →  /syscon@ff2c0000/usb2phy@100/otg-port
+               vbus-supply = <&otg_switch>
+```
+
+Sem PHY não há detecção de VBUS, e o dwc2 fica em `not attached` para sempre.
+
+**Por que o DTS do vendor funciona para eles:** não sabemos, e é irrelevante —
+o que está medido é que **não funciona para nós**. O R35S tem **uma** porta USB
+(`usb@ff300000`, `dr_mode=otg`); as outras duas do PX30 (`ff340000`, `ff350000`)
+estão `disabled`. Ou seja, sem o `otg-port` não há USB nenhum, nem para shell.
+
+Lição que vale além desta placa: **`status` em subnó de PHY não é detalhe de
+configuração — é a existência do dispositivo.** Um DTS com o nó desligado compila,
+gera DTB válido, e produz um aparelho sem o barramento. O sintoma (`NO-CARRIER`)
+aponta para rede, e a causa está em outra camada.
+
+O gerador `scripts/gerar-patch-dts.mjs` passou a **recusar** publicar DTS com o
+`u2phy_otg` desligado, junto das outras duas checagens de significado
+(`rocknix,generic-dsi` no painel e `gameconsole,r35s` no compatible) — as três
+que já custaram um boot.
+
+### 12.44 MTP não existe no kernel mainline — e "existe" é o que importa
+
+Pedido de "confirmar o MTP" em 06/11/2026. A verificação deu **negativo**, e o
+resultado é medido, não suposto:
+
+```text
+$ ls drivers/usb/gadget/function/ | grep -i mtp
+(nada)
+$ grep -r CONFIG_USB_CONFIGFS_MTP drivers/usb/gadget/Kconfig
+(nada)
+```
+
+O kernel mainline **não tem `f_mtp`**. MTP existe no Android porque ele precisa
+de um protocolo para expor mídia sem entregar o armazenamento cru ao PC —
+restrição que este aparelho não tem. Trazer `f_mtp` seria mais um driver fora da
+árvore (seria o quarto) para resolver um problema que `mass_storage` resolve.
+
+O que foi feito em vez disso: `giochi-usbnet --ms <partição>` expõe uma partição
+como disco removível. Medido no aparelho:
+
+```text
+(aparelho)  giochi-usbnet: modo armazenamento: /dev/mmcblk1p1 exposta como disco removível
+(PC)        sde  256M  disk  usb  File-Stor Gadget  RM=1
+            sd 1:0:0:0: [sde] 524288 512-byte logical blocks: (268 MB/256 MiB)
+            sd 1:0:0:0: [sde] Attached SCSI removable disk
+            /run/media/charles/GIOCHI_BOOT  (montou sozinho)
+```
+
+E o `md5sum` do `Image` lido **pelo PC**, através da USB, bate com o build. É o
+`cp` direto, sem cliente nem daemon no aparelho.
+
+#### A guarda que quase não existiu, e o defeito que ela própria tinha
+
+Expor o rootfs a outro computador deixa o host escrever num filesystem **em uso**
+— o kernel do aparelho não sabe, e o dano aparece no boot seguinte. A primeira
+versão da guarda comparava `/proc/mounts` com o part via `readlink -f`:
+
+```text
+/proc/mounts  ->  /dev/root         (nome de conveniência)
+readlink -f   ->  /dev/root         (o node NÃO existe)
+ls /dev/root  ->  No such file or directory
+```
+
+`readlink -f` de caminho inexistente devolve o próprio caminho, então
+`/dev/root` ≠ `/dev/mmcblk1p2` e a guarda **deixava passar**. E passou: o teste
+no aparelho expôs `mmcblk1p2` ao PC antes de eu perceber.
+
+O método que funciona compara **major:minor**, que é o que o kernel usa e não
+depende de nome de node:
+
+```text
+/proc/self/mountinfo  ->  "24 1 179:2 / / rw,relatime - ext4 /dev/root rw"
+/sys/dev/block/179:2  ->  .../mmcblk1/mmcblk1p2
+```
+
+E a primeira tentativa de conversão hex→decimal usou `strtonum` do awk — que
+**não existe no busybox** (§12.20, o mesmo erro do contador de bits). A versão
+que ficou lê o número decimal direto do nome do symlink em `/sys/dev/block`, que
+o kernel já publica pronto.
+
+Verificado no aparelho depois da correção:
+
+```text
+# giochi-usbnet --ms /dev/mmcblk1p2
+giochi-usbnet: RECUSADO: /dev/mmcblk1p2 é a partição que sustenta o / deste aparelho.
+exit=1
+```
+
+A lição: **a guarda de segurança também precisa de teste no dispositivo.** Um
+teste de unidade da lógica não pegaria, porque a lógica estava certa para os
+dados que eu inventei — e os dados reais (`/dev/root`) têm uma forma que eu não
+previ.
+
+### 12.43 Codec e I2S ligados, e mesmo assim `--- no soundcards ---`
+
+Medido no R35S em 06/11/2026, com a imagem que já bootava:
+
+```text
+CONFIG_SND_SOC_RK817=y
+CONFIG_SND_SOC_ROCKCHIP_I2S=y
+CONFIG_MFD_RK8XX_I2C=y
+rk808-regulator ... registered
+--- no soundcards ---
+```
+
+Faltavam **duas** peças independentes, com o mesmo sintoma:
+
+| Peça | Estado | Efeito |
+| --- | --- | --- |
+| `CONFIG_SND_SIMPLE_CARD` | `=m` (default do arm64) | o `.ko` existia em `/lib/modules/…/snd-soc-simple-card.ko` e **nada o carregava** |
+| `BR2_PACKAGE_ALSA_LIB` | ausente | rootfs sem `libasound.so`; o SDL2 não abre dispositivo |
+
+O `simple-audio-card` é quem **lê** o nó `rk817-sound` do DTS e monta o card.
+Codec e CPU-DAI sozinhos não criam card nenhum — eles ficam registrados,
+esperando alguém ligá-los.
+
+É a **mesma armadilha do X55** (§3, `S15modules`): módulo presente na imagem,
+nenhum autoload, build verde, hardware mudo. O R35S não tem `/etc/modules` nem
+`S15modules`, então `=m` significa "no disco e morto". Áudio é hardware **onboard**
+(aparece em todo boot, não é acessório), então `=y`.
+
+Regra que decorre: **ao revisar um nó de hardware no DTS, conte as peças do card
+— codec, CPU-DAI, e o próprio card.** Um `grep` por `SND_SOC_RK817` acha duas das
+três e dá a impressão de que está resolvido.
+
 ### 12.32 CMake 4.x recusa pacote do Buildroot 2024.02 (só em build do zero)
 
 Buildroot 2024.02 é de fevereiro de 2024, e vários pacotes dela ainda declaram

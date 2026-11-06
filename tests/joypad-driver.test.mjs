@@ -16,9 +16,11 @@
 // exigência em `kernel-required.txt`.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync,
+  writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import * as path from "node:path";
 import { test } from "node:test";
 
 const ROOT = new URL("..", import.meta.url).pathname;
@@ -262,6 +264,281 @@ test("o patch do painel APLICA numa fonte limpa (dry-run)", () => {
       { cwd: tmp, encoding: "utf8" });
     assert.match(out, /checking file drivers\/gpu\/drm\/panel\/Makefile/);
     assert.ok(!/FAILED/.test(out), out);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ── áudio: o card, não só o codec ─────────────────────────────────────────
+//
+// Medido no aparelho em 06/11/2026 com a imagem que bootou: `CONFIG_SND_SOC_RK817=y`,
+// `CONFIG_SND_SOC_ROCKCHIP_I2S=y`, PMIC `rk808` probe OK — e mesmo assim
+// `--- no soundcards ---`.
+//
+// Faltavam DUAS peças, independentes, com o mesmo sintoma:
+//
+//   1. `CONFIG_SND_SIMPLE_CARD` estava `=m` (default do defconfig arm64) e o
+//      R35S não tem `/etc/modules` nem `S15modules`. O `.ko` existia em
+//      `/lib/modules/.../snd-soc-simple-card.ko` e nada o carregava — a mesma
+//      armadilha do X55 (§3), com o mesmo build verde.
+//   2. `BR2_PACKAGE_ALSA_LIB` não estava ligada em lugar nenhum, então o rootfs
+//      não tinha `libasound.so` e o SDL2 não tinha como abrir o dispositivo.
+
+test("o card de som é =y, não =m — nada carrega módulo neste aparelho", () => {
+  // Sem `/etc/modules` e sem `S15modules`, `=m` significa "no disco e morto".
+  assert.match(fragment, /^CONFIG_SND_SIMPLE_CARD=y$/m);
+  assert.match(required, /^CONFIG_SND_SIMPLE_CARD=y$/m);
+  // E o codec e o I2S continuam exigidos: o card sozinho não faz som.
+  assert.match(fragment, /^CONFIG_SND_SOC_RK817=y$/m);
+  assert.match(fragment, /^CONFIG_SND_SOC_ROCKCHIP_I2S=y$/m);
+});
+
+test("o R35S não tem S15modules, então módulo de áudio seria mudo", () => {
+  // Este teste documenta a PREMISSA da decisão acima. Se um dia alguém criar
+  // um S15modules para este aparelho, o `=m` volta a ser aceitável — e este
+  // teste avisa que a premissa mudou.
+  const temS15 = existsSync(`${ROOT}device/r35s/rootfs-overlay/etc/init.d/S15modules`);
+  const temModules = existsSync(`${ROOT}device/r35s/rootfs-overlay/etc/modules`);
+  assert.equal(
+    temS15 || temModules, false,
+    "apareceu autoload de módulo no R35S: reveja a decisão de SND_SIMPLE_CARD=y",
+  );
+});
+
+test("libasound e alsactl estão na imagem", () => {
+  // `ALSA_LIB` é o que o SDL2 precisa. `ALSA_UTILS` traz `alsactl`, única forma
+  // de ler/gravar mixer no aparelho — `amixer` não existe nesta série (§12.16).
+  const br = readFileSync(`${ROOT}device/r35s/buildroot.fragment`, "utf8");
+  assert.match(br, /^BR2_PACKAGE_ALSA_LIB=y$/m);
+  assert.match(br, /^BR2_PACKAGE_ALSA_UTILS=y$/m);
+});
+
+// ── USB OTG: o PHY que o DTS do vendor deixa desligado ────────────────────
+//
+// Medido no aparelho em 06/11/2026, com o cabo plugado na porta OTG:
+//
+//   /sys/class/udc/ff300000.usb/state          ->  not attached
+//   /sys/kernel/config/usb_gadget/.../UDC      ->  ff300000.usb   (vinculado)
+//   usb0                                       ->  NO-CARRIER, com 10.55.0.2
+//
+// O gadget estava armado e o controlador não acordava o link. Causa:
+// `rockchip_usb2phy_probe` percorre os filhos com
+// `for_each_available_child_of_node`, que PULA nó `status = "disabled"`. O
+// `otg-port` do vendor está disabled, então nenhum PHY é criado — e o
+// `usb@ff300000` pede exatamente esse PHY (`phys = <&u2phy_otg>`).
+//
+// O R35S tem UMA porta USB (`usb@ff300000`, dr_mode=otg); as outras duas
+// (`ff340000`, `ff350000`) estão disabled no DTB. Ou seja: sem o otg-port não
+// há USB nenhum, nem para shell.
+
+const R3XS = `${ROOT}device/r35s/dts/src/rk3326-gameconsole-r3xs.dtsi`;
+
+test("o otg-port do PHY está okay — sem ele o gadget fica not attached", () => {
+  const src = readFileSync(R3XS, "utf8");
+  const m = /\bu2phy_otg:\s*otg-port\s*\{([\s\S]*?)\n\s*\};/.exec(src);
+  assert.ok(m, "não achei o nó u2phy_otg no dtsi da placa");
+  assert.match(
+    m[1], /status\s*=\s*"okay"/,
+    "otg-port disabled => nenhum PHY criado => dwc2 sem VBUS => not attached",
+  );
+});
+
+test("o patch do DTS carrega o otg-port ligado", () => {
+  // O patch é gerado da fonte; este teste pega o caso de alguém corrigir o dtsi
+  // e esquecer de regerar — build verde, aparelho com o comportamento antigo.
+  const p = readFileSync(`${ROOT}device/r35s/patches/0001-giochi-system-r35s-dts-e-painel.patch`, "utf8");
+  assert.match(p, /^\+	u2phy_otg: otg-port \{$/m);
+  const bloco = p.slice(p.indexOf("+	u2phy_otg: otg-port {"));
+  assert.match(bloco.slice(0, 400), /^\+\t\tstatus = "okay";$/m);
+});
+
+test("o patch do DTS está em dia com device/r35s/dts/", () => {
+  const out = execFileSync(process.execPath,
+    [`${ROOT}scripts/gerar-patch-dts.mjs`, "--check"], { encoding: "utf8" });
+  assert.match(out, /^OK: /m);
+});
+
+test("o gerador do DTS recusa publicar DTS que compila mas não funciona", () => {
+  // As checagens do gerador olham SIGNIFICADO, não sintaxe: um DTS compila com
+  // o hardware errado. Este teste garante que as checagens existem e cobrem os
+  // três casos que já custaram um boot.
+  const gerador = readFileSync(`${ROOT}scripts/gerar-patch-dts.mjs`, "utf8");
+  assert.match(gerador, /u2phy_otg \(otg-port\) não está status=okay/);
+  assert.match(gerador, /rocknix,generic-dsi/);
+  assert.match(gerador, /gameconsole,r35s/);
+});
+
+// ── USB: `otg` não basta, tem de ser `peripheral` ─────────────────────────
+//
+// Medido no aparelho em 06/11/2026, com o cabo neste porta:
+//
+//   dr_mode = "otg"         ->  udc state = not attached, usb0 NO-CARRIER
+//   dr_mode = "peripheral"  ->  udc state = configured, usb0 LOWER_UP, e o PC
+//                               enumera: "rndis_host ... Product: Giochi System"
+//
+// As linhas de dados funcionam; o que falta é a detecção de VBUS (a alimentação
+// vem pelo carregador do PMIC, não pelo pino VBUS do controlador). Em `otg` o
+// dwc2 espera o `bvalid` do PHY antes de conectar o pullup; em `peripheral` ele
+// conecta sem esperar (`dwc2_hsotg_pullup`).
+//
+// Ligar o otg-port do PHY sozinho não resolveu — foi medido: o PHY passou a ser
+// criado (IRQ 61 -> 63) e o estado continuou `not attached`. As duas peças são
+// necessárias, e nenhuma das duas aparece em mensagem de erro.
+
+test("usb20_otg usa dr_mode peripheral, não otg", () => {
+  const src = readFileSync(R3XS, "utf8");
+  const m = /&usb20_otg\s*\{([\s\S]*?)\n\};/.exec(src);
+  assert.ok(m, "não achei o nó &usb20_otg");
+  assert.match(
+    m[1], /dr_mode\s*=\s*"peripheral"/,
+    "otg espera bvalid do PHY, que esta placa não liga => usb0 NO-CARRIER",
+  );
+});
+
+test("o patch do DTS carrega dr_mode peripheral", () => {
+  const p = readFileSync(
+    `${ROOT}device/r35s/patches/0001-giochi-system-r35s-dts-e-painel.patch`, "utf8");
+  assert.match(p, /^\+	dr_mode = "peripheral";$/m);
+  // E o otg-port também, que é a outra metade.
+  assert.match(p, /^\+	u2phy_otg: otg-port \{$/m);
+});
+
+test("o gerador do DTS recusa publicar dr_mode otg", () => {
+  const gerador = readFileSync(`${ROOT}scripts/gerar-patch-dts.mjs`, "utf8");
+  // A checagem está escrita como regex no gerador, com as aspas escapadas —
+  // procurar a forma "literal" dava falso negativo (foi o que este teste pegou).
+  assert.match(gerador, /dr_mode\\s\*=\\s\*"peripheral"/);
+  assert.match(gerador, /usb0 fica NO-CARRIER/);
+});
+
+// ── transferência de arquivo: mass_storage, não MTP ───────────────────────
+//
+// Pedido de "confirmar o MTP". A verificação deu NEGATIVO no kernel, e o
+// resultado está medido: o mainline não tem `f_mtp` — não existe
+// `CONFIG_USB_CONFIGFS_MTP` nem `f_mtp.c` em `drivers/usb/gadget/function/`.
+// MTP no Android é patch fora da árvore, e existe lá porque o Android não pode
+// expor o armazenamento cru.
+//
+// O que existe é `mass_storage`, que já vem `=y` do defconfig arm64. É o que
+// `giochi-usbnet --ms` usa: o PC vê a partição como disco removível e `cp`
+// funciona sem daemon nem biblioteca no aparelho.
+
+const USBNET = `${ROOT}device/common/rootfs-overlay/usr/bin/giochi-usbnet`;
+
+test("o modo de transferência é mass_storage, e é o que o kernel tem", () => {
+  const sh = readFileSync(USBNET, "utf8");
+  assert.match(sh, /functions\/mass_storage\.usb0/, "não usa mass_storage");
+  assert.match(sh, /lun\.0\/file/, "o LUN tem de apontar para um dispositivo");
+  assert.match(sh, /lun\.0\/removable/, "sem removable o PC não mostra como disco");
+  // E o fragmento declara o símbolo, em vez de depender do default do arm64.
+  assert.match(fragment, /^CONFIG_USB_CONFIGFS_MASS_STORAGE=y$/m);
+});
+
+test("o modo de armazenamento RECUSA expor a partição do rootfs", () => {
+  // A guarda que não se negocia: expor o filesystem que sustenta `/` deixa o PC
+  // escrever num filesystem EM USO. O dano só aparece no boot seguinte.
+  const sh = readFileSync(USBNET, "utf8");
+  const bloco = sh.slice(sh.indexOf("start_mass_storage()"), sh.indexOf("stop_mass_storage()"));
+  assert.match(bloco, /RECUSADO/, "tem de haver recusa explícita");
+  assert.match(bloco, /mountinfo/, "a recusa tem de comparar com o que sustenta /");
+  assert.match(bloco, /\$5 == "\/"/, "tem de identificar a partição de /");
+  // E o teste NEGATIVO: o caminho de recusa tem de sair com erro, não avisar e
+  // continuar — avisar e seguir é o defeito.
+  assert.match(bloco, /return 1/);
+});
+
+test("o modo de armazenamento desmonta antes de expor", () => {
+  // Expor partição montada dá cache sujo no aparelho e lixo no PC.
+  const sh = readFileSync(USBNET, "utf8");
+  const bloco = sh.slice(sh.indexOf("start_mass_storage()"), sh.indexOf("stop_mass_storage()"));
+  assert.match(bloco, /umount/, "tem de desmontar antes");
+  assert.ok(
+    bloco.indexOf("umount") < bloco.indexOf("lun.0/file"),
+    "a ordem importa: desmontar ANTES de apontar o LUN",
+  );
+});
+
+test("`--ms-stop` desanexa o backing file e volta ao RNDIS", () => {
+  // Limpar `lun.0/file` é o que libera o dispositivo. Sem isso o backing file
+  // fica preso e o aparelho não consegue remontar a partição.
+  const sh = readFileSync(USBNET, "utf8");
+  const bloco = sh.slice(sh.indexOf("stop_mass_storage()"), sh.indexOf("# ---------------------------------------------------------------- main"));
+  assert.match(bloco, /lun\.0\/file/, "tem de limpar o file do LUN");
+  assert.match(bloco, /start_gadget rndis/, "tem de voltar ao gadget de rede");
+});
+
+test("a guarda do rootfs compara major:minor, não nome de node", () => {
+  // DEFEITO REAL, medido no aparelho em 06/11/2026: a primeira versão da guarda
+  // comparava `/proc/mounts` com o part via `readlink -f`, e o teste no aparelho
+  // EXPÔS O ROOTFS AO PC. Não é hipótese — aconteceu:
+  //
+  //   /proc/mounts ->  /dev/root        (nome de conveniência)
+  //   readlink -f  ->  /dev/root        (o node NÃO existe)
+  //   ls /dev/root ->  No such file or directory
+  //
+  // `readlink -f` de caminho inexistente devolve o próprio caminho, então
+  // `/dev/root` != `/dev/mmcblk1p2` e a guarda deixava passar.
+  //
+  // O método que funciona é major:minor: `/proc/self/mountinfo` dá `179:2` e
+  // `/sys/dev/block/179:2` é um symlink para o mmcblk1p2.
+  const sh = readFileSync(USBNET, "utf8");
+  const bloco = sh.slice(sh.indexOf("start_mass_storage()"), sh.indexOf("stop_mass_storage()"));
+  assert.match(bloco, /mountinfo/, "tem de usar mountinfo, que traz major:minor");
+  assert.match(bloco, /sys\/dev\/block/, "tem de resolver o número pelo kernel");
+  // E o método ANTIGO não pode voltar: readlink -f em /dev/root não resolve.
+  assert.ok(
+    !/readlink -f "\$ROOTDEV"/.test(bloco) && !/readlink -f "\$PART"/.test(bloco),
+    "readlink -f não resolve /dev/root (o node não existe) — foi o que falhou",
+  );
+});
+
+test("a guarda não usa strtonum (não existe no awk do busybox)", () => {
+  // §12.20: `strtonum` é do gawk. No busybox a expressão devolve vazio e uma
+  // comparação com vazio dá "diferente" — ou seja, a guarda nunca recusaria.
+  const sh = readFileSync(USBNET, "utf8");
+  // Só linhas de CÓDIGO contam: o comentário cita `strtonum` de propósito, para
+  // explicar por que ele não é usado. Procurar a palavra no arquivo inteiro dava
+  // falso negativo — foi o que este teste pegou na primeira execução.
+  const codigo = sh.split("\n").filter((l) => !/^\s*#/.test(l)).join("\n");
+  assert.ok(!/strtonum/.test(codigo), "strtonum não existe no awk do busybox");
+});
+
+test("a guarda recusa mmcblk1p2 e permite mmcblk1p1, com os dados reais", () => {
+  // Reproduz o sysfs do aparelho: /sys/dev/block/179:2 -> .../mmcblk1p2, e
+  // /proc/self/mountinfo dizendo que a raiz é 179:2.
+  //
+  // Roda com `cwd` no tmp porque o symlink do kernel é RELATIVO
+  // (`../../devices/...`): com caminho absoluto no argumento, `ls -l` mostraria
+  // o destino relativo ao diretório do teste, não ao sysfs — e o teste acusaria
+  // falha num código que funciona (foi o que aconteceu na primeira versão).
+  const tmp = mkdtempSync(path.join(tmpdir(), "giochi-guarda-"));
+  try {
+    mkdirSync(path.join(tmp, "sys/dev/block"), { recursive: true });
+    mkdirSync(path.join(tmp, "devices/mmcblk1"), { recursive: true });
+    writeFileSync(path.join(tmp, "mountinfo"),
+      "24 1 179:2 / / rw,relatime - ext4 /dev/root rw\n");
+    for (const pp of ["mmcblk1p1", "mmcblk1p2"]) {
+      writeFileSync(path.join(tmp, "devices/mmcblk1", pp), "");
+    }
+    // Os alvos ficam em <tmp>/devices/... e o symlink em <tmp>/sys/dev/block
+    // aponta para ../../devices/... — igual ao kernel.
+    // `symlinkSync` em vez de `ln`: o `ln` do shell do teste resolve
+    // `-sfn` de forma diferente conforme o cwd, e o symlink saía apontando
+    // para o lugar errado — o teste então acusava falha no código que funciona.
+    symlinkSync("../../devices/mmcblk1/mmcblk1p2",
+      path.join(tmp, "sys/dev/block/179:2"));
+    symlinkSync("../../devices/mmcblk1/mmcblk1p1",
+      path.join(tmp, "sys/dev/block/179:1"));
+
+    const script = `
+for part in mmcblk1p2 mmcblk1p1; do
+  raiz="$(awk '$5 == "/" {print $3; exit}' mountinfo)"
+  alvo="$(ls -l sys/dev/block 2>/dev/null | awk -v p="$part" '$NF ~ ("/" p "$") {print $9; exit}')"
+  if [ -n "$raiz" ] && [ "$raiz" = "$alvo" ]; then echo "$part RECUSA"; else echo "$part permite"; fi
+done`;
+    const saida = execFileSync("sh", ["-c", script], { cwd: tmp, encoding: "utf8" })
+      .trim().split("\n");
+    assert.deepEqual(saida, ["mmcblk1p2 RECUSA", "mmcblk1p1 permite"]);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

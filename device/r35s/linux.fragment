@@ -103,6 +103,23 @@ CONFIG_SND_SOC_ROCKCHIP=y
 CONFIG_SND_SOC_ROCKCHIP_I2S=y
 CONFIG_SND_SOC_RK817=y
 CONFIG_SND_SOC_SIMPLE_AMPLIFIER=m
+
+# ## O CARD, não só o codec
+#
+# Medido no aparelho em 06/11/2026 com a imagem que bootou: codec, I2S e PMIC
+# todos `=y` e mesmo assim `--- no soundcards ---`. Faltava a peça que LÊ o nó
+# `rk817-sound` do DTS e monta o card: o `simple-audio-card`.
+#
+# Ele estava `=m` (default do defconfig arm64), e o R35S não tem `/etc/modules`
+# nem `S15modules` — a mesma armadilha do X55 (§3): módulo presente na imagem,
+# nada o carrega, build verde, hardware mudo. O `.ko` estava em
+# `/lib/modules/.../snd-soc-simple-card.ko` e ninguém o abria.
+#
+# `=y` porque o alto-falante é hardware ONBOARD: aparece em todo boot, não é
+# acessório que o usuário pluga (§12.31). `select SND_SIMPLE_CARD_UTILS` vem
+# junto, então não precisa pedir.
+CONFIG_SND_SIMPLE_CARD=y
+
 CONFIG_MFD_RK8XX=y
 CONFIG_MFD_RK8XX_I2C=y
 
@@ -130,6 +147,24 @@ CONFIG_USB_GADGET=y
 CONFIG_USB_CONFIGFS=y
 CONFIG_USB_CONFIGFS_RNDIS=y
 CONFIG_USB_CONFIGFS_F_FS=y
+
+# ## Transferência de arquivo pela USB: o que EXISTE no kernel mainline
+#
+# MTP não é opção. O kernel mainline **não tem `f_mtp`**: não há
+# `CONFIG_USB_CONFIGFS_MTP` nem `f_mtp.c` em `drivers/usb/gadget/function/`
+# (conferido no 6.12 desta árvore). MTP em Android vem de patch fora da árvore,
+# e Android usa MTP porque não pode expor o armazenamento cru — restrição que
+# não temos.
+#
+# O que existe e serve é `mass_storage`, e ele já vem `=y` do defconfig arm64.
+# Declarado explicitamente porque é o que `giochi-usbnet --ms` usa para expor
+# uma partição ao PC como disco removível: `cp` e `rsync` funcionam direto, sem
+# daemon nem biblioteca no aparelho.
+#
+# `F_FS` (FunctionFS) é a porta para um MTP em userspace, se algum dia houver
+# um daemon. Fica ligado, custa nada e mantém a opção aberta — mas sem daemon
+# ele não faz nada, e é honesto dizer isso em vez de deixar parecer MTP.
+CONFIG_USB_CONFIGFS_MASS_STORAGE=y
 CONFIG_USB_DWC2=y
 CONFIG_USB_DWC2_DUAL_ROLE=y
 CONFIG_USB_EHCI_HCD=y

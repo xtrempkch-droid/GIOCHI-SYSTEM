@@ -30,11 +30,21 @@
 # pessoa tem de descobrir qual endereço usar. Com `udhcpd` o PC pluga, recebe
 # 10.55.0.1 em ~1 s, e `ssh root@10.55.0.2` simplesmente funciona.
 #
+# ## Transferência de arquivo, e por que NÃO é MTP
+#
+# O kernel mainline não tem `f_mtp` — não existe `CONFIG_USB_CONFIGFS_MTP` nem
+# `f_mtp.c` em `drivers/usb/gadget/function/` (conferido no 6.12 desta árvore).
+# MTP em Android só existe lá porque o Android não pode expor o armazenamento
+# cru. Aqui pode, então `--ms` expõe uma partição como disco removível: o `cp`
+# do PC funciona sem cliente nenhum.
+#
 # Uso:
-#   giochi-usbnet           # sobe o gadget (padrão RNDIS)
-#   giochi-usbnet --ecm     # sobe com ECM (macOS/ChromeOS)
-#   giochi-usbnet --stop    # desmonta o gadget
-#   giochi-usbnet --status  # o que está no ar, e o que o PC está vendo
+#   giochi-usbnet                  # sobe o gadget (padrão RNDIS)
+#   giochi-usbnet --ecm            # sobe com ECM (macOS/ChromeOS)
+#   giochi-usbnet --ms /dev/mmcblk1p1  # expõe uma partição como disco removível
+#   giochi-usbnet --ms-stop        # devolve a partição e volta ao RNDIS
+#   giochi-usbnet --stop           # desmonta o gadget
+#   giochi-usbnet --status         # o que está no ar, e o que o PC está vendo
 
 set -u
 
@@ -300,11 +310,168 @@ EOF
     fi
 }
 
+# ---------------------------------------------------------------- massa
+# Modo "armazenamento em massa": o PC vê uma PARTIÇÃO do aparelho como disco
+# removível. É o caminho para copiar arquivo grande (ROM, jogo, log) sem rede
+# e sem servidor nenhum rodando.
+#
+# Por que NÃO MTP: o kernel mainline não tem `f_mtp` — não existe
+# CONFIG_USB_CONFIGFS_MTP nem `f_mtp.c` em drivers/usb/gadget/function/. MTP em
+# Android vem de patch fora da árvore, e existe lá porque o Android não pode
+# expor o armazenamento cru. Aqui pode: mass_storage é mais simples, mais
+# rápido, e o `cp` do PC funciona sem cliente nenhum.
+#
+# REGRAS DE SEGURANÇA, e cada uma custou um incidente em algum lugar:
+#
+# 1. **Nunca a partição do rootfs.** Expor `/dev/mmcblk1p2` (que está montada em
+#    `/`) ao PC deixa o host escrever num filesystem em uso, e o resultado é
+#    perda silenciosa de dados — o kernel do aparelho não sabe que o PC mexeu.
+#    Recusar é obrigatório, não zelo.
+# 2. **Desmontar antes de expor.** Expor uma partição montada dá o mesmo
+#    problema pela outra ponta: o aparelho tem cache sujo e o PC lê lixo.
+# 3. **Avisar que o aparelho perde a partição.** Enquanto o modo está ativo, o
+#    aparelho não vê aquele armazenamento. Silêncio aqui faz o usuário concluir
+#    que o cartão "sumiu".
+start_mass_storage() {
+    PART="${1:-}"
+    if [ -z "$PART" ]; then
+        warn "uso: $0 --ms <partição>   (ex.: /dev/mmcblk1p1)"
+        warn "partições disponíveis:"
+        for p in /dev/mmcblk*p* /dev/sd*[0-9]; do
+            [ -b "$p" ] || continue
+            case "$p" in *mmcblk?p[0-9]|*sd?[0-9]) echo "  $p";; esac
+        done
+        return 2
+    fi
+
+    [ -b "$PART" ] || {
+        warn "$PART não é um dispositivo de bloco"
+        return 2
+    }
+
+    # ## A guarda que não se negocia, e a armadilha que a fez falhar
+    #
+    # Primeira versão comparava `awk '$2=="/"{print $1}' /proc/mounts` com o
+    # part e usava `readlink -f`. NÃO funcionou, e o teste no aparelho expôs o
+    # rootfs ao PC — o pior defeito possível neste script:
+    #
+    #   /proc/mounts     ->  /dev/root            (nome de conveniência)
+    #   readlink -f      ->  /dev/root            (o node NÃO EXISTE)
+    #   ls /dev/root     ->  No such file or directory
+    #
+    # `readlink -f` de um caminho inexistente devolve o próprio caminho, então a
+    # comparação `/dev/root` vs `/dev/mmcblk1p2` dava "diferente" e a guarda
+    # deixava passar.
+    #
+    # O método que funciona é comparar por **major:minor**, que é o que o kernel
+    # usa e que não depende de nome de node:
+    #
+    #   /proc/self/mountinfo  ->  "24 1 179:2 / / rw ... - ext4 /dev/root rw"
+    #   /sys/dev/block/179:2  ->  .../mmcblk1/mmcblk1p2
+    #
+    # E ainda: a partição que sustenta `/` pode não estar exposta como um node em
+    # /dev (é o caso aqui), então comparar caminhos de /dev é frágil por
+    # construção.
+    #
+    # `stat -c "%t:%T"` devolve major/minor em HEX, e o mountinfo em decimal.
+    # Converter hex→decimal em shell precisaria de `strtonum` do awk, que NÃO
+    # existe no busybox (§12.20 — o mesmo erro que já quebrou o contador de bits
+    # do selftest).
+    #
+    # Caminho portável: o próprio kernel publica o número decimal como nome do
+    # symlink em /sys/dev/block. Basta achar o symlink cujo DESTINO termina no
+    # nome da partição — e o nome do node (`mmcblk1p2`) não depende do nome de
+    # conveniência de /dev.
+    raiz_maior_menor="$(awk '$5 == "/" {print $3; exit}' /proc/self/mountinfo 2>/dev/null)"
+    alvo_maior_menor="$(ls -l /sys/dev/block 2>/dev/null \
+        | awk -v p="$(basename "$PART")" '$NF ~ ("/" p "$") {print $9; exit}')"
+
+    if [ -n "$raiz_maior_menor" ] && [ "$raiz_maior_menor" = "$alvo_maior_menor" ]; then
+        warn "RECUSADO: $PART é a partição que sustenta o / deste aparelho."
+        warn "Expor o rootfs a outro computador corrompe um filesystem EM USO,"
+        warn "e o dano só aparece no próximo boot."
+        return 1
+    fi
+
+    udc="$(find_udc)" || {
+        warn "nenhum UDC encontrado: o aparelho não está em modo dispositivo."
+        return 1
+    }
+
+    # Desmontar o que estiver montado nela, senão o aparelho tem cache sujo e o
+    # PC recebe lixo.
+    for mnt in $(awk -v d="$PART" '$1 == d {print $2}' /proc/mounts 2>/dev/null); do
+        log "desmontando $mnt antes de expor"
+        umount "$mnt" 2>/dev/null || {
+            warn "não consegui desmontar $mnt — use o aparelho para liberar e tente de novo"
+            return 1
+        }
+    done
+
+    if ! grep -q " $CONFIGFS " /proc/mounts 2>/dev/null; then
+        mount -t configfs none "$CONFIGFS" 2>/dev/null || {
+            warn "não consegui montar configfs"
+            return 1
+        }
+    fi
+
+    [ -d "$GADGET" ] && stop_gadget >/dev/null 2>&1
+
+    mkdir -p "$GADGET" || return 1
+    cd "$GADGET" || return 1
+
+    echo 0x1d6b >idVendor
+    echo 0x0104 >idProduct
+    echo 0x0100 >bcdDevice
+    echo 0x0200 >bcdUSB
+
+    mkdir -p strings/0x409
+    echo "Giochi" >strings/0x409/manufacturer
+    echo "Giochi System" >strings/0x409/product
+    echo "$(cat /etc/hostname 2>/dev/null || echo giochi)-ms" >strings/0x409/serialnumber
+
+    # `removable=1` faz o PC mostrar como disco removível (e permite ejetar sem
+    # "write cache" pendente). `ro=0` de propósito: o objetivo é escrita.
+    mkdir -p functions/mass_storage.usb0
+    echo 1 >functions/mass_storage.usb0/lun.0/removable 2>/dev/null
+    echo 0 >functions/mass_storage.usb0/lun.0/ro 2>/dev/null
+    echo "$PART" >functions/mass_storage.usb0/lun.0/file || {
+        warn "não consegui apontar $PART para o LUN"
+        return 1
+    }
+
+    mkdir -p configs/c.1/strings/0x409
+    echo "Armazenamento" >configs/c.1/strings/0x409/configuration
+    echo 500 >configs/c.1/MaxPower
+    ln -s functions/mass_storage.usb0 configs/c.1/ 2>/dev/null
+
+    echo "$udc" >UDC 2>/dev/null || {
+        warn "não consegui fazer bind do gadget em $udc"
+        return 1
+    }
+    log "modo armazenamento: $PART exposta como disco removível"
+    log "ENQUANTO ATIVO, este aparelho NÃO vê $PART — o PC está com ela."
+    log "para devolver ao aparelho:  $0 --ms-stop && mount -a"
+}
+
+stop_mass_storage() {
+    if [ -f "$GADGET/functions/mass_storage.usb0/lun.0/file" ]; then
+        # Limpar o `file` DESANEXA o backing file. Sem isso o laser fica preso
+        # no dispositivo e o aparelho não consegue remontar a partição.
+        echo "" >"$GADGET/functions/mass_storage.usb0/lun.0/file" 2>/dev/null
+    fi
+    stop_gadget
+    log "armazenamento liberado; voltando ao gadget de rede"
+    start_gadget rndis
+}
+
 # ---------------------------------------------------------------- main
 case "${1:-}" in
     --stop) stop_gadget ;;
     --status) status ;;
     --ecm) start_gadget ecm ;;
+    --ms) start_mass_storage "${2:-}" ;;
+    --ms-stop) stop_mass_storage ;;
     "" | --rndis) start_gadget rndis ;;
     -h | --help)
         sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'

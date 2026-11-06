@@ -1,6 +1,6 @@
 diff -ruN a/arch/arm64/boot/dts/rockchip/Makefile b/arch/arm64/boot/dts/rockchip/Makefile
---- a/arch/arm64/boot/dts/rockchip/Makefile	2026-11-06 05:13:25.146046780 -0300
-+++ b/arch/arm64/boot/dts/rockchip/Makefile	2026-11-06 05:13:25.147248139 -0300
+--- a/arch/arm64/boot/dts/rockchip/Makefile
++++ b/arch/arm64/boot/dts/rockchip/Makefile
 @@ -14,6 +14,7 @@
  dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3326-anbernic-rg351v.dtb
  dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3326-gameforce-chi.dtb
@@ -10,8 +10,8 @@ diff -ruN a/arch/arm64/boot/dts/rockchip/Makefile b/arch/arm64/boot/dts/rockchip
  dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3326-odroid-go3.dtb
  dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3328-a1.dtb
 diff -ruN a/arch/arm64/boot/dts/rockchip/panel-panel4.dtsi b/arch/arm64/boot/dts/rockchip/panel-panel4.dtsi
---- a/arch/arm64/boot/dts/rockchip/panel-panel4.dtsi	1969-12-31 21:00:00.000000000 -0300
-+++ b/arch/arm64/boot/dts/rockchip/panel-panel4.dtsi	2026-11-06 05:13:25.149263124 -0300
+--- a/arch/arm64/boot/dts/rockchip/panel-panel4.dtsi
++++ b/arch/arm64/boot/dts/rockchip/panel-panel4.dtsi
 @@ -0,0 +1,185 @@
 +// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
 +// ============================================================
@@ -199,8 +199,8 @@ diff -ruN a/arch/arm64/boot/dts/rockchip/panel-panel4.dtsi b/arch/arm64/boot/dts
 +        "#END";
 +};
 diff -ruN a/arch/arm64/boot/dts/rockchip/rk3326-device-group-r36.dtsi b/arch/arm64/boot/dts/rockchip/rk3326-device-group-r36.dtsi
---- a/arch/arm64/boot/dts/rockchip/rk3326-device-group-r36.dtsi	1969-12-31 21:00:00.000000000 -0300
-+++ b/arch/arm64/boot/dts/rockchip/rk3326-device-group-r36.dtsi	2026-11-06 05:13:25.149211972 -0300
+--- a/arch/arm64/boot/dts/rockchip/rk3326-device-group-r36.dtsi
++++ b/arch/arm64/boot/dts/rockchip/rk3326-device-group-r36.dtsi
 @@ -0,0 +1,7 @@
 +/ {
 +	rocknix,device_switch {
@@ -210,8 +210,8 @@ diff -ruN a/arch/arm64/boot/dts/rockchip/rk3326-device-group-r36.dtsi b/arch/arm
 +	};
 +};
 diff -ruN a/arch/arm64/boot/dts/rockchip/rk3326-gameconsole-r36s-giochi.dts b/arch/arm64/boot/dts/rockchip/rk3326-gameconsole-r36s-giochi.dts
---- a/arch/arm64/boot/dts/rockchip/rk3326-gameconsole-r36s-giochi.dts	1969-12-31 21:00:00.000000000 -0300
-+++ b/arch/arm64/boot/dts/rockchip/rk3326-gameconsole-r36s-giochi.dts	2026-11-06 05:13:25.149311946 -0300
+--- a/arch/arm64/boot/dts/rockchip/rk3326-gameconsole-r36s-giochi.dts
++++ b/arch/arm64/boot/dts/rockchip/rk3326-gameconsole-r36s-giochi.dts
 @@ -0,0 +1,211 @@
 +// GERADO por scripts/panel-to-dtsi.mjs -- nao editar a mao.
 +// Base: rk3326-gameconsole-r36s.dts (vendorizado, GPL-2.0+/MIT, ROCKNIX/JELOS).
@@ -425,9 +425,9 @@ diff -ruN a/arch/arm64/boot/dts/rockchip/rk3326-gameconsole-r36s-giochi.dts b/ar
 +	};
 +};
 diff -ruN a/arch/arm64/boot/dts/rockchip/rk3326-gameconsole-r3xs.dtsi b/arch/arm64/boot/dts/rockchip/rk3326-gameconsole-r3xs.dtsi
---- a/arch/arm64/boot/dts/rockchip/rk3326-gameconsole-r3xs.dtsi	1969-12-31 21:00:00.000000000 -0300
-+++ b/arch/arm64/boot/dts/rockchip/rk3326-gameconsole-r3xs.dtsi	2026-11-06 05:13:25.149152312 -0300
-@@ -0,0 +1,558 @@
+--- a/arch/arm64/boot/dts/rockchip/rk3326-gameconsole-r3xs.dtsi
++++ b/arch/arm64/boot/dts/rockchip/rk3326-gameconsole-r3xs.dtsi
+@@ -0,0 +1,600 @@
 +// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
 +/*
 + * # Copyright (C) 2022-24 JELOS (https://github.com/JustEnoughLinuxOS)
@@ -922,14 +922,56 @@ diff -ruN a/arch/arm64/boot/dts/rockchip/rk3326-gameconsole-r3xs.dtsi b/arch/arm
 +		status = "okay";
 +	};
 +
++	/*
++	 * O R35S tem UMA porta USB, e ela é OTG (`usb@ff300000`, dr_mode=otg).
++	 * O controlador referencia este PHY por `phys = <&u2phy_otg>`.
++	 *
++	 * O DTS do vendor deixa o otg-port `disabled` — e isso não é cosmético:
++	 * `rockchip_usb2phy_probe` percorre os filhos com
++	 * `for_each_available_child_of_node`, que PULA nó disabled. Resultado:
++	 * nenhum PHY é criado para o OTG, o dwc2 não vê VBUS e o gadget fica em
++	 * `not attached` para sempre, mesmo com o cabo plugado.
++	 *
++	 * Medido no aparelho em 06/11/2026:
++	 *   /sys/class/udc/ff300000.usb/state  ->  not attached
++	 *   /sys/kernel/config/usb_gadget/.../UDC -> ff300000.usb  (vinculado)
++	 *   usb0 em NO-CARRIER, com 10.55.0.2 atribuído
++	 *
++	 * Ou seja: o gadget estava armado e o controlador não acordava o link.
++	 */
 +	u2phy_otg: otg-port {
-+		status = "disabled";
++		status = "okay";
 +	};
 +};
 +
 +&usb20_otg {
 +	vbus-supply = <&otg_switch>;
 +	status = "okay";
++
++	/*
++	 * `peripheral`, e não `otg`. Medido no aparelho em 06/11/2026 com o cabo
++	 * plugado nesta porta:
++	 *
++	 *   dr_mode = "otg"         -> udc state = not attached, usb0 NO-CARRIER
++	 *   dr_mode = "peripheral"  -> udc state = configured, usb0 LOWER_UP,
++	 *                              e o PC enumera:
++	 *     "rndis_host 2-2:1.0 usb0: register 'rndis_host' (RNDIS device,
++	 *      02:47:49:4f:43:48) Product: Giochi System"
++	 *
++	 * Ou seja: as linhas de dados funcionam, e o que falta é a DETECÇÃO DE
++	 * VBUS. Em modo otg o dwc2 espera o sinal `bvalid` do PHY antes de
++	 * conectar o pullup; neste aparelho esse sinal não chega (a alimentação
++	 * vem pelo carregador do PMIC rk817, não pelo pino VBUS do controlador).
++	 *
++	 * Em modo `peripheral` o pullup é conectado sem esperar VBUS
++	 * (`dwc2_hsotg_pullup` em drivers/usb/dwc2/gadget.c), e o host enumera.
++	 *
++	 * CONSEQUÊNCIA QUE NÃO É ÓBVIA: com `peripheral` esta porta NÃO funciona
++	 * como host. O R35S não tem rádio onboard e não aceitaria dongle Wi-Fi/USB
++	 * — é limitação de hardware, não configuração. O canal de shell por USB
++	 * (o mesmo do X55/X35H) é o que se ganha; §12.31 não se aplica aqui.
++	 */
++	dr_mode = "peripheral";
 +};
 +
 +&uart2 {

@@ -34,6 +34,16 @@ Console portátil Rockchip **RK3326**, tela 640×480. Mesma base do R36S.
 > **Falta:** o card de áudio (`--- no soundcards ---`, `libasound` ausente) e o
 > launcher, que é do `Giochi app`.
 
+> **USB: `dr_mode = "peripheral"`, e isso é uma limitação de hardware.**
+> Medido em 06/11/2026 com o cabo na única porta: em `otg` o `usb0` fica em
+> `NO-CARRIER` (o dwc2 espera `bvalid` do PHY, e o VBUS entra pelo carregador do
+> PMIC, não pelo pino do controlador). Em `peripheral` o link sobe, o PC enumera
+> `rndis_host` (`Product: Giochi System`), recebe `10.55.0.1` por DHCP e
+> `ssh root@10.55.0.2` responde.
+>
+> Consequência: **esta porta não serve como host**, então dongle Wi-Fi/USB não é
+> opção no R35S — e ele não tem rádio onboard. O canal de rede é o gadget.
+
 ## As três coisas que tornam esta placa diferente
 
 ### 1. Ela quebra a premissa do RK3566

@@ -56,3 +56,8 @@ CONFIG_MFD_RK8XX=y
 # símbolo some e o build FALHA — em vez de entregar imagem com tela preta e
 # sistema bootando, que é indistinguível de "não ligou".
 CONFIG_DRM_PANEL_GENERIC_DSI=y
+
+# O card que lê o nó `rk817-sound` do DTS. Medido em 06/11/2026: sem ele, codec
+# e I2S `=y` e mesmo assim `--- no soundcards ---`, porque o módulo existia na
+# imagem e nada o carregava. O boot é a única prova de que ele veio.
+CONFIG_SND_SIMPLE_CARD=y

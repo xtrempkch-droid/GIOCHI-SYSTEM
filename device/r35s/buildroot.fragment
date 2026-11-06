@@ -1,8 +1,21 @@
 # R35S — fragmento Buildroot
 #
-# Vazio de propósito: os símbolos de kernel/driver deste aparelho ainda não foram
-# levantados.
+# Só o que é específico deste aparelho e não cabe no `config/common.fragment`.
+# Tudo que é consequência do hardware ter áudio, e não da placa ser RK3326.
+
+# ── áudio ───────────────────────────────────────────────────
 #
-# Ponto de partida quando for preencher: é RK3326, o mesmo SoC do
-# `rk3326-generic`. O fragmento tende a ser quase idêntico ao dele, mudando o DTS
-# e o driver de painel.
+# Medido no aparelho em 06/11/2026: o kernel não criava card nenhum
+# (`--- no soundcards ---`) E o rootfs não tinha `libasound.so` — duas falhas
+# independentes, com o mesmo sintoma para quem usa: sem som.
+#
+# `ALSA_LIB` é o que o SDL2 precisa para abrir o dispositivo. Sem ela o launcher
+# escolhe o driver de áudio "dummy" ou aborta, e o `giochi-selftest` acusa
+# "libasound ausente — o launcher não inicia ou quebra em runtime".
+#
+# `ALSA_UTILS` traz `alsactl` e `alsamixer`. É a única forma de ler e gravar
+# estado de mixer no aparelho: o Buildroot 2024.02 desta série NÃO tem `amixer`
+# (§12.16), e sem `alsactl` não há como provar que o roteamento (`Playback Mux`)
+# ficou onde devia — foi assim que o X55 fechou o último FAIL dele.
+BR2_PACKAGE_ALSA_LIB=y
+BR2_PACKAGE_ALSA_UTILS=y

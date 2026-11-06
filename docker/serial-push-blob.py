@@ -155,12 +155,28 @@ with serial.Serial(port, baud, timeout=0.3) as link:
             link.write(("cat > %s <<'FIM'\n" % b64_remoto).encode())
         else:
             link.write(("cat >> %s <<'FIM'\n" % b64_remoto).encode())
+        link.flush()
+        # CORRIDA MEDIDA: mandar o corpo no mesmo write do cabeçalho faz o shell
+        # ainda estar configurando o redirect quando o texto chega. O resultado
+        # não é perda limpa — é mistura: numa tentativa o arquivo saiu com 36
+        # bytes A MENOS e o .b64 com 261 kB A MAIS, e o md5 diferiu nas duas
+        # execuções, o que descarta "truncou" e aponta para intercalação.
+        #
+        # O shell precisa de uma janela para chegar ao estado "lendo heredoc"
+        # antes do primeiro byte de dado.
+        time.sleep(0.35)
         link.write(corpo.encode() + b"\nFIM\n")
         link.flush()
         enviado += sum(len(l) for l in grupo)
         # Espera o grupo ser absorvido antes do próximo heredoc: sem isto o
         # buffer do tty enche e bytes somem. A pausa é por GRUPO, não por linha.
         time.sleep(pausa)
+
+        # A conferência é no FIM (tamanho exato + md5 do arquivo decodificado).
+        # A consulta por grupo foi tentada e REMOVIDA: `wc -c` volta vazio
+        # enquanto o shell ainda está processando o heredoc, e o script lia
+        # "None" e abortava um envio que estava correto. Verificação que
+        # atrapalha é pior que verificação nenhuma.
         gasto = time.monotonic() - inicio
         taxa = enviado / gasto if gasto > 0 else 0
         faltam = (len(encoded) - enviado) / taxa if taxa > 0 else 0
@@ -186,6 +202,35 @@ with serial.Serial(port, baud, timeout=0.3) as link:
 
     # Decodifica no aparelho e confere o md5 do ARQUIVO FINAL, não do base64:
     # é o único número que prova que o conteúdo chegou inteiro.
+    # O base64 tem tamanho previsível: ceil(bytes/3)*4. Conferir ANTES de
+    # decodificar separa "o transporte perdeu" de "a decodificação falhou" —
+    # dois problemas com a mesma cara no md5 final.
+    # ATENÇÃO à conta: o arquivo tem os caracteres do base64 **mais uma quebra de
+    # linha por linha**. Contar só `ceil(bytes/3)*4` acusava 207 bytes a mais num
+    # DTB de 11 KB e parecia corrupção — era o erro na expectativa, não no
+    # transporte. Medido com `od -c`: o tty grava LF puro, sem CR.
+    esperado_b64 = len(encoded) + len(linhas)
+    link.write(("wc -c < %s\r" % b64_remoto).encode())
+    time.sleep(0.8)
+    eco_tam = drenar(1.5)
+    tam_b64 = None
+    for linha in eco_tam.replace("\r", "\n").split("\n"):
+        linha = linha.strip()
+        if linha.isdigit():
+            tam_b64 = int(linha)
+    if tam_b64 is not None:
+        print("  base64 remoto: %d bytes (esperado %d)" % (tam_b64, esperado_b64))
+        if tam_b64 != esperado_b64:
+            print(
+                "ERRO: o base64 remoto tem %d bytes, esperado %d — transporte "
+                "intercalou ou perdeu" % (tam_b64, esperado_b64),
+                file=sys.stderr,
+            )
+            link.write(b"\r\x03")
+            sys.exit(6)
+    else:
+        print("  AVISO: nao consegui ler o tamanho do base64 remoto")
+
     print("decodificando no aparelho...")
     sys.stdout.flush()
     link.write(("base64 -d %s > %s\r" % (b64_remoto, remoto)).encode())
