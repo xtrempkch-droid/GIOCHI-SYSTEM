@@ -29,3 +29,4 @@ import "./python-libs-study.test.mjs";
 import "./arcade-probe.test.mjs";
 import "./dongle.test.mjs";
 import "./host-compat.test.mjs";
+import "./device-r35s-console.test.mjs";

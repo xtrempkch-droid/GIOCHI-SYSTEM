@@ -17,5 +17,9 @@
   "timeoutMinutes": 300,
   "status": "draft",
   "bootNotes": "SoC RK3326 (não RK3566): sem NPU, Mali-G31, 1 GB de RAM. É o mesmo SoC da família rk3326-generic, então o fragmento de kernel tende a ser compartilhado. DTS do padrão ROCKNIX. Build nunca executado.",
+  "kernelCmdline": {
+    "console": "ttyS2",
+    "baud": 1500000
+  },
   "docs": "README.md"
 }

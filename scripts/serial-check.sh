@@ -62,6 +62,16 @@ fi
 
 mkdir -p "$CACHE/serial"
 
+# Um `docker run --rm` cujo script do host foi morto CONTINUA rodando e segurando
+# a porta. O CH341 é acesso exclusivo, então o próximo leitor recebe
+# `returned no data` — a mesma mensagem de "adaptador desconectado", que manda
+# procurar defeito no cabo. Encerrar leitores nossos antes de abrir.
+# (Medido em 06/11/2026: dois containers órfãos de uma execução interrompida.)
+for stale in $(docker ps -q --filter "ancestor=$IMG" 2>/dev/null); do
+  echo "Encerrando leitor órfão da serial: $stale"
+  docker kill "$stale" >/dev/null 2>&1 || true
+done
+
 # `-v /dev:/dev` em vez de `--device=`: o adaptador CAI do barramento, e um
 # `--device=/dev/ttyUSB0` fixado no start aborta o container quando o nó não
 # existe. Com /dev montado, o container sobrevive ao ir e voltar.

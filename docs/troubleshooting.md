@@ -213,6 +213,41 @@ lsusb | grep -i 1a86         # idem
 - cabo USB ruim antes do adaptador;
 - alimentação do aparelho puxando do mesmo ponto.
 
+### Porta presente, mesma mensagem, causa oposta: leitor órfão
+
+Medido em 06/11/2026, e é o espelho do caso acima: o erro é **idêntico**, mas
+desta vez `multiple access` estava literalmente certo.
+
+```text
+ls -la /dev/ttyUSB*   → /dev/ttyUSB0 existe (04:09)
+lsusb | grep 1a86     → CH341 presente, Device 011 (o mesmo de antes, não reenumerou)
+docker ps             → dois containers giochi-serial-scan:3 "Up 7 minutes"
+```
+
+Causa: um `docker run --rm` foi iniciado por um script que depois recebeu `kill`.
+Matar o processo do script **não** mata o container — ele continua rodando e
+segurando a porta. Como o CH341 é um dispositivo de acesso exclusivo, o próximo
+leitor recebe `returned no data` na primeira `read()`.
+
+**Regra:** antes de abrir a serial, olhar quem está com ela.
+
+```bash
+docker ps --format '{{.ID}} {{.Image}} {{.Status}}'
+docker kill <id>          # encerra o leitor órfão
+```
+
+São **dois** diagnósticos possíveis para a mesma mensagem, e a ordem de checagem
+que separa os dois é sempre a mesma:
+
+| `/dev/ttyUSB0` | `lsusb` mostra o CH341 | `docker ps` tem leitor | Causa |
+| --- | --- | --- | --- |
+| existe | sim | **sim** | leitor órfão — matar o container |
+| existe | sim | não | porta que suspende, ou outro processo do host |
+| **sumiu** | **não** | — | adaptador caiu do barramento — reconectar |
+
+O último caso é o que "volta sozinho" em 30–45 s nesta máquina; os dois
+primeiros não.
+
 ### Linha muda, e o padrão que diz por quê
 
 Com o adaptador presente e nenhum byte, a varredura de bauds responde:
