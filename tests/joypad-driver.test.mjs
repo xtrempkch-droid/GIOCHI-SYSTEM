@@ -24,7 +24,7 @@ import { test } from "node:test";
 const ROOT = new URL("..", import.meta.url).pathname;
 const SRC = `${ROOT}device/r35s/kernel-modules/rocknix-joypad`;
 const PATCH = `${ROOT}device/r35s/patches/0002-giochi-joypad-singleadc.patch`;
-const GERADOR = `${ROOT}scripts/gerar-patch-joypad.mjs`;
+const GERADOR = `${ROOT}scripts/gerar-patch-modulos.mjs`;
 const device = JSON.parse(readFileSync(`${ROOT}device/r35s/device.json`, "utf8"));
 const fragment = readFileSync(`${ROOT}device/r35s/linux.fragment`, "utf8");
 const required = readFileSync(`${ROOT}device/r35s/kernel-required.txt`, "utf8");
@@ -178,4 +178,91 @@ test("todo símbolo do Makefile tem um config no Kconfig", () => {
   // E o contrário também: símbolo declarado que nunca vira módulo é promessa vazia.
   const semModulo = [...definidos].filter((s) => !referidos.has(s));
   assert.deepEqual(semModulo, [], `Kconfig declara símbolo sem obj-: ${semModulo.join(", ")}`);
+});
+
+// ── o painel: a outra metade da tela ──────────────────────────────────────
+//
+// Mesma classe de defeito do joypad, e o sintoma é pior: tela preta com o
+// sistema bootando normal. Medido no R35S em 06/11/2026 — login funcionando por
+// serial e `SEM_DRI`, porque o `dw-mipi-dsi-rockchip` cria o dispositivo
+// `mipi-dsi ff450000.dsi.0` e nenhum driver de painel o atende.
+
+const PATCH_PAINEL = `${ROOT}device/r35s/patches/0003-giochi-painel-generic-dsi.patch`;
+const SRC_PAINEL = `${ROOT}device/r35s/kernel-modules/generic-dsi/panel-generic-dsi.c`;
+
+test("o fonte do driver de painel está versionado, com licença GPL", () => {
+  assert.ok(existsSync(SRC_PAINEL), "falta o .c do painel");
+  const c = readFileSync(SRC_PAINEL, "utf8");
+  assert.match(c, /SPDX-License-Identifier: GPL-2\.0/);
+  assert.match(c, /MODULE_LICENSE\("GPL/);
+  // O `compatible` do DTS tem de casar com o que o driver anuncia.
+  assert.match(c, /"rocknix,generic-dsi"/);
+  // E tem de ler a descrição do DT — é o que o gerador de painel escreve.
+  assert.match(c, /of_property_count_strings\([^)]*"panel_description"/);
+});
+
+test("o patch do painel carrega o .c e liga Kconfig/Makefile", () => {
+  assert.ok(existsSync(PATCH_PAINEL), "o patch do painel não existe");
+  const p = readFileSync(PATCH_PAINEL, "utf8");
+  assert.ok(
+    p.includes("b/drivers/gpu/drm/panel/panel-generic-dsi.c"),
+    "o patch não cria panel-generic-dsi.c",
+  );
+  // Arquivo na árvore sem gancho não compila. Os dois ganchos são obrigatórios.
+  assert.match(p, /^\+config DRM_PANEL_GENERIC_DSI$/m);
+  assert.match(p, /^\+obj-\$\(CONFIG_DRM_PANEL_GENERIC_DSI\) \+= panel-generic-dsi\.o$/m);
+  // Arquivo único fica no próprio diretório: sem subcaminho no obj-.
+  assert.ok(
+    !/CONFIG_DRM_PANEL_GENERIC_DSI\) \+= .*\//.test(p),
+    "panel-generic-dsi.c não mora em subdiretório",
+  );
+});
+
+test("o device.json manda aplicar o patch do painel", () => {
+  const lista = device.kernelPatches ?? [];
+  assert.ok(
+    lista.some((p) => p.includes("0003-giochi-painel-generic-dsi.patch")),
+    "sem isto o patch existe e nenhum build o aplica",
+  );
+});
+
+test("o símbolo do painel é =y no fragmento e exigido no kernel-required", () => {
+  // `=m` dependeria do S15modules — e uma tela que depende de autoload de
+  // módulo é uma tela que pode não acender. O painel é o console desta placa.
+  assert.match(fragment, /^CONFIG_DRM_PANEL_GENERIC_DSI=y$/m);
+  assert.match(required, /^CONFIG_DRM_PANEL_GENERIC_DSI=y$/m);
+});
+
+test("o DTS usa o compatible que o driver anuncia, não um inventado", () => {
+  // Um `compatible` sem driver deixa o nó órfão e a tela preta, sem erro.
+  // Este teste fecha a ponte entre os dois arquivos.
+  const dts = readFileSync(
+    `${ROOT}device/r35s/patches/0001-giochi-system-r35s-dts-e-painel.patch`,
+    "utf8",
+  );
+  assert.match(dts, /^\+	compatible = "rocknix,generic-dsi";$/m);
+  const driver = readFileSync(SRC_PAINEL, "utf8");
+  assert.match(driver, /\.compatible = "rocknix,generic-dsi"/);
+});
+
+test("o patch do painel APLICA numa fonte limpa (dry-run)", () => {
+  // Mesma armadilha do joypad: patch gerado contra árvore já patcheada não
+  // aplica, e o `a/` do diff esconde o motivo.
+  const alt = `${process.env.HOME}/.cache/giochi-system/dl/linux/linux-6.12.tar.xz`;
+  if (!existsSync(alt)) {
+    console.warn(`  (pulado: ${alt} não existe)`);
+    return;
+  }
+  const tmp = mkdtempSync(join(tmpdir(), "giochi-dryrun-painel-"));
+  try {
+    execFileSync("tar", ["-xJf", alt, "--strip-components=1", "-C", tmp,
+      "linux-6.12/drivers/gpu/drm/panel/Kconfig",
+      "linux-6.12/drivers/gpu/drm/panel/Makefile"]);
+    const out = execFileSync("patch", ["-p1", "--dry-run", "-i", PATCH_PAINEL],
+      { cwd: tmp, encoding: "utf8" });
+    assert.match(out, /checking file drivers\/gpu\/drm\/panel\/Makefile/);
+    assert.ok(!/FAILED/.test(out), out);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 });

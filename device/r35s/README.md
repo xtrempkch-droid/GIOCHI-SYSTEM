@@ -408,6 +408,40 @@ node scripts/panel-to-dtsi.mjs device/r35s/panels/r36s-panel4.txt \
   --base device/r35s/dts/src/rk3326-gameconsole-r36s.dts
 ```
 
+#### O painel precisa do DRIVER, não só da descrição
+
+**Medido no aparelho em 06/11/2026:** o sistema bootou, o login apareceu pela
+serial, e a tela ficou **preta**. A descrição do painel estava certa no DTS (160
+strings, temporização conferida) e ainda assim nada aparecia.
+
+O dmesg mostrou o controlador DSI probe sem erro:
+
+```text
+dw-mipi-dsi-rockchip ff450000.dsi: Fixed dependency cycle(s) with /dsi@ff450000/panel@0
+mipi-dsi ff450000.dsi.0: Fixed dependency cycle(s) with /dsi@ff450000
+```
+
+E os drivers de painel no barramento eram só:
+
+```text
+panel-simple
+```
+
+Ou seja: o `compatible = "rocknix,generic-dsi"` do DTS **não tinha driver**. O
+`panel@0` ficou órfão, ninguém criou conector, e sem conector o `rockchip-drm`
+não cria card — `ls /dev/dri` devolvia nada. O kernel não reclama de nó órfão.
+
+É a mesma classe do joypad (§ acima), e o sintoma é pior: **tela preta com o
+sistema funcionando**, que num handheld é indistinguível de "não ligou". Só a
+serial separa os dois casos.
+
+Correção: `panel-generic-dsi` entra por patch
+(`patches/0003-giochi-painel-generic-dsi.patch`, gerado de
+[`kernel-modules/generic-dsi/`](kernel-modules/generic-dsi/) por
+[`scripts/gerar-patch-modulos.mjs`](../../scripts/gerar-patch-modulos.mjs)) e
+`CONFIG_DRM_PANEL_GENERIC_DSI=y` no fragmento. `=y` e não `=m`: um módulo que
+depende do `S15modules` é uma tela que pode não acender.
+
 ### O carregador de boot: por que a imagem pode ser gerada
 
 **Correção de uma afirmação errada deste README.** Eu havia escrito que a imagem

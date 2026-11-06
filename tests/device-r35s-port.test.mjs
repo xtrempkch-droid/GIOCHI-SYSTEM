@@ -66,6 +66,16 @@ test("os símbolos do fragmento existem na config do vendor", () => {
     // isso no primeiro build:
     //   CONFIG_SND_SOC_ROCKCHIP_I2S: pedido =y, ficou =m
     "SND_SOC_ROCKCHIP",
+    // DRIVER FORA DA ÁRVORE, e por isso não pode estar na config do vendor:
+    // o símbolo nasce do patch `0003-giochi-painel-generic-dsi.patch`. No
+    // ROCKNIX o driver é compilado fora do Kconfig do kernel (o package.mk
+    // deles faz `obj-m` à mão), então não existe símbolo para observar.
+    //
+    // Medido no aparelho em 06/11/2026: sem ele o `dw-mipi-dsi-rockchip` probe,
+    // o `mipi-dsi ff450000.dsi.0` é criado e NENHUM driver o atende. Login
+    // funciona, `SEM_DRI`, tela preta. O nome e o `compatible` foram conferidos
+    // no fonte vendorizado, não inventados.
+    "DRM_PANEL_GENERIC_DSI",
   ]);
   const unexpected = missing.filter((symbol) => !allowed.has(symbol));
   assert.deepEqual(unexpected, [], `símbolos inventados: ${unexpected.join(", ")}`);

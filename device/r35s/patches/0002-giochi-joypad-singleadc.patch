@@ -22,40 +22,35 @@ diff -ruN a/drivers/input/joystick/Makefile b/drivers/input/joystick/Makefile
 diff -ruN a/drivers/input/joystick/rocknix-joypad/Kconfig b/drivers/input/joystick/rocknix-joypad/Kconfig
 --- a/drivers/input/joystick/rocknix-joypad/Kconfig
 +++ b/drivers/input/joystick/rocknix-joypad/Kconfig
-@@ -0,0 +1,62 @@
+@@ -0,0 +1,57 @@
 +# SPDX-License-Identifier: GPL-2.0-only
 +# ============================================================
 +# Giochi System — joypad do ROCKNIX (fora da árvore), trazido por patch
 +# ============================================================
-+# Gerado por scripts/gerar-patch-joypad.mjs a partir de
-+# device/r35s/kernel-modules/rocknix-joypad/. Não edite à mão: edite o fonte e
-+# regenere.
++# Gerado por scripts/gerar-patch-modulos.mjs a partir de
++# device/r35s/kernel-modules/rocknix-joypad/. Não edite à mão.
 +#
 +# ## Por que o símbolo se chama ODROIDGO3 num aparelho que não é Odroid
 +#
-+# Porque é o nome MEDIDO, não um nome escolhido. A config do kernel do vendor,
-+# extraída do aparelho (`device/r35s/extracted/kernel-config.gz`, md5
-+# 93bf213f…), tem exatamente:
++# Porque é o nome MEDIDO. A config do kernel do aparelho
++# (device/r35s/extracted/kernel-config.gz, md5 93bf213f...) tem:
 +#
 +#   CONFIG_JOYSTICK_ODROIDGO2=y
 +#   CONFIG_JOYSTICK_ODROIDGO3=y
 +#   CONFIG_JOYSTICK_RGB20S=y
 +#   CONFIG_JOYSTICK_XU10=y
 +#
-+# Ou seja: no ROCKNIX uma Kconfig por variante de hardware, todas servindo o
-+# mesmo par de fontes. Inventar outro nome aqui quebraria a única regra que
-+# torna o fragmento verificável — "todo símbolo que pedimos foi observado no
-+# aparelho" (`tests/device-r35s-port.test.mjs`). O nome é feio; a alternativa é
-+# uma exceção sem prova.
++# No ROCKNIX é uma Kconfig por variante de hardware, todas servindo o mesmo par
++# de fontes. Inventar outro nome quebraria a única regra que torna o fragmento
++# verificável: todo símbolo pedido foi observado no aparelho.
 +#
-+# A variante que o R35S usa é a **ODROIDGO3** (um canal de SARADC atrás de um
-+# multiplexador): o nó do DTS do vendor chama-se `odroidgo3-joypad` e o driver
-+# registra só `compatible = "rocknix-singleadc-joypad"`.
++# A variante do R35S é a ODROIDGO3: um canal de SARADC atrás de um multiplexador.
++# O nó do DTS do vendor chama-se odroidgo3-joypad e o driver registra só
++# compatible = "rocknix-singleadc-joypad".
 +#
-+# A separação em dois símbolos é a correção de um bug do Makefile do fornecedor.
-+# Lá a escolha era feita por `ifeq ($(DEVICE),$(filter $(DEVICE), ...))`, e com
-+# DEVICE vazio a primeira comparação dava verdadeira — compilando a variante
-+# errada, sem aviso. Dois símbolos de Kconfig não têm esse modo de falha.
++# A separação em dois símbolos corrige um bug do Makefile do fornecedor: lá a
++# escolha era feita por ifeq ($(DEVICE),$(filter $(DEVICE), ...)), e com DEVICE
++# vazio a primeira comparação dá verdadeira — compilando a variante errada.
 +
 +config JOYSTICK_ODROIDGO3
 +	tristate "ROCKNIX joypad, um canal SARADC com multiplexador (amux)"
@@ -66,9 +61,9 @@ diff -ruN a/drivers/input/joystick/rocknix-joypad/Kconfig b/drivers/input/joysti
 +	  Driver do joypad dos consoles portáteis cujo botão é lido por um
 +	  único canal do SARADC através de um multiplexador analógico.
 +
-+	  É o caso do R35S/R36S (RK3326): dezesseis botões e os eixos dos
-+	  analógicos saem todos de um pino de ADC. O `adc-joystick` do
-+	  mainline não atende, porque exige um canal por eixo.
++	  É o caso do R35S/R36S (RK3326): dezenove botões e os eixos dos
++	  analógicos saem todos de um pino de ADC. O adc-joystick do mainline
++	  não atende, porque exige um canal por eixo.
 +
 +	  To compile this driver as a module, choose M here: the module
 +	  will be called rocknix-singleadc-joypad.

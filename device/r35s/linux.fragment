@@ -149,3 +149,18 @@ CONFIG_MT7601U=m
 CONFIG_ATH9K_HTC=m
 CONFIG_MAC80211=m
 CONFIG_CFG80211=m
+
+# ── painel DSI fora da árvore ───────────────────────────────
+# O painel do R35S é um clone sem controlador nomeado, então o ROCKNIX o
+# descreve em DADOS: a sequência de init (155 comandos), a geometria e a
+# temporização vão na propriedade `panel_description` do DT, e o driver
+# `panel-generic-dsi` interpreta. É o que `scripts/panel-to-dtsi.mjs` gera.
+#
+# Sem este símbolo o nó `panel@0` do DTS fica ÓRFÃO: o `dw-mipi-dsi-rockchip`
+# probe, o `mipi-dsi ff450000.dsi.0` é criado, e nenhum driver responde. Não há
+# `/dev/dri/card0`, não há erro no dmesg, e o sintoma é **tela preta com o
+# sistema bootando normal** — medido no R35S em 06/11/2026.
+#
+# `=y` e não `=m`: um módulo que depende do `S15modules` é uma tela que pode não
+# acender. O painel é o console desta placa.
+CONFIG_DRM_PANEL_GENERIC_DSI=y

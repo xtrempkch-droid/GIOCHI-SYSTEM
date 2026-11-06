@@ -50,3 +50,9 @@ CONFIG_USB_DWC2=y
 # Áudio: card `rk817_int`, codec no PMIC. Medido no aparelho.
 CONFIG_SND_SOC_RK817=y
 CONFIG_MFD_RK8XX=y
+
+# O driver que atende o nó `panel@0` do DTS. Não é do mainline: vem do patch
+# `0003-giochi-painel-generic-dsi.patch`. Se o patch parar de aplicar, este
+# símbolo some e o build FALHA — em vez de entregar imagem com tela preta e
+# sistema bootando, que é indistinguível de "não ligou".
+CONFIG_DRM_PANEL_GENERIC_DSI=y
