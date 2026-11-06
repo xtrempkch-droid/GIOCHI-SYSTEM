@@ -1,0 +1,199 @@
+#!/bin/sh
+# ============================================================
+# giochi-usb — troca o papel da porta USB entre device e host
+# ============================================================
+# Uso:
+#   giochi-usb                # mostra o papel atual e o que está plugado
+#   giochi-usb --host         # vira HOST: aceita dongle Wi-Fi, teclado, pendrive
+#   giochi-usb --device       # volta a DEVICE: shell por USB (usb0) e mass storage
+#   giochi-usb --status       # só consulta
+#
+# ## Por que isto existe
+#
+# A maioria dos aparelhos desta árvore tem **uma** porta USB, e ela é OTG. Essa
+# porta serve para três coisas que se excluem:
+#
+#   1. carregar (sempre funciona, não depende de papel);
+#   2. shell por USB — `usb0` + RNDIS, o canal do sistema base. Exige DEVICE;
+#   3. dongle Wi-Fi/teclado/pendrive. Exige HOST.
+#
+# Não dá para ter 2 e 3 ao mesmo tempo no mesmo conector. Um `dr_mode` fixo no
+# device tree escolheria um e mataria o outro em TODOS os aparelhos, para sempre.
+#
+# ## O mecanismo
+#
+# O `dwc2` registra um `usb_role_switch` quando o nó do device tree tem
+# `usb-role-switch` (`drivers/usb/dwc2/drd.c`), com
+# `allow_userspace_control = true`. Isso cria
+# `/sys/class/usb_role/<udc>-role-switch/role`, que aceita `host`, `device` ou
+# `none`.
+#
+# O kernel RECUSA (`-EINVAL`) a troca para `host` se o `dr_mode` for
+# `"peripheral"`, e para `device` se for `"host"`. Por isso o DTS usa
+# `dr_mode = "otg"` — é o único valor que aceita os dois sentidos.
+#
+# ## O que acontece com o gadget ao virar host
+#
+# O gadget (RNDIS) some, porque o controlador deixa de ser dispositivo. É
+# esperado e é o motivo de `--device` existir para voltar. O script desmonta o
+# gadget ANTES de trocar: deixar o bind pendurado num controlador que virou host
+# faz o dwc2 reclamar e o gadget não volta depois.
+set -u
+
+ROLE_SWITCH_GLOB=/sys/class/usb_role/*/role
+GADGET=/sys/kernel/config/usb_gadget/giochi
+USBNET=/usr/bin/giochi-usbnet
+
+# Só o primeiro: nenhum aparelho desta árvore tem dois controladores OTG.
+role_file() {
+    for f in $ROLE_SWITCH_GLOB; do
+        [ -w "$f" ] && { printf '%s' "$f"; return 0; }
+    done
+    return 1
+}
+
+papel_atual() {
+    f="$(role_file)" || { echo "indisponivel"; return; }
+    cat "$f" 2>/dev/null || echo "indisponivel"
+}
+
+# O que o host tem plugado, se estamos em host mode. `lsusb` não está na imagem;
+# /sys/bus/usb/devices é o caminho que sempre existe.
+dispositivos_host() {
+    n=0
+    for d in /sys/bus/usb/devices/*/idVendor; do
+        [ -r "$d" ] || continue
+        dir="$(dirname "$d")"
+        # A raiz (usb1, usb2) é o próprio controlador, não um dispositivo.
+        case "$(basename "$dir")" in
+            usb[0-9]*) continue ;;
+        esac
+        nome="$(cat "$dir/product" 2>/dev/null || echo '?')"
+        vid="$(cat "$dir/idVendor" 2>/dev/null)"
+        pid="$(cat "$dir/idProduct" 2>/dev/null)"
+        echo "  $vid:$pid  $nome"
+        n=$((n + 1))
+    done
+    [ "$n" -eq 0 ] && echo "  (nenhum)"
+    return 0
+}
+
+mostrar_status() {
+    papel="$(papel_atual)"
+    echo "papel da porta USB: $papel"
+
+    case "$papel" in
+        host)
+            echo "modo HOST: aceita dongle Wi-Fi, teclado, pendrive."
+            echo "o shell por USB (usb0) está INATIVO neste modo."
+            echo "dispositivos plugados:"
+            dispositivos_host
+            ;;
+        device|peripheral)
+            echo "modo DEVICE: canal de shell por USB."
+            for i in /sys/class/net/usb0; do
+                [ -e "$i" ] || continue
+                addr="$(ip -o -4 addr show usb0 2>/dev/null | awk '{print $4}')"
+                echo "  usb0: ${addr:-(sem endereco)}"
+            done
+            ;;
+        *)
+            echo "papel desconhecido: o DTS deste aparelho tem \`usb-role-switch\`?"
+            echo "  procurando em $ROLE_SWITCH_GLOB"
+            ;;
+    esac
+
+    # Dongle presente mas sem interface = driver ou firmware faltando. É o
+    # sintoma que o usuário vê como "pluguei e não aconteceu nada".
+    if [ "$papel" = host ]; then
+        tem_wlan=0
+        for w in /sys/class/net/wlan* /sys/class/net/wlx*; do
+            [ -e "$w" ] && tem_wlan=1
+        done
+        if [ "$tem_wlan" -eq 0 ] && [ "$(dispositivos_host | grep -c ':')" -gt 0 ]; then
+            echo
+            echo "AVISO: há dispositivo USB mas nenhuma interface de rede."
+            echo "  dongle Wi-Fi precisa de driver (CONFIG_RTL8XXXU etc.) e firmware."
+            echo "  veja: dmesg | grep -iE 'firmware|rtl|mt76|ath9k'"
+        fi
+    fi
+}
+
+virar_host() {
+    f="$(role_file)" || {
+        echo "ERRO: não há role switch. O DTS precisa de \`usb-role-switch\` no" >&2
+        echo "      nó do controlador OTG, e \`dr_mode = \"otg\"\`." >&2
+        return 1
+    }
+    if [ "$(cat "$f")" = host ]; then
+        echo "já está em host"
+        mostrar_status
+        return 0
+    fi
+
+    # Desmontar o gadget ANTES: um gadget vinculado a um controlador que virou
+    # host deixa o bind pendurado e o `--device` seguinte não remonta.
+    if [ -x "$USBNET" ]; then
+        "$USBNET" --stop >/dev/null 2>&1
+    fi
+
+    echo host > "$f" 2>/dev/null || {
+        echo "ERRO: o kernel recusou a troca para host." >&2
+        echo "      Sintoma típico: o DTS usa dr_mode=\"peripheral\", que aceita só device." >&2
+        return 1
+    }
+
+    # O dwc2 leva um instante para reinicializar como host. Esperar a raiz do
+    # barramento aparecer é mais confiável que um sleep fixo.
+    i=0
+    while [ "$i" -lt 40 ]; do
+        [ -d /sys/bus/usb/devices/usb1 ] && break
+        sleep 0.1
+        i=$((i + 1))
+    done
+    echo "porta USB em modo HOST. Plugue o dongle."
+    sleep 1
+    mostrar_status
+}
+
+virar_device() {
+    f="$(role_file)" || {
+        echo "ERRO: não há role switch (veja --host)." >&2
+        return 1
+    }
+    if [ "$(cat "$f")" != host ]; then
+        # Já em device: só garante que o gadget está de pé.
+        if [ -x "$USBNET" ]; then
+            "$USBNET" >/dev/null 2>&1
+        fi
+        mostrar_status
+        return 0
+    fi
+
+    echo device > "$f" 2>/dev/null || {
+        echo "ERRO: o kernel recusou a troca para device." >&2
+        return 1
+    }
+    sleep 1
+
+    # Remontar o RNDIS: é o canal de shell e tem de voltar sozinho, senão o
+    # usuário perde o acesso ao aparelho ao trocar de papel.
+    if [ -x "$USBNET" ]; then
+        "$USBNET" >/dev/null 2>&1
+    fi
+    echo "porta USB em modo DEVICE (shell por USB de volta)."
+    mostrar_status
+}
+
+case "${1:-}" in
+    --host) virar_host ;;
+    --device) virar_device ;;
+    --status | "") mostrar_status ;;
+    -h | --help)
+        sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+        ;;
+    *)
+        echo "opção desconhecida: $1" >&2
+        exit 2
+        ;;
+esac

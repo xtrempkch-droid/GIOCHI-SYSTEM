@@ -155,3 +155,32 @@ endif
 ifeq ($(BR2_PACKAGE_LINUX_FIRMWARE),y)
 LINUX_FIRMWARE_FILES += mediatek/mt7601u.bin
 endif
+
+# ── psplash: a imagem é do PROJETO, no tamanho da tela ──────
+# O Buildroot 2024.02 não expõe mais `BR2_PACKAGE_PSPLASH_IMAGE` no Kconfig —
+# sobrou só no `.mk`, lendo um símbolo que não existe. Resultado: o pacote usa a
+# imagem padrão do Yocto (o logo do poky) em QUALQUER aparelho, e não há como
+# trocar pelo menu.
+#
+# `package/psplash/psplash.mk` faz:
+#
+#   PSPLASH_IMAGE = $(call qstrip,$(BR2_PACKAGE_PSPLASH_IMAGE))
+#   ifneq ($(PSPLASH_IMAGE),)
+#     define PSPLASH_COPY_IMAGE
+#       cp $(PSPLASH_IMAGE) $(@D)/base-images/psplash-poky.png
+#     endef
+#     PSPLASH_POST_EXTRACT_HOOKS += PSPLASH_COPY_IMAGE
+#   endif
+#
+# A atribuição é simples (`=`), então definir antes NÃO adianta: a receita
+# apagaria em silêncio (§12.7). `override` é o que sobrevive — e como ele é
+# recursivo, lê a variável de ambiente na hora do uso.
+#
+# O caminho vem do `build-device.sh`, que gera a imagem no tamanho do painel
+# declarado em `device.json`. Sem a variável (build à mão, sem o script), o
+# `ifneq` fica falso e o psplash usa a imagem dele — degradação graciosa, sem
+# quebrar build.
+override PSPLASH_IMAGE = $(GIOCHI_SPLASH_PNG)
+
+# Conferir com:
+#   make -p -n | grep '^PSPLASH_IMAGE'

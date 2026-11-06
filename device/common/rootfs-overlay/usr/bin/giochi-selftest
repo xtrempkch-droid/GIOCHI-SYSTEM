@@ -730,6 +730,35 @@ for t in /sys/class/thermal/thermal_zone*; do
 done
 [ -n "$TEMP" ] && pass "temperatura: $TEMP" || warn "sem zona térmica"
 
+# ── relógio ──────────────────────────────────────────────────
+# A equipe do app perguntou em 06/11/2026 se o aparelho "tem como guardar hora".
+# A resposta é SIM nos três aparelhos desta árvore (rk808-rtc / rk817-rtc), mas
+# ela depende de três coisas que falham em silêncio: o driver no kernel, o
+# `hwclock` do busybox, e alguém gravar de volta. Perguntar só "existe
+# /dev/rtc0" daria PASS num aparelho cujo RTC está em 1970 — o defeito que
+# importa para licença com prazo é a HORA, não o nó.
+if [ -e /dev/rtc0 ] || [ -d /sys/class/rtc/rtc0 ]; then
+    RTC_NOME="$(read_or /sys/class/rtc/rtc0/name)"
+    ANO="$(date +%Y 2>/dev/null)"
+    case "$ANO" in
+        ''|*[!0-9]*) warn "RTC $RTC_NOME presente, mas a data do sistema é ilegível" ;;
+        *)
+            # Mesmo piso do S50hwclock: antes do ano de construção da imagem é
+            # impossível estar certo. Vem do build, não de constante escrita à mão.
+            PISO="$(sed -n 's/^built_at_utc=\([0-9]\{4\}\)-.*/\1/p' /etc/giochi/build-info.txt 2>/dev/null | head -1)"
+            [ -n "$PISO" ] || PISO=2024
+            if [ "$ANO" -lt "$PISO" ]; then
+                warn "relógio em $ANO, antes de $PISO — RTC $RTC_NOME existe mas o sistema nasceu com data errada"
+                say "        não é falta de RTC: ninguém acertou o relógio ainda (S50hwclock grava no desligamento)"
+            else
+                pass "relógio: $(date '+%Y-%m-%d %H:%M') · RTC $RTC_NOME"
+            fi
+            ;;
+    esac
+else
+    warn "sem /dev/rtc0 — a hora não sobrevive ao desligamento"
+fi
+
 # ── camada Giochi ────────────────────────────────────────────
 head2 "camada Giochi"
 
@@ -755,6 +784,32 @@ fi
 
 if [ -x "$LAUNCHER" ]; then
     pass "launcher: $LAUNCHER"
+
+    # O `giochi-init` para de reiniciar depois de RESTART_MAX quedas e dorme.
+    # Isso é correto contra laço de crash e, sem aviso, o resultado em campo é
+    # "aparelho ligado, tela parada, nenhum erro" — foi o que a equipe do app
+    # relatou em 06/11/2026. O arquivo transforma o silêncio em diagnóstico.
+    PARADA_FILE="${GIOCHI_PARADA_FILE:-/run/giochi/launcher-parado}"
+    if [ -r "$PARADA_FILE" ]; then
+        fail "giochi-init DESISTIU de reiniciar o launcher: $(tr '\n' ' ' <"$PARADA_FILE")"
+    fi
+
+    # O launcher é o dono do DRM master. Se ele está vivo, o processo aparece em
+    # /proc — e aqui não vale `ps`: a imagem tem procps-ng, cujo `ps` sem
+    # argumento mostra só os processos da MESMA TTY (§12.46). Foi assim que a
+    # equipe do app concluiu "o launcher não está rodando" com ele na tela.
+    LAUNCHER_VIVO=0
+    for cmdline in /proc/[0-9]*/cmdline; do
+        # O processo pode sumir entre o glob e o `open` (é /proc): o redirect
+        # falha e polui a saída com "No such file". Silêncio é o certo aqui.
+        cmd="$(tr '\0' ' ' <"$cmdline" 2>/dev/null)"
+        case "$cmd" in
+            *giochi-launcher*) LAUNCHER_VIVO=$((LAUNCHER_VIVO + 1)) ;;
+        esac
+    done
+    if [ "$LAUNCHER_VIVO" -eq 0 ] && [ ! -r "$PARADA_FILE" ]; then
+        warn "launcher instalado mas nenhum processo rodando (lido de /proc, não de ps)"
+    fi
 else
     skip "sem launcher empacotado (/opt/giochi/apps/launcher)"
 fi

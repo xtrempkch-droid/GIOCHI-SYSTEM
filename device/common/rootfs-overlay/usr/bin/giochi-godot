@@ -1,0 +1,120 @@
+#!/bin/sh
+# giochi-godot — roda um jogo feito em Godot no aparelho.
+#
+# O que este script resolve, e o que ele NÃO resolve:
+#
+# O Godot oficial não tem driver de vídeo KMSDRM (medido com `strings` nos
+# binários 4.7.2 — ver GIOCHI-APP/docs/godot.md). Ele só sabe falar X11 ou
+# Wayland. Num aparelho que só tem DRM, o jogo "roda" e não desenha nada.
+#
+# Este script sobe o `cage` (compositor quiosque, uma janela maximizada) e
+# entrega o jogo a ele como cliente Wayland. O cage abre o DRM, então quem
+# chama precisa ter soltado o DRM antes — ver a nota de DRM master abaixo.
+#
+# Uso:
+#   giochi-godot /caminho/para/o/jogo.x86_64   [argumentos do jogo]
+#   giochi-godot --check                       só diagnostica, não executa
+#
+# Códigos de saída:
+#   0    o jogo rodou e terminou
+#   2    não há cage nesta imagem (build sem GIOCHI_WITH_GODOT=1)
+#   3    o binário do jogo não existe ou não é executável
+#   4    outro processo já tem o DRM master
+
+set -u
+
+CAGE=${GIOCHI_CAGE:-/usr/bin/cage}
+WAYLAND_DISPLAY_NAME=${GIOCHI_WAYLAND_DISPLAY:-wayland-giochi}
+
+aviso() { echo "giochi-godot: $*" >&2; }
+
+# ---------------------------------------------------------------- diagnóstico
+if [ "${1:-}" = "--check" ]; then
+    echo "giochi-godot: diagnóstico"
+
+    if [ -x "$CAGE" ]; then
+        echo "  cage:        $CAGE (ok)"
+    else
+        echo "  cage:        AUSENTE — a imagem foi construída sem GIOCHI_WITH_GODOT=1"
+        echo "  Ligue com:   GIOCHI_WITH_GODOT=1 bash scripts/build-device.sh <device>"
+    fi
+
+    # O cage só existe se o eudev existir: o wlroots lê o /dev pelo libinput,
+    # que depende de udev. Não é preferência, é dependência de compilação.
+    if [ -d /lib/udev ] || [ -d /etc/udev ]; then
+        echo "  udev:        presente (/lib/udev)"
+    else
+        echo "  udev:        ausente — o cage não vai abrir o dispositivo de entrada"
+    fi
+
+    if [ -e /dev/dri/card0 ]; then
+        echo "  DRM:         /dev/dri/card0 presente"
+    else
+        echo "  DRM:         /dev/dri/card0 AUSENTE — sem isto nada desenha"
+    fi
+
+    # Quem tem o DRM master agora. Com o launcher (KMSDRM) rodando, o cage não
+    # consegue abrir o card: o kernel permite um master por dispositivo, e a
+    # mensagem que aparece é um "Permission denied" que não diz o motivo.
+    master=""
+    for pid in $(ls /proc | grep -E '^[0-9]+$'); do
+        [ -d "/proc/$pid" ] || continue
+        if grep -qa '/dev/dri/card0' "/proc/$pid/maps" 2>/dev/null; then
+            master="$master $pid:$(cat /proc/$pid/comm 2>/dev/null)"
+        fi
+    done
+    if [ -n "$master" ]; then
+        echo "  DRM master:  ocupado por$master"
+        echo "               (o launcher precisa sair antes de o cage subir)"
+    else
+        echo "  DRM master:  livre"
+    fi
+
+    # Módulos de dongle: o Godot não usa rede, mas o jogo pode querer.
+    echo "  egl/gles:    $(ls /usr/lib/libEGL.so* 2>/dev/null | head -1 || echo ausente)"
+    exit 0
+fi
+
+# ------------------------------------------------------------------- o jogo
+JOGO=${1:-}
+if [ -z "$JOGO" ]; then
+    aviso "uso: giochi-godot /caminho/para/o/jogo [argumentos]"
+    aviso "     giochi-godot --check"
+    exit 3
+fi
+shift
+
+if [ ! -x "$JOGO" ]; then
+    aviso "não encontrei o jogo (ou ele não é executável): $JOGO"
+    exit 3
+fi
+
+if [ ! -x "$CAGE" ]; then
+    # A mensagem importa mais do que o código de saída: sem isso o sintoma é
+    # "o jogo não abre" e a causa é a imagem não ter sido construída com o
+    # fragmento do Godot.
+    aviso "esta imagem NÃO tem o compositor Wayland (cage)."
+    aviso "O Godot não desenha em KMSDRM; sem cage o jogo roda e não aparece."
+    aviso "Reconstrua com: GIOCHI_WITH_GODOT=1 bash scripts/build-device.sh <device>"
+    exit 2
+fi
+
+# O cage abre o /dev/dri/card0. Se o launcher ainda estiver com ele, o kernel
+# devolve EBUSY e o cage sai com uma mensagem que não cita o outro processo.
+for pid in $(ls /proc | grep -E '^[0-9]+$'); do
+    [ -d "/proc/$pid" ] || continue
+    [ "$pid" = "$$" ] && continue
+    if grep -qa '/dev/dri/card0' "/proc/$pid/maps" 2>/dev/null; then
+        aviso "o processo $pid ($(cat /proc/$pid/comm 2>/dev/null)) já tem o DRM master."
+        aviso "O launcher precisa sair (ou fazer exec) antes de o jogo subir."
+        exit 4
+    fi
+done
+
+# O cage procura um seat pelo libinput. Rodando como root ele abre o seat
+# direto, sem seatd — por isso o seatd não precisa estar no ar. Se um dia o
+# app rodar como usuário comum, o seatd passa a ser obrigatório.
+#
+# `--` separa as opções do cage do comando do jogo: sem ele, um argumento do
+# jogo que comece com `-` seria interpretado pelo cage.
+exec "$CAGE" -- "$JOGO" "$@"

@@ -28,6 +28,17 @@ CONFIG_PHY_ROCKCHIP_INNO_DSIDPHY=y
 CONFIG_DRM_PANEL_SITRONIX_ST7703=y
 CONFIG_DRM_PANFROST=y
 CONFIG_FRAMEBUFFER_CONSOLE=y
+# Bootsplash: o fbcon NÃO toma a tela até haver texto para mostrar.
+#
+# Sem isto o fbcon pinta preto assim que carrega, apagando o que o U-Boot/firmware
+# deixou — e o `psplash` só sobe no `S01`, alguns segundos depois. A janela preta
+# no meio do boot é o que faz o usuário achar que travou.
+#
+# O logo do kernel (pinguim) também sai: `CONFIG_LOGO=n`. Não é vaidade — com o
+# pinguim a sequência é "pinguim -> preto -> nosso splash", e sem ele é
+# "preto -> nosso splash", que parece o mesmo sistema o tempo todo.
+CONFIG_FRAMEBUFFER_CONSOLE_DEFERRED_TAKEOVER=y
+# CONFIG_LOGO is not set
 CONFIG_DRM_FBDEV_EMULATION=y
 # Rotação do console. SEM ESTA OPÇÃO o parâmetro `fbcon=rotate:N` da linha de
 # comando é IGNORADO EM SILÊNCIO — o kernel nem reclama.

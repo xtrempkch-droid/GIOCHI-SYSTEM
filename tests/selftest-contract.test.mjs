@@ -272,3 +272,69 @@ echo "$PAD_BUTTONS|$PAD_AXES|$PAD_ORIGEM"
     rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+// ── Caso 3 (06/11): o `ps` desta imagem MENTE ───────────────────────────────
+//
+// Relato da equipe do app, medido no R35S:
+//
+//     $ ps
+//       169 ttyS2  sh
+//       184 ttyS2  ps
+//     $ ls -d /proc/[0-9]* | wc -l
+//     94
+//
+// 94 processos em `/proc`, dois no `ps` — e entre os invisíveis estavam o
+// `init`, o `sshd`, o `giochi-init` **e o launcher**. A conclusão que quase
+// saiu de lá foi "o launcher não está rodando" enquanto ele desenhava a 99,2%
+// na tela.
+//
+// A causa não é defeito: `/bin/ps` desta imagem é **procps-ng 3.3.17**, e o
+// `ps` do procps-ng sem argumento seleciona "mesmo euid e mesmo terminal" —
+// comportamento herdado do Unix, documentado no man. Medido no `rootfs.ext4`:
+// `strings target/bin/ps | grep procps-ng` → `procps-ng 3.3.17`; o busybox
+// também tem `CONFIG_PS=y` (defconfig da placa puxa procps-ng e o binário real
+// ganha do symlink).
+//
+// Regra que fica: ferramenta de diagnóstico NÃO usa `ps`. `/proc` não tem
+// seleção implícita.
+
+test("a imagem traz procps-ng, cujo `ps` mostra só a própria TTY", async () => {
+  // A premissa do teste seguinte só vale se o `ps` for o do procps-ng. Se o
+  // Buildroot passar a instalar o applet do busybox, `ps` volta a listar tudo e
+  // o comentário do selftest fica mentindo — este teste avisa antes.
+  const frag = await readFile(path.join(ROOT, "config/common.fragment"), "utf8");
+  const temProcps = /^BR2_PACKAGE_PROCPS_NG=y$/m.test(frag);
+  const defconfig = await readFile(
+    path.join(ROOT, "device/r35s/defconfig"), "utf8").catch(() => "");
+  const noDefconfig = /^BR2_PACKAGE_PROCPS_NG=y$/m.test(defconfig);
+  assert.ok(
+    temProcps || noDefconfig,
+    "nem o fragmento comum nem o defconfig ligam PROCPS_NG — confira qual `ps` a imagem tem antes de mexer no selftest",
+  );
+});
+
+test("o selftest descobre o launcher por /proc, nunca por ps", async () => {
+  const texto = await read();
+  assert.ok(
+    /\/proc\/\[0-9\]\*\/cmdline/.test(texto),
+    "o selftest tem de ler /proc/*/cmdline para ver processos",
+  );
+  // `ps` dentro do selftest é a regressão: voltaria a esconder o launcher.
+  const usaPs = texto
+    .split("\n")
+    .filter((l) => !l.trim().startsWith("#"))
+    .some((l) => /(^|[\s|(;])ps\s+(-[a-zA-Z]|\|)/.test(l) || /\bps -e\b/.test(l));
+  assert.ok(!usaPs, "o selftest não pode usar `ps`: nesta imagem ele esconde processos");
+});
+
+test("a desistência do giochi-init vira FAIL no selftest, com o motivo", async () => {
+  // Antes: o init parava de reiniciar e dormia, e a tela ficava parada sem
+  // nenhuma pista. O arquivo é o que transforma silêncio em diagnóstico.
+  const texto = await read();
+  assert.match(texto, /\/run\/giochi\/launcher-parado/);
+  assert.match(texto, /DESISTIU de reiniciar/);
+  // O conteúdo é repassado, não só a existência: "desistiu" sem o motivo
+  // obriga a abrir o arquivo por SSH, que é justamente o que falta quando a
+  // tela está parada e o USB não subiu.
+  assert.match(texto, /tr '\\n' ' ' <"?\$PARADA_FILE"?/);
+});

@@ -107,6 +107,37 @@ OpenSSH porque o `scp` do OpenSSH 9+ usa SFTP por padrão, e o dropbear não tem
 aparelho tem o marcador `/etc/giochi/boot-log` — usado nos aparelhos sem console
 exposto (X35H). Ver [`x35h-bringup.md`](x35h-bringup.md).
 
+### 5. A hora sobrevive ao desligamento
+
+`S50hwclock` grava a hora do sistema no RTC no `stop` do `rcK`, e o kernel a lê
+de volta no boot seguinte (`CONFIG_RTC_HCTOSYS=y`).
+
+Nos três aparelhos desta árvore o RTC existe e persiste — medido no R35S:
+`rk808-rtc`, `/dev/rtc0`, `hwclock -w` sobrevivendo a reboot. O que faltava era o
+caminho de volta: ninguém gravava, então o próximo boot voltava para a data de
+fábrica.
+
+Se o ano do sistema for **anterior ao ano de construção da imagem**, o script se
+recusa a gravar. Um relógio de 1970 no RTC é pior que um relógio perdido: o
+aparelho nasce em 1970 para sempre, e nenhum piso de tempo (nem o do catálogo
+assinado da loja) corrige para trás. O piso vem de `/etc/giochi/build-info.txt`,
+gravado pelo build — não de constante escrita à mão que envelhece.
+
+O `giochi-selftest` reporta o resultado na seção `energia`:
+
+```text
+[PASS] relógio: 2026-11-06 17:04 · RTC rk808-rtc
+[WARN] relógio em 1970, antes de 2026 — RTC rk808-rtc existe mas o sistema nasceu com data errada
+       não é falta de RTC: ninguém acertou o relógio ainda (S50hwclock grava no desligamento)
+```
+
+A distinção importa: as duas linhas são `WARN`, e a mensagem é o que evita trocar
+hardware por causa de um relógio que ninguém acertou.
+
+**O que o sistema não faz:** descobrir a hora certa sozinho. Sem rede não há
+NTP; o RTC precisa de alguém dizer a hora ao menos uma vez (UI, catálogo
+assinado, ou `hwclock --set` por SSH). Depois disso, ele mantém.
+
 ## A camada de boot: quem chama o `giochi-init`
 
 O `giochi-init` mantém o launcher vivo. `respawn` tem dois motivos, e nenhum
@@ -172,7 +203,8 @@ device/common/rootfs-overlay/
 ```
 
 A ordem dos `S*` importa: `S30usbnet` sobe a interface **antes** de `S50sshd`,
-para o sshd nascer com socket válido.
+para o sshd nascer com socket válido. `S50hwclock` não depende de ordem: só age
+no `stop`, quando todos os outros já pararam ou estão parando.
 
 ## Trocar de servidor SSH num build retomado exige build limpo
 

@@ -27,7 +27,7 @@ const INIT = path.join(ROOT, "device/common/rootfs-overlay/usr/bin/giochi-init")
 const execFileAsync = promisify(execFile);
 
 async function montaRaiz({ comLauncher = true, saidaLauncher = 0, comConfigurador = false,
-                           saidaConfigurador = 0, comFlag = false } = {}) {
+                           saidaConfigurador = 0, comFlag = false, corpoLauncher = null } = {}) {
   const dir = await mkdtemp(path.join(tmpdir(), "giochi-init-"));
   const bin = path.join(dir, "opt/giochi/apps");
   await mkdir(path.join(bin, "launcher/bin"), { recursive: true });
@@ -36,7 +36,7 @@ async function montaRaiz({ comLauncher = true, saidaLauncher = 0, comConfigurado
 
   if (comLauncher) {
     const p = path.join(bin, "launcher/bin/giochi-launcher");
-    await writeFile(p, `#!/bin/sh\nexit ${saidaLauncher}\n`);
+    await writeFile(p, corpoLauncher ?? `#!/bin/sh\nexit ${saidaLauncher}\n`);
     await chmod(p, 0o755);
   }
   if (comConfigurador) {
@@ -50,13 +50,15 @@ async function montaRaiz({ comLauncher = true, saidaLauncher = 0, comConfigurado
   return dir;
 }
 
-async function roda(dir, timeoutMs = 4000) {
+async function roda(dir, timeoutMs = 4000, extraEnv = {}) {
   const env = {
     ...process.env,
     GIOCHI_LAUNCHER: path.join(dir, "opt/giochi/apps/launcher/bin/giochi-launcher"),
     GIOCHI_CONTROLLERS: path.join(dir, "opt/giochi/apps/controllers/bin/giochi-controllers"),
     GIOCHI_CONFIG_DIR: path.join(dir, ".config/giochi"),
     GIOCHI_LAUNCHER_WAIT: "1",
+    GIOCHI_PARADA_FILE: path.join(dir, "run/giochi/launcher-parado"),
+    ...extraEnv,
   };
   try {
     const { stderr } = await execFileAsync("sh", [INIT], { env, timeout: timeoutMs });
@@ -135,8 +137,64 @@ test("RESTART_MAX=5 significa cinco tentativas, não seis", async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-test("o cabeçalho descreve fork+wait, não exec", async () => {
-  // A premissa errada é perigosa: com `exec`, `RESTART_MAX` contaria o fim
+// ── encerramento deliberado (relato da equipe do app, 06/11/2026) ──────────
+//
+// Medido no R35S: cada `verificar` da ferramenta deles derruba o launcher uma
+// vez (o KMSDRM é exclusivo; não há como ler o framebuffer com ele vivo). Em
+// duas horas de bancada as cinco quedas da cota se esgotaram e o `giochi-init`
+// parou de reiniciar — a tela ficou parada, sem erro visível.
+//
+// A cota existe para o DEFEITO; a ferramenta de diagnóstico não pode consumi-la.
+
+test("SIGTERM no launcher ZERA a cota em vez de consumi-la", async () => {
+  // Mata a si mesmo com SIGTERM: é o que acontece quando o app derruba o
+  // launcher para capturar o quadro. O shell devolve 143 (128+15).
+  const dir = await montaRaiz({
+    corpoLauncher: "#!/bin/sh\nkill -TERM $$\nsleep 1\n",
+  });
+  const stderr = await roda(dir, 8000);
+  assert.match(stderr, /encerramento deliberado/, "não reconheceu a morte por SIGTERM");
+  // Nenhuma linha pode chamar isso de queda; se chamar, a cota é consumida.
+  assert.doesNotMatch(stderr, /queda \d+ de 5/);
+  assert.doesNotMatch(stderr, /já caiu 5 vezes/);
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("exit 0 do launcher é saída normal, não queda", async () => {
+  const dir = await montaRaiz({ saidaLauncher: 0 });
+  const stderr = await roda(dir, 4000);
+  assert.match(stderr, /encerramento deliberado/);
+  assert.doesNotMatch(stderr, /já caiu 5 vezes/);
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("crash de verdade CONTINUA consumindo a cota", async () => {
+  // O espelho do teste acima: afrouxar a proteção contra laço de crash seria
+  // trocar um problema visível por um pior. Segfault = 139.
+  const dir = await montaRaiz({ saidaLauncher: 139 });
+  const stderr = await roda(dir, 12000);
+  assert.match(stderr, /já caiu 5 vezes/, "crash deixou de consumir a cota");
+  assert.doesNotMatch(stderr, /encerramento deliberado/);
+  assert.equal((stderr.match(/launcher saiu com 139/g) ?? []).length, 5);
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("a desistência deixa rastro em arquivo, não só no console", async () => {
+  // "Tela parada" num handheld é indistinguível de "não ligou". A equipe do app
+  // pediu explicitamente um lugar visível; o console serial não é visível para
+  // quem só tem o aparelho na mão.
+  const dir = await montaRaiz({ saidaLauncher: 7 });
+  await roda(dir, 12000);
+  const marca = path.join(dir, "run/giochi/launcher-parado");
+  const texto = await readFile(marca, "utf8");
+  assert.match(texto, /^motivo=quedas_repetidas$/m);
+  assert.match(texto, /^quedas=5$/m);
+  assert.match(texto, /^ultimo_status=7$/m);
+  assert.match(texto, /^launcher=\/.*giochi-launcher$/m);
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("o cabeçalho descreve fork+wait, não exec", async () => {  // A premissa errada é perigosa: com `exec`, `RESTART_MAX` contaria o fim
   // normal de cada jogo; com `fork`+`wait`, toda saída é anormal. Um watchdog
   // escrito sobre a premissa errada mata launcher saudável no meio da partida.
   const texto = await readFile(INIT, "utf8");

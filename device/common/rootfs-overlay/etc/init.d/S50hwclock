@@ -1,0 +1,87 @@
+#!/bin/sh
+# ============================================================
+# S50hwclock — grava a hora do sistema no RTC no desligamento
+# ============================================================
+# O kernel já lê o RTC no boot (`CONFIG_RTC_HCTOSYS=y`, medido nos três
+# aparelhos RK3566/RK3326 desta árvore), então acertar o relógio do sistema
+# acerta a hora da sessão inteira. O que faltava era o caminho de VOLTA: ninguém
+# gravava a hora acertada no RTC, então o próximo boot voltava para a data que
+# estava lá.
+#
+# Foi o que a equipe do `Giochi app` mediu no R35S: relógio em 2017 e nenhuma
+# forma de guardar hora ("nenhuma licença com prazo funcionaria no R35S,
+# nunca"). O RTC **existe** (`rk808-rtc`, `/dev/rtc0`) e persiste — o problema
+# era que ninguém o acertava. Do lado deles o piso de tempo veio do catálogo
+# assinado; do nosso lado falta o RTC receber esse valor.
+#
+# ## Por que no `stop` e não no `start`
+#
+# No boot o relógio do sistema acabou de vir DO RTC: gravar de volta é
+# `hwclock -w` de um valor idêntico — no-op que só gasta escrita em NVRAM.
+# O momento em que o sistema sabe mais que o RTC é o desligamento, depois de
+# qualquer acerto (UI, catálogo assinado, `ntpd` se um dia entrar).
+#
+# O `inittab` desta árvore tem `::shutdown:/etc/init.d/rcK`, e o `rcK` chama
+# cada `S??*` com `stop` — é o gancho.
+#
+# ## A guarda que importa
+#
+# Só grava se o ano for plausível. Um relógio ERRADO gravado no RTC é pior que
+# um relógio errado que se perde: sem a guarda, um boot com bateria de RTC
+# descarregada (1970) faz o aparelho **nascer** em 1970 para sempre, e nem o
+# piso do catálogo assinado consegue corrigir para trás.
+#
+# O piso é o ano de construção da imagem (`built_at_utc` do `build-info.txt`),
+# que é uma data que o próprio build garante. Antes disso, o relógio é
+# necessariamente errado.
+
+PISO_ANO="${GIOCHI_RELOGIO_PISO_ANO:-$(sed -n 's/^built_at_utc=\([0-9]\{4\}\)-.*/\1/p' /etc/giochi/build-info.txt 2>/dev/null | head -1)}"
+[ -n "$PISO_ANO" ] || PISO_ANO=2024
+
+log() {
+    printf 'S50hwclock: %s\n' "$1" >&2
+}
+
+grava_no_rtc() {
+    # Sem /dev/rtc0 não há o que gravar, e falhar aqui não pode travar o
+    # desligamento — a hora é o último item da lista, não o primeiro.
+    [ -e /dev/rtc0 ] || { log "sem /dev/rtc0, nada a gravar"; return 0; }
+
+    command -v hwclock >/dev/null 2>&1 || { log "sem hwclock na imagem"; return 0; }
+
+    ANO_ATUAL="$(date +%Y 2>/dev/null)"
+    case "$ANO_ATUAL" in
+        ''|*[!0-9]*) log "data do sistema ilegível ($ANO_ATUAL), não gravo"; return 0 ;;
+    esac
+    if [ "$ANO_ATUAL" -lt "$PISO_ANO" ]; then
+        log "relógio em $ANO_ATUAL, antes do piso $PISO_ANO — NÃO grava (gravaria erro no RTC)"
+        return 0
+    fi
+
+    if hwclock -w 2>/dev/null; then
+        log "RTC acertado para $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    else
+        log "hwclock -w falhou (RTC sem permissão de escrita?)"
+    fi
+    return 0
+}
+
+case "$1" in
+    start)
+        # Só relata, para o log de boot dizer se o RTC foi lido.
+        if [ -r /sys/class/rtc/rtc0/name ]; then
+            log "RTC: $(cat /sys/class/rtc/rtc0/name 2>/dev/null)"
+        fi
+        ;;
+    stop)
+        grava_no_rtc
+        ;;
+    restart|reload)
+        ;;
+    *)
+        echo "Uso: $0 {start|stop|restart|reload}" >&2
+        exit 1
+        ;;
+esac
+
+exit 0

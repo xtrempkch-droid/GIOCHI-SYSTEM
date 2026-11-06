@@ -110,6 +110,123 @@ if [ -f "$VERIFICADOR_SRC" ]; then
     fi
 fi
 
+# ── gate: a biblioteca presente PROVA que alguém a usa? ─────
+#
+# DEFEITO REAL, medido no R35S em 06/11/2026: `BR2_PACKAGE_HARFBUZZ=y` estava no
+# `.config`, `libharfbuzz.so.0` estava em `/usr/lib`, e o `libSDL2_ttf` tinha
+# sido configurado com `--disable-harfbuzz`:
+#
+#   $ grep TTF_USE_HARFBUZZ build/sdl2_ttf-2.22.0/config.log
+#   #define TTF_USE_HARFBUZZ 0
+#   $ grep -a libharfbuzz.so.0 libSDL2_ttf-2.0.so.0     -> nada
+#
+# Causa: o build incremental (§12.29). O `sdl2_ttf` já estava configurado quando
+# a dependência foi acrescentada — e o Buildroot NÃO reconfigura pacote já
+# construído. O `sdl2_ttf.mk` está certo (`ifeq ($(BR2_PACKAGE_HARFBUZZ),y)`),
+# mas ele foi avaliado antes.
+#
+# O `giochi-selftest` pegava isso no APARELHO (com WARN, não FAIL). Aqui o build
+# FALHA, que é o lugar certo: a imagem não deve sair com um recurso que a config
+# diz que tem.
+#
+# A pergunta é a CONSEQUÊNCIA (o `.so` cita o soname?), não a intenção (o
+# símbolo está no `.config`?). É a regra do §12.29 aplicada ao build.
+verifica_harfbuzz() {
+    # Só interessa quando alguém pediu harfbuzz.
+    [ "${BR2_PACKAGE_HARFBUZZ:-n}" = "y" ] || return 0
+
+    local ttf=""
+    for d in "$TARGET_DIR/usr/lib" "$TARGET_DIR/lib"; do
+        for f in "$d"/libSDL2_ttf-2.0.so.0.*; do
+            [ -f "$f" ] && { ttf="$f"; break; }
+        done
+        [ -n "$ttf" ] && break
+    done
+    [ -n "$ttf" ] || return 0   # aparelho sem SDL2_ttf: nada a verificar
+
+    if grep -aq 'libharfbuzz\.so' "$ttf"; then
+        echo "post-build: SDL2_ttf pede libharfbuzz (ok)"
+        return 0
+    fi
+
+    echo "post-build: ERRO — BR2_PACKAGE_HARFBUZZ=y mas $(basename "$ttf") NÃO pede harfbuzz." >&2
+    echo "  O texto com escrita complexa (árabe, hindi, tailandês) sai errado," >&2
+    echo "  sem erro em tempo de execução — o shaping simplesmente não acontece." >&2
+    echo "  Causa: o build incremental não reconfigura pacote já construído (§12.29)." >&2
+    echo "  Correção: remova o pacote e reconstrua:" >&2
+    echo "    rm -rf \$(echo ~)/.cache/giochi-system/work/<device>/build/build/sdl2_ttf-*" >&2
+    return 1
+}
+
+if ! verifica_harfbuzz; then
+    exit 1
+fi
+
+# ## Por que este bloco vem ANTES do inittab
+#
+# A primeira versão ficou no fim do arquivo, e não rodava em build RETOMADO: o
+# bloco do inittab termina em `exit 0` quando a linha já está lá ("inittab já
+# chama giochi-init"), então tudo depois dele é código morto na segunda
+# execução. Medido em 06/11/2026 — o `/etc/giochi/build-info.txt` não apareceu
+# na imagem e o log não dizia nada, porque o `echo` também nunca rodou.
+#
+# É a mesma classe do §12.11 e §12.27 do AGENTS: trabalho que depende de "isto
+# ainda não está feito" não pode ficar depois de um `exit 0` de outro item.
+
+# ── /etc/giochi/build-info.txt (para o piso do relógio no aparelho) ──
+#
+# O `S50hwclock` grava a hora do sistema no RTC no desligamento, e se recusa a
+# gravar quando o ano é anterior ao da construção da imagem — gravar um relógio
+# de 1970 no RTC faria o aparelho NAScer em 1970 para sempre, e nenhum piso de
+# tempo de licença conseguiria corrigir para trás.
+#
+# O piso tem de ser uma data que o BUILD garante, e o `build-info.txt` existe
+# em `out/<device>/`, que NÃO está na imagem. Sem esta cópia, o script cairia
+# no piso reserva (2024) — funciona, mas é um número escrito à mão que
+# envelhece. Aqui ele vem do build.
+#
+# As variáveis chegam do `build-device.sh` por export, não por argumento: o
+# post-build é chamado pelo próprio Buildroot, com só TARGET_DIR e
+# BINARIES_DIR (a mesma armadilha do HOST_DIR documentada acima).
+if [ -n "${GIOCHI_BUILD_INFO_LINHAS:-}" ]; then
+    mkdir -p "$TARGET_DIR/etc/giochi"
+    printf '%s\n' "$GIOCHI_BUILD_INFO_LINHAS" >"$TARGET_DIR/etc/giochi/build-info.txt"
+    # Sem a senha: este arquivo vai para o cartão, e o `out/build-info.txt`
+    # registra que ela existe sem registrá-la.
+    echo "post-build: /etc/giochi/build-info.txt gravado"
+fi
+
+# ── script de init sem +x é serviço que não sobe, em silêncio ──
+#
+# `rcS` e `rcK` chamam cada `/etc/init.d/S??*` como `$i start` / `$i stop`.
+# Sem o bit de execução isso é `Permission denied` — que num boot aparece no
+# console entre outras 200 linhas e ninguém vê. O serviço simplesmente não
+# existe, e o sintoma é "não tem hora", "não tem rede", sempre longe da causa.
+#
+# Medido em 06/11/2026: `S50hwclock` foi criado por ferramenta que não preserva
+# modo, chegou ao `target/` como 0644, e o build ficou verde. O `giochi-init`
+# já tinha guarda (abaixo); ela valia para UM arquivo, que é o mesmo erro de
+# escopo do §12.34 — o teste perguntando por um caso quando o defeito é da
+# classe inteira.
+#
+# Aqui a guarda é da classe: todo script em `/etc/init.d` que o overlay do
+# Giochi System entregou tem de estar executável.
+INIT_DIR="$TARGET_DIR/etc/init.d"
+if [ -d "$INIT_DIR" ]; then
+    INIT_NAO_EXEC=""
+    for script in "$INIT_DIR"/S[0-9][0-9]*; do
+        [ -f "$script" ] || continue
+        [ -x "$script" ] || INIT_NAO_EXEC="$INIT_NAO_EXEC $(basename "$script")"
+    done
+    if [ -n "$INIT_NAO_EXEC" ]; then
+        echo "post-build: script(s) de init sem bit de execução:$INIT_NAO_EXEC" >&2
+        echo "post-build: o rcS/rcK chama \"\$script start\" — sem +x o serviço não sobe" >&2
+        echo "post-build: corrija com: chmod +x no overlay de origem (e confira o modo no git)" >&2
+        exit 1
+    fi
+    echo "post-build: todos os scripts de init estão executáveis"
+fi
+
 INITTAB="$TARGET_DIR/etc/inittab"
 INIT_BIN="$TARGET_DIR/usr/bin/giochi-init"
 

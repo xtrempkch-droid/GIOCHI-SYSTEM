@@ -181,6 +181,26 @@ case "${KEEP_WORK,,}" in
   1|true|yes|on) KEEP_WORK=1 ;;
   *) KEEP_WORK=0 ;;
 esac
+# Suporte a jogos Godot (compositor Wayland em quiosque). NÃO é o padrão:
+# custa ~15-25 MB e troca o gerenciamento de /dev de mdev para eudev. Ver
+# config/godot.fragment, que abre com o porquê (o Godot não tem KMSDRM).
+WITH_GODOT="${GIOCHI_WITH_GODOT:-0}"
+case "${WITH_GODOT,,}" in
+  1|true|yes|on) WITH_GODOT=1 ;;
+  *) WITH_GODOT=0 ;;
+esac
+if ((WITH_GODOT)); then
+  # eudev não é incremental: o `target/` de um build com mdev tem /dev
+  # populado pelo mdev e não tem /lib/udev. Misturar os dois produz imagem com
+  # os dois gerenciadores e nenhum funcionando — a mesma família do §12.27.
+  if ((KEEP_WORK)); then
+    echo "ERRO: GIOCHI_WITH_GODOT=1 troca mdev por eudev e NÃO é incremental." >&2
+    echo "  Rode sem GIOCHI_SYSTEM_KEEP_WORK=1 (build do zero)." >&2
+    exit 2
+  fi
+  echo "  godot:     suporte Wayland (cage) — /dev via eudev, ~15-25 MB"
+fi
+
 if ((KEEP_WORK)); then
   if [[ -f "$BUILD_DIR/.config" ]]; then
     echo "  retomando: build existente em $BUILD_DIR (GIOCHI_SYSTEM_KEEP_WORK=1)"
@@ -544,6 +564,20 @@ if [[ -f "$ROOT/config/package-overrides.mk" ]]; then
   echo "  overrides: config/package-overrides.mk"
 fi
 
+# O fragmento do Godot entra DEPOIS de common + principal e ANTES dos
+# fragmentos por área: ele é configuração de plataforma, e um fragmento de área
+# do aparelho pode legitimamente querer sobrepor algo daqui.
+GODOT_FRAGMENT_ARGS=()
+if ((WITH_GODOT)); then
+  if [[ ! -f "$ROOT/config/godot.fragment" ]]; then
+    echo "ERRO: GIOCHI_WITH_GODOT=1 mas config/godot.fragment não existe." >&2
+    exit 2
+  fi
+  # Staging pelo §12.6: caminho em lista separada por espaço.
+  cp -a "$ROOT/config/godot.fragment" "$WORK_DIR/godot.fragment"
+  GODOT_FRAGMENT_ARGS=(--fragment "$WORK_DIR/godot.fragment")
+fi
+
 node "$ROOT/scripts/prepare-config.mjs" \
   --config "$BUILD_DIR/.config" \
   --hostname "$HOSTNAME_VALUE" \
@@ -552,6 +586,7 @@ node "$ROOT/scripts/prepare-config.mjs" \
   --dl-dir "$BUILDROOT_DL_DIR" \
   --fragment "$ROOT/config/common.fragment" \
   --fragment "$FRAGMENT" \
+  ${GODOT_FRAGMENT_ARGS[@]+"${GODOT_FRAGMENT_ARGS[@]}"} \
   ${EXTRA_FRAGMENT_ARGS[@]+"${EXTRA_FRAGMENT_ARGS[@]}"} \
   --ccache-dir "$CCACHE_ARG" \
   "${KERNEL_FRAGMENT_ARGS[@]+"${KERNEL_FRAGMENT_ARGS[@]}"}" \
@@ -661,6 +696,21 @@ if ((FORCE_KERNEL_REBUILD)); then
   make -C "$BR2_DIR" O="$BUILD_DIR" linux-dirclean >/dev/null 2>&1 || true
 fi
 
+# O `S50hwclock` no aparelho se recusa a gravar no RTC um ano anterior ao da
+# construção da imagem — gravar um relógio de 1970 no RTC é pior que não gravar.
+# O piso tem de vir do build, não de um número escrito à mão que envelhece.
+# Exportado (não argumento) porque é o Buildroot quem chama o post-build, com só
+# TARGET_DIR e BINARIES_DIR.
+GIOCHI_BUILD_INFO_LINHAS="$(printf '%s\n' \
+  "name=Giochi System" \
+  "device=$DEVICE_ID" \
+  "device_name=$DEVICE_NAME" \
+  "arch=$DEVICE_ARCH" \
+  "buildroot=$BUILDROOT_VERSION" \
+  "version=${GIOCHI_SYSTEM_VERSION:-local}" \
+  "built_at_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)")"
+export GIOCHI_BUILD_INFO_LINHAS
+
 echo "Compilando com $JOBS job(s). O log fica em $LOG_FILE..."
 
 # ---------------------------------------------------------------
@@ -688,6 +738,32 @@ if command -v cmake >/dev/null 2>&1; then
     export CMAKE_POLICY_VERSION_MINIMUM=3.5
     echo "CMake do host é $CMAKE_HOST_VERSION — exportando CMAKE_POLICY_VERSION_MINIMUM=3.5" >&2
   fi
+fi
+
+# ---------------------------------------------------------------
+# Bootsplash: a imagem é gerada NO TAMANHO DA TELA deste aparelho.
+#
+# O `psplash` não escala nem centraliza: desenha em (0,0) do framebuffer. Uma
+# imagem de 640x480 numa tela de 720x1280 aparece no canto com o resto preto, o
+# que é pior que não ter splash — parece defeito.
+#
+# A resolução vem de `panel { width, height }` no device.json, validado pelo
+# schema. `config/package-overrides.mk` lê `GIOCHI_SPLASH_PNG` e a entrega ao
+# psplash; sem a variável, o override fica inerte e o pacote usa a imagem dele.
+#
+# O arquivo vai para `work/<device>/` e não para a pasta do aparelho: caminho
+# com espaço entraria cru numa variável de make (§12.6).
+# ---------------------------------------------------------------
+SPLASH_PNG="$WORK_DIR/splash.png"
+if node "$ROOT/scripts/gerar-splash.mjs" --device "$DEVICE_ID" --out "$SPLASH_PNG" \
+     >"$WORK_DIR/splash.log" 2>&1; then
+  export GIOCHI_SPLASH_PNG="$SPLASH_PNG"
+  echo "  splash:    $(sed -n '2p' "$WORK_DIR/splash.log" | sed 's/^ *//')"
+else
+  # Sem splash o aparelho boota igual. Não vale derrubar o build por cosmético,
+  # mas o motivo tem de aparecer: rascunho sem `panel` no device.json é o caso
+  # normal e o aviso explica o que falta.
+  echo "  splash:    NÃO gerado — $(tail -1 "$WORK_DIR/splash.log" 2>/dev/null)" >&2
 fi
 
 # ---------------------------------------------------------------

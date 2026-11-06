@@ -19,3 +19,38 @@
 # ficou onde devia — foi assim que o X55 fechou o último FAIL dele.
 BR2_PACKAGE_ALSA_LIB=y
 BR2_PACKAGE_ALSA_UTILS=y
+
+# ── firmware dos dongles Wi-Fi USB ──────────────────────────
+#
+# O R35S não tem rádio: o dongle é hardware FORNECIDO PELO USUÁRIO, e a regra do
+# §12.31 manda empacotar mesmo ausente. Os drivers estão `=m` no
+# `linux.fragment`; aqui vem o firmware, sem o qual o módulo carrega e o
+# aparelho fica sem interface:
+#
+#   rtlwifi/rtl8188efw.bin  RTL8188EU   (RTL_81XX)
+#   rtlwifi/rtl8192cufw.bin RTL8192CU   (idem)
+#   rtlwifi/rtl8723aufw.bin RTL8723AU   (idem)
+#   rtlwifi/rtl8188fufw.bin RTL8188FU   (idem)
+#   ath9k_htc/htc_9271-1.4.0.fw  AR9271 (ATHEROS_9271)
+#
+# `mediatek/mt7601u.bin` NÃO tem opção no Buildroot 2024.02 e entra por
+# `LINUX_FIRMWARE_FILES +=` em config/package-overrides.mk — esse já vale para
+# todos os aparelhos que têm linux-firmware.
+BR2_PACKAGE_LINUX_FIRMWARE=y
+BR2_PACKAGE_LINUX_FIRMWARE_RTL_81XX=y
+BR2_PACKAGE_LINUX_FIRMWARE_ATHEROS_9271=y
+
+# ── usuário de Wi-Fi sem rádio onboard ──────────────────────
+# `wpa_supplicant` e `iw` são o mínimo para o dongle ser utilizável: sem eles a
+# interface existe e não há como conectar. O `wireless-regdb` define a potência
+# permitida por país; sem ele o cfg80211 usa o mundo inteiro conservador, e
+# alguns dongles simplesmente não sobem.
+#
+# O `S40wifi` já existe no overlay comum e conecta se
+# `/etc/wpa_supplicant.conf` existir. Credencial NÃO entra na imagem (§12.14):
+# ela é provisionada no aparelho com `wpa_passphrase`.
+BR2_PACKAGE_WPA_SUPPLICANT=y
+BR2_PACKAGE_WPA_SUPPLICANT_CLI=y
+BR2_PACKAGE_WPA_SUPPLICANT_NL80211=y
+BR2_PACKAGE_IW=y
+BR2_PACKAGE_WIRELESS_REGDB=y

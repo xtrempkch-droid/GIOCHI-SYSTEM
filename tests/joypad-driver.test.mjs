@@ -385,30 +385,46 @@ test("o gerador do DTS recusa publicar DTS que compila mas não funciona", () =>
 // criado (IRQ 61 -> 63) e o estado continuou `not attached`. As duas peças são
 // necessárias, e nenhuma das duas aparece em mensagem de erro.
 
-test("usb20_otg usa dr_mode peripheral, não otg", () => {
+test("usb20_otg tem role switch, não dr_mode fixo", () => {
+  // A evolução do diagnóstico, medida em duas rodadas:
+  //
+  //   1. `dr_mode = "otg"`        -> UDC `not attached` (bvalid do PHY nunca sobe)
+  //   2. `dr_mode = "peripheral"` -> funciona, MAS fecha a porta para host:
+  //                                  dongle Wi-Fi deixa de ser possível
+  //   3. role switch              -> os dois papéis
+  //
+  // O `dwc2_ovr_init()` força `GOTGCTL_BVALOVAL | GOTGCTL_VBVALOVAL` quando o
+  // modo default é peripheral — mesmo efeito do item 2, sem matar host. E o
+  // role switch só existe se o nó tiver `usb-role-switch`.
   const src = readFileSync(R3XS, "utf8");
   const m = /&usb20_otg\s*\{([\s\S]*?)\n\};/.exec(src);
   assert.ok(m, "não achei o nó &usb20_otg");
-  assert.match(
-    m[1], /dr_mode\s*=\s*"peripheral"/,
-    "otg espera bvalid do PHY, que esta placa não liga => usb0 NO-CARRIER",
-  );
+  const corpo = m[1];
+
+  assert.match(corpo, /^\s*usb-role-switch;/m,
+    "sem isto o dwc2 não registra o role switch");
+  assert.match(corpo, /role-switch-default-mode\s*=\s*"peripheral"/,
+    "é o que força BVALOVAL e faz o gadget subir sem o PHY");
+  // `otg` é REQUISITO: `dwc2_drd_role_sw_set` recusa host com `peripheral`.
+  assert.match(corpo, /dr_mode\s*=\s*"otg"/,
+    "com `peripheral` o kernel recusa a troca para host (EINVAL)");
 });
 
-test("o patch do DTS carrega dr_mode peripheral", () => {
+test("o patch do DTS carrega role switch e otg-port", () => {
   const p = readFileSync(
     `${ROOT}device/r35s/patches/0001-giochi-system-r35s-dts-e-painel.patch`, "utf8");
-  assert.match(p, /^\+	dr_mode = "peripheral";$/m);
+  assert.match(p, /^\+	usb-role-switch;$/m);
+  assert.match(p, /^\+	role-switch-default-mode = "peripheral";$/m);
+  assert.match(p, /^\+	dr_mode = "otg";$/m);
   // E o otg-port também, que é a outra metade.
   assert.match(p, /^\+	u2phy_otg: otg-port \{$/m);
 });
 
-test("o gerador do DTS recusa publicar dr_mode otg", () => {
+test("o gerador do DTS recusa DTS sem role switch", () => {
   const gerador = readFileSync(`${ROOT}scripts/gerar-patch-dts.mjs`, "utf8");
-  // A checagem está escrita como regex no gerador, com as aspas escapadas —
-  // procurar a forma "literal" dava falso negativo (foi o que este teste pegou).
-  assert.match(gerador, /dr_mode\\s\*=\\s\*"peripheral"/);
-  assert.match(gerador, /usb0 fica NO-CARRIER/);
+  assert.match(gerador, /usb-role-switch/, "a checagem tem de cobrir o role switch");
+  assert.match(gerador, /role-switch-default-mode/);
+  assert.match(gerador, /recusa host com/);
 });
 
 // ── transferência de arquivo: mass_storage, não MTP ───────────────────────
@@ -542,4 +558,66 @@ done`;
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+// ── dongle Wi-Fi: o R35S não tem rádio, então é o único caminho ───────────
+//
+// Pedido de 06/11/2026: "dongle Wi-Fi/USB pode implantar, pois esse não tem
+// wifi nem bluetooth interno". Confere com o medido: o DTB não tem nó de rádio,
+// e o `ls /sys/class/net` só mostra `lo` e `usb0`.
+//
+// Isso exigiu reverter o `dr_mode = "peripheral"` que eu tinha fixado: um
+// `dr_mode` fixo escolhe um papel para sempre, e a MESMA porta serve para o
+// shell USB (device) e para o dongle (host).
+
+const USB_TOOL = `${ROOT}device/common/rootfs-overlay/usr/bin/giochi-usb`;
+
+test("giochi-usb troca o papel e volta — sem deixar o gadget pendurado", () => {
+  assert.ok(existsSync(USB_TOOL), "falta o giochi-usb");
+  const sh = readFileSync(USB_TOOL, "utf8");
+  assert.match(sh, /\/sys\/class\/usb_role\/\*\/role/, "o caminho do role switch");
+  // Desmontar o gadget antes de virar host: bind pendurado num controlador que
+  // virou host faz o `--device` seguinte não remontar.
+  const blocoHost = sh.slice(sh.indexOf("virar_host()"), sh.indexOf("virar_device()"));
+  assert.match(blocoHost, /--stop/, "tem de parar o gadget antes de trocar");
+  // E voltar para device tem de REMONTAR o RNDIS, senão o usuário perde o shell.
+  const blocoDev = sh.slice(sh.indexOf("virar_device()"));
+  assert.match(blocoDev, /giochi-usbnet|USBNET/, "tem de remontar o RNDIS");
+});
+
+test("os drivers de dongle estão no R35S e são módulos", () => {
+  // Hardware FORNECIDO pelo usuário se empacota mesmo ausente (§12.31): a imagem
+  // é gravada uma vez e o dongle chega depois.
+  for (const sym of ["RTL8XXXU", "RTL8192CU", "MT7601U", "ATH9K_HTC"]) {
+    assert.match(fragment, new RegExp(`^CONFIG_${sym}=m$`, "m"), `falta ${sym}`);
+  }
+  // `UNTESTED` é o que cobre o 8188FU, o dongle barato de hoje.
+  assert.match(fragment, /^CONFIG_RTL8XXXU_UNTESTED=y$/m);
+  // `=m` e não `=y`: carregam por modalias quando o dongle entra, e não custam
+  // memória se ninguém plugar.
+  assert.ok(
+    !/^CONFIG_RTL8XXXU=y$/m.test(fragment),
+    "=y infla o kernel com driver que talvez nunca seja usado",
+  );
+});
+
+test("o firmware dos dongles vem na imagem, com usuário de Wi-Fi", () => {
+  const br = readFileSync(`${ROOT}device/r35s/buildroot.fragment`, "utf8");
+  assert.match(br, /^BR2_PACKAGE_LINUX_FIRMWARE_RTL_81XX=y$/m, "8188/8192/8723/8188FU");
+  assert.match(br, /^BR2_PACKAGE_LINUX_FIRMWARE_ATHEROS_9271=y$/m, "AR9271");
+  // Sem wpa_supplicant/iw a interface existe e não há como conectar.
+  assert.match(br, /^BR2_PACKAGE_WPA_SUPPLICANT=y$/m);
+  assert.match(br, /^BR2_PACKAGE_IW=y$/m);
+  assert.match(br, /^BR2_PACKAGE_WIRELESS_REGDB=y$/m);
+  // E o mt7601u entra pelo override, que já vale para todos os aparelhos.
+  const ov = readFileSync(`${ROOT}config/package-overrides.mk`, "utf8");
+  assert.match(ov, /mediatek\/mt7601u\.bin/);
+});
+
+test("credencial de Wi-Fi não entra na imagem (§12.14)", () => {
+  // O artefato do CI é público: um wpa_supplicant.conf com psk= entrega a senha
+  // de quem buildou. É provisionado no aparelho com `wpa_passphrase`.
+  const br = readFileSync(`${ROOT}device/r35s/buildroot.fragment`, "utf8");
+  assert.ok(!/psk=|ssid=/i.test(br), "nada de credencial no fragmento");
+  assert.match(br, /wpa_passphrase|provisionad/i, "o motivo tem de estar escrito");
 });

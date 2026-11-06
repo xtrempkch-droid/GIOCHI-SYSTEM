@@ -124,12 +124,66 @@ mkdir -p "$CACHE_HOST/work" "$CACHE_HOST/downloads" "$CACHE_HOST/ccache"
 # host, o que torna container e build nativo intercambiáveis. Use quando o
 # `work/<device>` já existir e não se quiser pagar um build do zero (~1 h só de
 # toolchain).
+#
+# ## Por que isso virou automático
+#
+# Era uma flag para esquecer, e foi esquecida. Medido em 06/11/2026: o retomado
+# do `work/r35s` sem a flag morreu no FIM do build, em `fs/ext2`:
+#
+#   fakeroot: preload library `libfakeroot.so' not found, aborting.
+#   make: *** [fs/ext2/ext2.mk:66: .../images/rootfs.ext2] Error 1
+#
+# O `bin/fakeroot` é um script de shell com o prefixo CRAVADO na geração:
+#
+#   FAKEROOT_PREFIX=/home/charles/.cache/giochi-system/work/r35s/build/host
+#   PATHS=/home/charles/.cache/giochi-system/work/r35s/build/host/lib:...
+#
+# Dentro do container com `/cache` esse diretório não existe, então o fakeroot
+# não acha a própria biblioteca. O erro cita a biblioteca, não o caminho — e o
+# build já tinha compilado tudo antes de morrer.
+#
+# A defesa certa é não ter flag: o layout do `work/<device>` existente MANDA.
+# Lemos o prefixo cravado nele e montamos o cache no caminho que ele espera.
+# Sem `work/` (build do zero) o padrão `/cache` continua valendo.
+CACHE_IN_CONTAINER=/cache
+CACHE_MOUNT_ORIGEM="padrão"
+
+if [[ -n "$DEVICE_ID" ]]; then
+  WORK_DEV_HOST="$CACHE_HOST/work/$(echo "$DEVICE_ID" | tr 'A-Z' 'a-z')"
+  FAKEROOT_WRAPPER="$WORK_DEV_HOST/build/host/bin/fakeroot"
+  if [[ -f "$FAKEROOT_WRAPPER" ]]; then
+    # O prefixo da instalação é a primeira atribuição FAKEROOT_PREFIX= do wrapper.
+    PREFIXO_CRAVADO="$(sed -n 's/^FAKEROOT_PREFIX=//p' "$FAKEROOT_WRAPPER" | head -1)"
+    case "$PREFIXO_CRAVADO" in
+      "$WORK_DEV_HOST/build/host")
+        CACHE_IN_CONTAINER="$CACHE_HOST"
+        CACHE_MOUNT_ORIGEM="work/ existente foi construído com o caminho do host"
+        ;;
+      "/cache/work/"*/build/host)
+        CACHE_IN_CONTAINER=/cache
+        CACHE_MOUNT_ORIGEM="work/ existente foi construído dentro do container em /cache"
+        ;;
+      "")
+        : # wrapper sem prefixo reconhecível: fica no padrão
+        ;;
+      *)
+        echo "ERRO: o work/$DEVICE_ID existente espera $PREFIXO_CRAVADO," >&2
+        echo "      que não existe nem no host nem em /cache dentro do container." >&2
+        echo "      Esse work/ veio de outra máquina: rode sem" >&2
+        echo "      GIOCHI_SYSTEM_KEEP_WORK=1 para reconstruir do zero." >&2
+        exit 2
+        ;;
+    esac
+  fi
+fi
+
 if [[ "${GIOCHI_CONTAINER_SAME_PATHS:-0}" =~ ^(1|true|yes|on)$ ]]; then
   CACHE_IN_CONTAINER="$CACHE_HOST"
-  echo "cache:     $CACHE_HOST (mesmo caminho do host — GIOCHI_CONTAINER_SAME_PATHS)"
-else
-  CACHE_IN_CONTAINER=/cache
+  CACHE_MOUNT_ORIGEM="GIOCHI_CONTAINER_SAME_PATHS=1 (forçado)"
 fi
+
+echo "cache:     $CACHE_IN_CONTAINER no container ← $CACHE_HOST no host"
+echo "           ($CACHE_MOUNT_ORIGEM)"
 
 # As variáveis chegam do ambiente do host e são repassadas explicitamente:
 # `docker run` não herda o ambiente da chamada.

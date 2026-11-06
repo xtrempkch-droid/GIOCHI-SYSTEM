@@ -2,6 +2,10 @@
   "schemaVersion": 1,
   "id": "powkiddy-x55",
   "name": "Powkiddy X55",
+  "panel": {
+    "width": 720,
+    "height": 1280
+  },
   "description": "Handheld Rockchip RK3566 (4x Cortex-A55, Mali-G52, 2 GB), painel MIPI-DSI Himax HX8394 720x1280. Base Buildroot derivada do defconfig que bootou em hardware real no antecessor GIOCHI-KONSOL-OS.",
   "arch": "arm64",
   "hostname": "giochi-system-x55",

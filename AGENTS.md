@@ -2076,6 +2076,279 @@ nenhuma das três é detectável por `bash -n` nem por teste de metadados — s�
 `patch --dry-run` e um build de verdade pegam. Por isso o teste do patch faz o
 dry-run: custa 1 s e teria evitado dois builds.
 
+### 12.45 A ferramenta de diagnóstico consumindo a cota que existe para o defeito
+
+Relatado pela equipe do `Giochi app` em 06/11/2026, medido no R35S:
+
+> Cada `verificar` meu derruba o launcher uma vez para capturar o quadro (o
+> KMSDRM é exclusivo). Depois de 5, o `giochi-init` **para de reiniciar** e
+> dorme — correto para não entrar em laço de crash, mas o resultado em campo é
+> "aparelho ligado, tela parada, nenhum erro na tela".
+
+O `RESTART_MAX=5` estava certo contra a ameaça que ele foi escrito para conter
+(launcher quebrado piscando a tela em laço). O erro foi não distinguir **quem**
+matou o processo:
+
+| Como o launcher saiu | `$?` | Conta na cota? |
+| --- | --- | --- |
+| o usuário fechou / o app pediu para sair | `0` | **não** |
+| morto por `SIGHUP`/`SIGINT`/`SIGTERM` | `129`/`130`/`143` | **não** |
+| segfault, panic, `exit 7`… | qualquer outro | sim |
+
+`128 + sinal` é o que o shell devolve para filho morto por sinal — não há número
+inventado aqui. Saída deliberada **zera** a cota (`restarts=0`), em vez de só
+deixar de contar: um `verificar` a cada duas horas nunca deve chegar perto do
+limite em nenhum cenário, e zerar é mais fácil de provar do que "decrementar".
+
+O que **não** mudou: um launcher que crasha de verdade com cinco segfaults em
+60 s continua parando de ser reiniciado. Afrouxar isso trocaria um problema
+visível por um pior.
+
+**A segunda metade é o rastro.** "Tela parada" num handheld é indistinguível de
+"não ligou", e o console serial (único canal quando o USB não sobe) não é
+visível para quem tem o aparelho na mão. A desistência agora grava
+`/run/giochi/launcher-parado`:
+
+```text
+motivo=quedas_repetidas
+quedas=5
+janela_s=60
+ultimo_status=139
+launcher=/opt/giochi/apps/launcher/bin/giochi-launcher
+uptime_s=4213
+```
+
+O `giochi-selftest` transforma isso em `[FAIL] giochi-init DESISTIU de
+reiniciar o launcher: <conteúdo>` — motivo junto, porque "desistiu" sem o porquê
+só obriga a abrir o arquivo por SSH.
+
+`tests/giochi-init.test.mjs` cobre os quatro casos rodando o script de verdade
+(SIGTERM zera, `exit 0` zera, `exit 139` **continua** consumindo, e a marca é
+escrita com `quedas=5`). O caso do crash é o que impede a correção de virar
+"nunca desiste de nada".
+
+### 12.46 `/bin/ps` desta imagem mostra só a própria TTY
+
+Medido pela equipe do app no R35S, e é a explicação de um diagnóstico errado
+que quase saiu de lá:
+
+```text
+$ ps
+  169 ttyS2  sh
+  184 ttyS2  ps
+$ ls -d /proc/[0-9]* | wc -l
+94
+```
+
+94 processos em `/proc`, dois no `ps`. Entre os invisíveis estavam o `init`, o
+`sshd`, o `giochi-init` **e o launcher** — e a conclusão que quase foi escrita
+foi "o launcher não está rodando" com ele desenhando a 99,2% na tela.
+
+**Não é defeito.** `/bin/ps` desta imagem é `procps-ng 3.3.17` (`strings
+target/bin/ps | grep procps-ng`), e o `ps` do procps-ng **sem argumento**
+seleciona "mesmo euid e mesmo terminal" — comportamento herdado do Unix,
+documentado no man. O busybox também tem `CONFIG_PS=y`, mas o binário real do
+procps-ng ganha do symlink no `target/`.
+
+| Comando | O que lista |
+| --- | --- |
+| `ps` | só a própria TTY (o que engana) |
+| `ps -ef` | tudo |
+| `pidof <nome>` | acerta (usa `/proc`) |
+| ler `/proc/*/cmdline` | acerta sempre |
+
+**Regra:** ferramenta de diagnóstico desta árvore não usa `ps`. `/proc` não tem
+seleção implícita, responde a pergunta feita, e funciona igual em busybox e
+procps-ng. `tests/selftest-contract.test.mjs` falha se um `ps` voltar ao
+`giochi-selftest`, e um teste irmão confirma que a imagem realmente traz
+procps-ng (se um dia o applet do busybox ganhar, o comentário estaria mentindo e
+o teste avisa antes).
+
+Família do §12.30 e do §12.34: **o teste perguntou a coisa errada.** Ali foi
+`ls` com dois globs, aqui é `ps` com seleção implícita. O padrão que funciona é
+perguntar pela consequência — `/proc` responde "este processo existe?" sem
+precisar de opção.
+
+### 12.47 `work/` com o caminho do host cravado não retoma dentro do container
+
+`scripts/build-in-container.sh` monta o cache em `/cache` por padrão (caminho
+curto e estável). Mas o Buildroot grava o **caminho absoluto** do `host/` no
+`RPATH` de cada binário, e o `bin/fakeroot` é um script de shell com o prefixo
+literal:
+
+```text
+FAKEROOT_PREFIX=/home/charles/.cache/giochi-system/work/r35s/build/host
+PATHS=/home/charles/.cache/giochi-system/work/r35s/build/host/lib:...
+```
+
+Consequência medida em 06/11/2026, ao retomar um `work/r35s` construído fora do
+container: o build compilou **tudo**, chegou ao fim e morreu em `fs/ext2`:
+
+```text
+fakeroot: preload library `libfakeroot.so' not found, aborting.
+make: *** [fs/ext2/ext2.mk:66: .../images/rootfs.ext2] Error 1
+```
+
+A mensagem cita a **biblioteca**, nunca o caminho. `libfakeroot.so` está em
+`host/lib` — só que o `host/lib` que o script procura não existe dentro do
+container. Meia hora de compilação perdida no último passo.
+
+Antes isto era `GIOCHI_CONTAINER_SAME_PATHS=1`, uma flag para lembrar. Flag que
+se esquece não é defesa: agora o script **lê o prefixo cravado** no
+`work/<device>/build/host/bin/fakeroot` e monta o cache no caminho que ele
+espera, avisando qual foi:
+
+```text
+cache:     /home/charles/.cache/giochi-system no container ← ... no host
+           (work/ existente foi construído com o caminho do host)
+```
+
+Três layouts são reconhecidos, e um quarto é recusado com instrução: prefixo
+igual ao `work/` do host (monta no caminho do host), prefixo `/cache/...`
+(monta em `/cache`), wrapper sem prefixo (fica no padrão), e **qualquer outro**
+— típico de `work/` vindo de outra máquina — aborta antes de compilar nada:
+
+```text
+ERRO: o work/r35s existente espera /outra/maquina/work/r35s/build/host,
+      que não existe nem no host nem em /cache dentro do container.
+      Esse work/ veio de outra máquina: rode sem GIOCHI_SYSTEM_KEEP_WORK=1.
+```
+
+`GIOCHI_CONTAINER_SAME_PATHS=1` continua existindo para forçar o layout do host,
+mas deixou de ser necessária. A regra geral é a do §12.11 e §12.27: **`KEEP_WORK`
+é seguro só quando o ambiente não mudou** — e "ambiente" inclui o caminho onde o
+build mora.
+
+### 12.48 Relógio errado gravado no RTC é pior que relógio que se perde
+
+Pergunta da equipe do app em 06/11/2026, medida no R35S:
+
+> O relógio diz 2017, sem RTC e sem rádio. Isso quebrava a licença: emitida em
+> 2026, o veredito era "não sei julgar", e não liberava — **nenhuma licença com
+> prazo funcionaria no R35S, nunca**. […] tem como o R35S guardar hora?
+
+**Tem.** O `rk808-rtc` está lá e persiste — gravei 13:30:00, li 13:31:57 depois
+de um ciclo de energia; o delta é o tempo do boot. E o kernel já faz a leitura:
+`CONFIG_RTC_CLASS=y`, `CONFIG_RTC_HCTOSYS=y`, `CONFIG_RTC_DRV_RK808=y`.
+
+O que faltava não era hardware nem símbolo de kernel: era o **caminho de volta**.
+Ninguém gravava a hora acertada no RTC, então o boot seguinte voltava para a data
+que estava lá. `S50hwclock` fecha isso no `stop` do `rcK` (o `inittab` já tem
+`::shutdown:/etc/init.d/rcK`).
+
+Duas decisões de desenho, e a segunda é a que importa:
+
+**1. No `stop`, não no `start`.** No boot o relógio do sistema acabou de vir DO
+RTC; gravar de volta é `hwclock -w` de um valor idêntico — escrita em NVRAM sem
+ganho. O momento em que o sistema sabe mais que o RTC é o desligamento.
+
+**2. Piso de ano, vindo do build.** Só grava quando o ano do sistema ≥ o ano de
+construção da imagem. Sem essa guarda, um boot com bateria de RTC descarregada
+(1970) faz o aparelho **nascer** em 1970 para sempre — e nenhum piso de tempo,
+nem o do catálogo assinado do app, corrige para trás. Um relógio errado gravado
+é pior que um relógio errado que se perde.
+
+O piso tem de ser um dado do build, não um número escrito à mão que envelhece.
+`out/<device>/build-info.txt` **não está na imagem** (é artefato de CI), então
+`build-device.sh` exporta `GIOCHI_BUILD_INFO_LINHAS` e o `post-build.sh` grava
+`/etc/giochi/build-info.txt` no `TARGET_DIR`. Export, não argumento: o Buildroot
+chama o post-build com só `TARGET_DIR` e `BINARIES_DIR` (a mesma armadilha do
+`HOST_DIR` já documentada no próprio `post-build.sh`).
+
+Sem o arquivo, o reserva é 2024 — funciona, mas é exatamente o tipo de constante
+que envelhece em silêncio. `tests/rtc-clock.test.mjs` (7 testes) roda o script de
+verdade com `hwclock` instrumentado e cobre: piso do build, recusa em 1970,
+gravação em ano válido, ausência de `/dev/rtc0` (desligamento não pode travar),
+data ilegível (não pode virar gravação às cegas) e a assimetria `start`/`stop`.
+
+Corolário para o app: depois de acertar o relógio pela UI ou pelo catálogo
+assinado, **basta um desligamento normal** para o RTC guardar. Não é preciso
+chamar nada — mas se chamarem `hwclock -w` explicitamente também funciona,
+porque o applet está na imagem (`CONFIG_HWCLOCK=y` no busybox).
+
+### 12.49 Código depois de um `exit 0` é código morto — e o build fica verde
+
+Ao acrescentar o `/etc/giochi/build-info.txt` (piso do relógio, §12.48), escrevi
+o bloco **no fim** do `scripts/post-build.sh`. O build passou, `EXIT=0`, nenhum
+aviso:
+
+```text
+post-build: verificador-ed25519 compilado
+post-build: inittab já chama giochi-init          <- exit 0 aqui
+```
+
+O arquivo não apareceu na imagem e o log não disse nada — porque o `echo` que
+anunciaria a gravação também estava depois do `exit 0`. A linha 183 é:
+
+```sh
+if grep -qxF "$ENTRADA" "$INITTAB" 2>/dev/null; then
+    echo "post-build: inittab já chama giochi-init"
+    exit 0                     # <- tudo depois disto nunca roda
+fi
+```
+
+Esse `exit 0` está **certo**: se o inittab já tem a linha, não há o que fazer
+*naquele item*. O erro é de estrutura — assumir que "o fim do arquivo" é "o fim
+do trabalho". Em build do zero a linha ainda não existe, o `grep` falha, e o
+código do fim roda. Só o build **retomado** (o caso normal quando se está
+depurando) executa o caminho do `exit 0` e pula o resto.
+
+É a mesma família do §12.11 e do §12.27: **trabalho que depende de "isto ainda
+não está feito" não pode ficar depois de um `exit 0` de outro item.** Regra:
+
+- `exit` só no fim lógico do arquivo, nunca no meio de um bloco condicional que
+  outros blocos posteriores precisam atravessar;
+- blocos independentes vêm **antes** de qualquer `exit` condicional;
+- se precisar sair cedo, use uma flag (`JA_TEM_LINHA=1`) e decida no fim.
+
+`tests/rtc-clock.test.mjs` verifica a **ordem** no texto: o índice do bloco do
+`build-info.txt` tem de ser menor que o do early-exit do inittab. Teste de
+ordem é frágil por natureza, então ele falha com mensagem explícita se um dos
+dois marcadores sumir — quem reestruturar o arquivo é obrigado a olhar.
+
+### 12.50 Arquivo criado sem bit de execução é serviço que não sobe
+
+`S50hwclock` foi criado com modo `0644`. `cp -a` do staging preservou o modo, e
+o arquivo chegou ao `target/` assim. O build ficou **verde**.
+
+O `rcS` e o `rcK` chamam cada `/etc/init.d/S??*` como `$i start` / `$i stop`:
+
+```sh
+for i in $(ls -r /etc/init.d/S??*) ;do
+     ...
+     $i stop
+done
+```
+
+Sem `+x` isso é `Permission denied` — uma linha no console entre outras duzentas,
+que ninguém lê. O RTC nunca seria gravado, e o sintoma ("a hora não guarda") não
+aponta para modo de arquivo.
+
+O `post-build.sh` **já tinha** essa guarda, mas para um arquivo só:
+
+```sh
+[ -x "$INIT_BIN" ] || { echo "...giochi-init não está executável"; exit 1; }
+```
+
+Ela valia para o `giochi-init` porque foi ele que doeu na primeira vez. É
+exatamente o erro de escopo do §12.34: **o teste perguntando por um caso quando
+o defeito é da classe inteira.** Agora a guarda varre o diretório:
+
+```text
+post-build: script(s) de init sem bit de execução: S50hwclock
+post-build: o rcS/rcK chama "$script start" — sem +x o serviço não sobe
+```
+
+E `tests/rtc-clock.test.mjs` tem o par barato (10 ms, antes do commit):
+todo `S??*` do overlay é executável. O gate do build custa 40 min para descobrir;
+o teste custa nada.
+
+**Armadilha do Git:** `chmod +x` no disco não é o que o checkout de outra máquina
+vê — o modo vem do índice. Para arquivo novo, `git add` normal já grava `100755`
+se o disco estiver certo, mas se ele foi adicionado antes do `chmod`, corrija com
+`git update-index --chmod=+x <arquivo>` (ou `git add --chmod=+x`). Conferir com
+`git ls-files -s`: a primeira coluna tem de ser `100755`.
+
 ## 13. Aparelhos
 
 | ID | Pasta | SoC | Arch | Status | Falta |

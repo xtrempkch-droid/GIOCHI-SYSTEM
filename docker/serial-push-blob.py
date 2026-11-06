@@ -56,6 +56,7 @@ remoto = sys.argv[4]
 
 chunk = 700
 pausa = 1.2
+senha = "giochi-dev"
 usar_gz = False
 
 resto = sys.argv[5:]
@@ -66,6 +67,9 @@ while i < len(resto):
         i += 2
     elif resto[i] == "--pausa":
         pausa = float(resto[i + 1])
+        i += 2
+    elif resto[i] == "--senha":
+        senha = resto[i + 1]
         i += 2
     elif resto[i] == "--gz":
         usar_gz = True
@@ -113,6 +117,36 @@ with serial.Serial(port, baud, timeout=0.3) as link:
 
     link.reset_input_buffer()
     drenar(0.3)
+
+    # ## Garantir que há um SHELL do outro lado
+    #
+    # Medido em 06/11/2026: dois envios seguidos falharam em silêncio porque o
+    # console não estava num shell — o login do getty tinha expirado, ou o
+    # `giochi-init` estava imprimindo no meio. O script mandava heredoc para o
+    # prompt de login, recebia "Password:" e o md5 saía "não lido".
+    #
+    # Aqui o script bate Enter, olha o que voltou, e se não houver prompt `#`
+    # faz o login. Só então começa a transferir. Sem isso o modo de falha é
+    # "enviou 28433 blocos" e nenhum byte no disco.
+    def tem_shell(segundos=2.0):
+        link.write(b"\r")
+        time.sleep(0.4)
+        saida = drenar(segundos)
+        return "#" in saida, saida
+
+    ok, saida = tem_shell()
+    if not ok:
+        if b"login:" in saida:
+            link.write(b"root\r")
+            time.sleep(0.8)
+            drenar(0.5)
+            link.write(senha.encode() + b"\r")
+            time.sleep(2.5)
+            ok, saida = tem_shell(2.5)
+    if not ok:
+        print("ERRO: não cheguei a um shell no aparelho.", file=sys.stderr)
+        print(saida[-500:].decode("utf-8", "replace"), file=sys.stderr)
+        sys.exit(8)
 
     # Eco desligado: sem isto cada bloco volta pela console e o tty descarta
     # caracteres. E `set +m`/`stty -icanon` evitam edição de linha no caminho.

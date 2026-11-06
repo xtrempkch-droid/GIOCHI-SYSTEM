@@ -265,19 +265,99 @@ if (!incluiPainel) {
   problemas.push("o wrapper não inclui panel-panel4.dtsi");
 }
 
-// 4. `dr_mode` do OTG: `peripheral` é o que funciona nesta placa.
-//    Em `otg` o dwc2 espera bvalid do PHY, que não chega — medido.
-const drMode = /&usb20_otg\s*\{([\s\S]*?)\n\};/.exec(r3xs);
-if (!drMode) {
+// 4. USB: `usb-role-switch` + `dr_mode = "otg"`.
+//
+// `dr_mode` fixo em `"peripheral"` resolve o VBUS (não depende do bvalid do PHY)
+// mas FECHA a porta para host — e o R35S não tem rádio, então o dongle Wi-Fi é o
+// único caminho de rede sem fio. `dr_mode` fixo em `"host"` faz o contrário.
+//
+// O role switch do dwc2 resolve os dois: registrado por `usb-role-switch`, ele
+// força BVALOVAL em modo default peripheral (o mesmo efeito do dr_mode fixo) e
+// aceita troca em runtime para host por `/sys/class/usb_role/*/role`.
+//
+// Mas `dwc2_drd_role_sw_set` recusa (EINVAL) ir para host com dr_mode
+// "peripheral". Então `dr_mode = "otg"` é REQUISITO, não estilo.
+const usbOtg = /&usb20_otg\s*\{([\s\S]*?)\n\};/.exec(r3xs);
+if (!usbOtg) {
   problemas.push("não achei o nó &usb20_otg — o controle do USB mudou de lugar");
-} else if (!/dr_mode\s*=\s*"peripheral"/.test(drMode[1])) {
-  problemas.push(
-    "usb20_otg sem `dr_mode = \"peripheral\"`: em modo otg o dwc2 espera " +
-    "VBUS do PHY, que este aparelho não liga — usb0 fica NO-CARRIER",
-  );
+} else {
+  const corpo = usbOtg[1];
+  if (!/dr_mode\s*=\s*"otg"/.test(corpo)) {
+    problemas.push(
+      "usb20_otg sem `dr_mode = \"otg\"`: o role switch recusa host com " +
+      "`peripheral`, e dongle Wi-Fi precisa de host",
+    );
+  }
+  if (!/^\s*usb-role-switch;/m.test(corpo)) {
+    problemas.push(
+      "usb20_otg sem `usb-role-switch`: o dwc2 não registra o role switch e " +
+      "não há como alternar entre shell USB e dongle",
+    );
+  }
+  if (!/role-switch-default-mode\s*=\s*"peripheral"/.test(corpo)) {
+    problemas.push(
+      "usb20_otg sem `role-switch-default-mode = \"peripheral\"`: é o que faz " +
+      "o dwc2 forçar BVALOVAL e o gadget subir sem depender do PHY",
+    );
+  }
 }
 
-// 5. O `compatible` do aparelho: é o que identifica a placa (§12.30 — o U-Boot
+// 5. Comentário de bloco balanceado, e sem `*/` DENTRO dele.
+//
+// Erro real de 06/11/2026: escrevi
+//
+//     *   2. expõe `/sys/class/usb_role/*/role` para trocar em runtime
+//
+// dentro de um `/* ... */`. A sequência `*/` do caminho FECHOU o comentário, e o
+// DTC falhou com
+//
+//     Error: rk3326-gameconsole-r3xs.dtsi:535.44-45 syntax error
+//     FATAL ERROR: Unable to parse input tree
+//
+// A mensagem dá linha e coluna — mas o texto ali é um comentário que parece
+// correto, e a causa (path com glob) está dentro dele. Custou um build de 20 min.
+//
+// Já houve um erro da mesma família neste projeto (§12.37, com `#END` num parser
+// de comentário). Documentação em C/DTS é código: `*/` não pode aparecer.
+for (const [rotulo, texto] of [
+  ["rk3326-gameconsole-r3xs.dtsi", r3xs],
+  ["rk3326-gameconsole-r36s-giochi.dts", wrapper],
+  ["panel-panel4.dtsi", readFileSync(join(DTS_GEN, "panel-panel4.dtsi"), "utf8")],
+]) {
+  let i = 0;
+  let profundidade = 0;
+  let linha = 1;
+  let problema = "";
+  while (i < texto.length - 1) {
+    if (texto[i] === "\n") linha += 1;
+    if (texto[i] === "/" && texto[i + 1] === "*") {
+      profundidade += 1;
+      i += 2;
+      continue;
+    }
+    if (texto[i] === "/" && texto[i + 1] === "/") {
+      // comentário de linha: pode ter `*/` à vontade
+      const fim = texto.indexOf("\n", i);
+      i = fim < 0 ? texto.length : fim;
+      continue;
+    }
+    if (texto[i] === "*" && texto[i + 1] === "/") {
+      if (profundidade === 0 && !problema) {
+        problema = `\`*/\` fora de comentário na linha ${linha}`;
+      }
+      profundidade = Math.max(0, profundidade - 1);
+      i += 2;
+      continue;
+    }
+    i += 1;
+  }
+  if (problema) problemas.push(`${rotulo}: ${problema} (DTC falha com "syntax error")`);
+  else if (profundidade !== 0) {
+    problemas.push(`${rotulo}: comentário /* aberto sem fechar (${profundidade})`);
+  }
+}
+
+// 6. O `compatible` do aparelho: é o que identifica a placa (§12.30 — o U-Boot
 //    sobrescreve /model, então `compatible` é a identidade que vale).
 if (!/gameconsole,r35s/.test(wrapper)) {
   problemas.push("o wrapper não declara `gameconsole,r35s` em compatible");

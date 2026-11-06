@@ -46,7 +46,26 @@ test("os símbolos do fragmento existem na config do vendor", () => {
   const symbols = [...fragment.matchAll(/^CONFIG_([A-Z0-9_]+)=/gm)].map((m) => m[1]);
   assert.ok(symbols.length > 40, `fragmento com só ${symbols.length} símbolos`);
 
-  const missing = symbols.filter((symbol) => !new RegExp(`^CONFIG_${symbol}=`, "m").test(vendor));
+  // ## Três estados, e o teste só sabia ver dois
+  //
+  // A verificação original era `^CONFIG_X=`, que só reconhece símbolo LIGADO.
+  // Isso confundia duas coisas diferentes:
+  //
+  //   CONFIG_X=y                  -> o símbolo existe e está ligado
+  //   # CONFIG_X is not set       -> o símbolo EXISTE no kernel e está desligado
+  //   (nada)                      -> o símbolo não existe: invenção
+  //
+  // O caso do meio é legítimo e comum: `CONFIG_FRAMEBUFFER_CONSOLE_DEFERRED_TAKEOVER`
+  // está no 7.1.2 do vendor como "not set", e nós o ligamos por decisão de
+  // produto (bootsplash). O teste antigo chamava isso de invenção.
+  //
+  // Agora ele pergunta o que deveria: o símbolo existe no kernel que rodou no
+  // aparelho? Se está declarado desligado, existe — e ligá-lo é escolha nossa,
+  // que o próprio fragmento documenta.
+  const existeNoVendor = (symbol) =>
+    new RegExp(`^(CONFIG_${symbol}=|# CONFIG_${symbol} is not set$)`, "m").test(vendor);
+
+  const missing = symbols.filter((symbol) => !existeNoVendor(symbol));
   // Exceções têm de ser EXPLÍCITAS e ter motivo. Silêncio aqui transformaria
   // "achei no aparelho" em "inventei", que é a diferença entre medir e supor.
   const allowed = new Set([

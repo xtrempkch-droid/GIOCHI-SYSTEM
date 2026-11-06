@@ -56,6 +56,41 @@ BRIGHTNESS_FILE="$CONFIG_DIR/brightness"
 RESTART_MAX=5
 RESTART_WINDOW=60
 
+# ## Queda por sinal deliberado não é queda
+#
+# Relatado pela equipe do `Giochi app` em 06/11/2026, medido no R35S: cada
+# `verificar` deles derruba o launcher uma vez para capturar o quadro (o KMSDRM
+# é exclusivo, não há como ler o framebuffer com o launcher vivo). Depois de
+# cinco verificações em duas horas de bancada o `giochi-init` **parava de
+# reiniciar** e dormia — correto contra laço de crash, e o resultado em campo
+# era "aparelho ligado, tela parada, nenhum erro na tela".
+#
+# O aviso deles estava certo: a ferramenta de diagnóstico estava consumindo a
+# cota que existe para o defeito. A distinção que faltava é a única que importa:
+#
+#   status 0            → o launcher saiu por conta própria (usuário fechou)
+#   status 129/130/143  → 128+SIGHUP/SIGINT/SIGTERM: alguém MATOU de propósito
+#   qualquer outro      → crash de verdade, conta na cota
+#
+# Nada disso afrouxa a proteção contra laço: um launcher que crasha com segfault
+# (139), panic (101) ou `exit 7` continua contando. O que muda é que o
+# encerramento deliberado **zera** a cota em vez de consumi-la.
+#
+# A desistência também deixou de ser invisível: além do console, ela grava
+# `/run/giochi/launcher-parado`, porque "tela parada" sem texto é
+# indistinguível de "não ligou". Quem entra por SSH pergunta ao arquivo em vez
+# de adivinhar. Ver §12.45 em AGENTS.md.
+PARADA_FILE="${GIOCHI_PARADA_FILE:-/run/giochi/launcher-parado}"
+
+# Saída deliberada: 0 (o launcher pediu para sair) ou morte por sinal
+# "administrativo". 128+sinal é o que o shell devolve para filho morto por sinal.
+saida_deliberada() {
+    case "$1" in
+        0|129|130|143) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 # Intervalo entre tentativas de encontrar o launcher, em segundos.
 LAUNCHER_WAIT="${GIOCHI_LAUNCHER_WAIT:-30}"
 
@@ -167,7 +202,39 @@ run_controller_setup() {
 # getty na mesma tela.
 #
 # Então espera. Sem CPU, sem ruído, e o PID 1 continua vivo.
+# ---------------------------------------------------------------
+# Bootsplash: quem decide a hora de sair é ESTE script.
+#
+# O `S01splash` sobe o psplash antes de tudo. Ele cobre o texto que o kernel
+# deixou no framebuffer, e sai por dois motivos possíveis:
+#
+#   com launcher    -> o launcher assume o DRM master; o splash tem de sair
+#                      ANTES, senão ele segura o master e a tela do app fica
+#                      preta (o pior sintoma: sistema bom, tela morta)
+#   sem launcher    -> o console (getty) é a interface; o splash tem de sair
+#                      para o login aparecer
+#
+# Se este script não estivesse aqui para decidir, o splash ficaria na tela para
+# sempre no caso sem launcher — que é o caso de TODA imagem desta árvore hoje.
+# ---------------------------------------------------------------
+stop_splash() {
+    [ -p /tmp/psplash_fifo ] || return 0
+    if command -v psplash-write >/dev/null 2>&1; then
+        psplash-write "QUIT" 2>/dev/null && log "splash encerrado"
+        return 0
+    fi
+    for p in $(pidof psplash 2>/dev/null); do
+        kill "$p" 2>/dev/null && log "splash encerrado (por sinal)"
+    done
+    return 0
+}
+
 wait_for_launcher() {
+    # Sem launcher, o console É a interface: tira o splash para o getty aparecer.
+    # Sem isto, a imagem fica com o logo na tela e ninguém vê o login — e como o
+    # getty escreve no ttyS2, quem está na serial vê tudo e quem olha a tela não
+    # vê nada. Assimetria que custa tempo para diagnosticar.
+    stop_splash
     log "launcher ausente ainda: $LAUNCHER"
     log "esperando aparecer; verifico a cada ${LAUNCHER_WAIT}s (sem inundar o console)"
     while [ ! -x "$LAUNCHER" ]; do
@@ -198,24 +265,47 @@ main() {
             window_start=$now
         fi
 
+        # ANTES de executar: o launcher vai virar DRM master, e o psplash
+        # segurando a tela impediria o primeiro quadro dele de aparecer.
+        stop_splash
+        "$LAUNCHER"
+        status=$?
+
+        # Encerramento deliberado (o app matou para ler o framebuffer, ou o
+        # usuário fechou) não é queda: zera a cota em vez de consumi-la.
+        if saida_deliberada "$status"; then
+            log "launcher saiu com $status — encerramento deliberado, cota zerada"
+            restarts=0
+            window_start=$now
+            sleep 1
+            continue
+        fi
+
         restarts=$((restarts + 1))
 
-        # O limite é checado ANTES de rodar, não depois: com `-gt` no fim, cinco
-        # reinícios viravam seis ("reinício 6 de 5", medido), porque a contagem
-        # era incrementada e só então comparada. Aqui `RESTART_MAX=5` significa
-        # exatamente cinco tentativas.
-        if [ "$restarts" -gt "$RESTART_MAX" ]; then
+        log "launcher saiu com $status (queda $restarts de $RESTART_MAX na janela de ${RESTART_WINDOW}s)"
+
+        # O limite é checado DEPOIS de contar a queda atual: `RESTART_MAX=5`
+        # significa cinco tentativas de rodar, não seis. A versão anterior
+        # contava antes de rodar e imprimia "reinício 6 de 5", medido.
+        if [ "$restarts" -ge "$RESTART_MAX" ]; then
             log "launcher já caiu $RESTART_MAX vezes na janela de ${RESTART_WINDOW}s; parando de reiniciar"
             log "o processo continua vivo para o kernel não ficar sem init"
+            # Deixa rastro fora do console: tela parada sem texto é
+            # indistinguível de "não ligou" num handheld.
+            mkdir -p "$(dirname "$PARADA_FILE")" 2>/dev/null || true
+            {
+                printf 'motivo=quedas_repetidas\n'
+                printf 'quedas=%s\n' "$restarts"
+                printf 'janela_s=%s\n' "$RESTART_WINDOW"
+                printf 'ultimo_status=%s\n' "$status"
+                printf 'launcher=%s\n' "$LAUNCHER"
+                printf 'uptime_s=%s\n' "$now"
+            } >"$PARADA_FILE" 2>/dev/null || true
             # Não reinicia mais. Dorme para não consumir CPU, mas o processo
             # continua vivo para o kernel não entrar em pânico por falta de init.
             while :; do sleep 3600; done
         fi
-
-        "$LAUNCHER"
-        status=$?
-
-        log "launcher saiu com $status (tentativa $restarts de $RESTART_MAX na janela de ${RESTART_WINDOW}s)"
 
         # Um intervalo curto evita loop apertado em falha instantânea.
         sleep 1

@@ -28,6 +28,21 @@ BR2_PACKAGE_DOSFSTOOLS=y
 # ele não há como provar que um botão chega ao kernel com o código certo — o
 # `giochi-selftest` conta capacidades, mas não vê eventos.
 BR2_PACKAGE_EVTEST=y
+# bootsplash: padrão em TODOS os aparelhos desta árvore.
+#
+# O `psplash` é userspace e cobre do `init` até o launcher assumir a tela. Ele
+# não é o único pedaço: o kernel mostra texto no framebuffer entre o U-Boot e o
+# init (ver `CONFIG_LOGO` nos fragmentos de kernel), e o psplash pinta por cima
+# quando sobe.
+#
+# A imagem é NOSSA e é gerada no tamanho da tela do aparelho por
+# `scripts/gerar-splash.mjs`, entregue ao pacote por `config/package-overrides.mk`.
+# Sem o override o psplash usaria o logo do Yocto, que não é deste projeto.
+#
+# `BR2_USE_WCHAR` é dependência do pacote e já vem do defconfig arm64; num
+# defconfig sem wchar o símbolo seria descartado em silêncio e o `assert-config`
+# reprovaria o build — que é o comportamento certo.
+BR2_PACKAGE_PSPLASH=y
 BR2_PACKAGE_E2FSPROGS=y
 # iproute2 é do sistema base, não do aparelho: o `giochi-usbnet` usa
 # `ip link`/`ip addr` e o applet `tc` do busybox está desligado no comum
@@ -42,6 +57,23 @@ BR2_PACKAGE_OPENSSH=y
 BR2_PACKAGE_PROCPS_NG=y
 BR2_PACKAGE_RSYNC=y
 BR2_PACKAGE_STRACE=y
+# binutils no ALVO: é de onde vem o `readelf`.
+#
+# A decisão anterior neste projeto era NÃO instalar (§12.36): pesava "a toolchain
+# inteira no aparelho" para servir a um diagnóstico. Medido em 06/11/2026, o
+# custo real é outro: o `readelf` aarch64 tem **1 053 240 B** (1 MB) e o conjunto
+# completo dá ~4 MB sem strip — num rootfs de 1 GB isso é 0,4%.
+#
+# O que se ganha é a prova EXATA de ligação dinâmica: `readelf -d` mostra as
+# `DT_NEEDED`, que é a única forma de responder "esta biblioteca é USADA?" em vez
+# de "esta biblioteca existe?" — a distinção que já custou dois falsos positivos
+# neste projeto (harfbuzz no SDL2_ttf e libasound no launcher).
+#
+# O `giochi-selftest` continua com a cascata (`ld.so --list` pelo exit code,
+# `grep -a` no `.dynstr`), porque imagem sem binutils tem de continuar
+# funcionando. O `readelf` é a primeira opção quando existe.
+BR2_PACKAGE_BINUTILS=y
+BR2_PACKAGE_BINUTILS_TARGET=y
 BR2_PACKAGE_UTIL_LINUX=y
 
 # kmscube NÃO entra aqui.

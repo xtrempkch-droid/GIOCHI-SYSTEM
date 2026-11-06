@@ -37,4 +37,7 @@ import "./device-r35s-port.test.mjs";
 import "./build-device-vars.test.mjs";
 import "./rk3326-legacy-boot.test.mjs";
 import "./joypad-driver.test.mjs";
+import "./bootsplash.test.mjs";
 import "./chave-da-loja.test.mjs";
+import "./godot.test.mjs";
+import "./rtc-clock.test.mjs";

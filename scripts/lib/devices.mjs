@@ -356,6 +356,35 @@ export async function validateDevice(device) {
     }
   }
 
+  // panel: resolução NATIVA do painel, em pixels. É o que o gerador de
+  // bootsplash usa.
+  //
+  // Por que precisa estar declarado, e não ser lido do painel: o `psplash` NÃO
+  // escala nem centraliza a imagem — ele desenha em (0,0) do framebuffer. Uma
+  // imagem de 640x480 numa tela de 720x1280 aparece no canto, com o resto preto,
+  // o que é pior que não ter splash. E a resolução nativa de um painel MIPI-DSI
+  // NÃO é parâmetro de build (§12.23): ela vem do driver, então tem de ser
+  // declarada aqui, onde o build consegue lê-la.
+  if (device.panel !== undefined) {
+    if (typeof device.panel !== "object" || Array.isArray(device.panel)) {
+      errors.push("panel deve ser objeto { width, height }.");
+    } else {
+      const { width, height } = device.panel;
+      for (const [nome, valor] of [["width", width], ["height", height]]) {
+        if (!Number.isInteger(valor) || valor < 64 || valor > 8192) {
+          errors.push(
+            `panel.${nome} deve ser inteiro entre 64 e 8192 (recebido: ${JSON.stringify(valor)}).`,
+          );
+        }
+      }
+      // Painel não é quadrado em nenhum aparelho desta árvore, e largura igual a
+      // altura seria quase sempre erro de digitação (640 no lugar de 480).
+      if (Number.isInteger(width) && width === height) {
+        errors.push("panel.width e panel.height iguais — conferir a resolução.");
+      }
+    }
+  }
+
   return errors;
 }
 

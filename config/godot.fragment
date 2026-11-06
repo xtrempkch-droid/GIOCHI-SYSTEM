@@ -1,0 +1,125 @@
+# ── suporte a jogos Godot: compositor Wayland em modo quiosque ──────────────
+#
+# OPCIONAL e NÃO é o padrão. Entra no build com:
+#
+#   GIOCHI_WITH_GODOT=1 bash scripts/build-device.sh <device>
+#
+# ── por que existe ──────────────────────────────────────────────────────────
+#
+# O Godot 4.7.2 NÃO tem driver de vídeo KMSDRM. Medido pela equipe do app em
+# `GIOCHI-APP/docs/godot.md`, com `strings` nos dois binários oficiais:
+#
+#   $ strings Godot_v4.7.2-stable_linux.x86_64 | grep -oE 'DisplayServer[A-Za-z]+' | sort -u
+#   DisplayServerEnums
+#   DisplayServerHeadless
+#   DisplayServerWayland
+#   DisplayServerX
+#
+# Ou seja: um jogo Godot exportado para aarch64 tenta X11, falha, tenta Wayland,
+# falha, e cai no Headless — o processo roda e não desenha nada. Não há
+# `video=` nem variável de ambiente que resolva; falta o backend no motor.
+#
+# Sobram duas rotas de imagem (a terceira é recompilar o Godot com KMSDRM, que é
+# do lado do app e custa horas de cross-compile por atualização):
+#
+#   X11      xorg-server + xdriver_xf86-input-evdev + xinit + ...  (maior)
+#   Wayland  cage (quiosque: UMA janela maximizada) + wlroots      (menor)
+#
+# Ficou Wayland/cage por ser o menor conjunto que ainda entrega o que o aparelho
+# precisa: uma aplicação em tela cheia, sem área de trabalho, sem gerenciador de
+# janelas, sem cursor.
+#
+# ── o preço, e é ALTO ──────────────────────────────────────────────────────
+#
+# 1. **Troca o gerenciamento de /dev de `mdev` para `eudev`.** Não é opcional:
+#    `wlroots` faz `select BR2_PACKAGE_LIBINPUT`, e `libinput` depende de
+#    `BR2_PACKAGE_HAS_UDEV`. O `mdev` do busybox NÃO satisfaz `HAS_UDEV`.
+#
+#    Medido nos dois caminhos, não deduzido:
+#
+#      $ grep -A4 '^config BR2_PACKAGE_CAGE$' package/cage/Config.in
+#        depends on BR2_PACKAGE_HAS_UDEV # wlroots
+#
+#      $ grep -B1 -A3 'depends on BR2_PACKAGE_HAS_UDEV' \
+#          package/x11r7/xdriver_xf86-input-evdev/Config.in
+#        depends on BR2_PACKAGE_HAS_UDEV # libudev is configure dependency
+#
+#    Então X11 também exige eudev. Não existe rota de compositor sem eudev.
+#
+# 2. **~15–25 MB de imagem** (wlroots, wayland, wayland-protocols, libinput,
+#    libxkbcommon, pixman, seatd, hwdata, cage).
+#
+# 3. **`seatd` passa a existir.** O cage roda como root, então o seat é aberto
+#    direto; o `seatd` é construído porque o wlroots o seleciona, e fica parado.
+#
+# ── o que NÃO muda, e por quê ─────────────────────────────────────────────
+#
+# **O SDL2 desta árvore não tem driver Wayland, e não adianta pedir.** O
+# `package/sdl2/sdl2.mk` do Buildroot 2024.02 crava a opção, sem Kconfig:
+#
+#   $ sed -n '26p' package/sdl2/sdl2.mk
+#   	--disable-video-wayland \
+#
+#   $ grep -c 'SDL2_WAYLAND' package/sdl2/Config.in
+#   0
+#
+# Consequência de desenho: o LAUNCHER (SDL2) continua no KMSDRM nu, e o cage
+# sobe só durante a partida. O ciclo é:
+#
+#   giochi-init → launcher (KMSDRM, dono do DRM) → [sai ou faz exec]
+#       → giochi-godot → cage (dono do DRM) → jogo Godot (Wayland)
+#       → jogo termina → cage sai → launcher volta pelo ::respawn:
+#
+# Um processo por vez com o DRM master, que é a regra do kernel — e a mesma
+# premissa de `exec` que o `docs/integracao.md` da equipe do app registra como
+# decisão futura. Se um dia o SDL2 passar a ter Wayland nesta árvore, o launcher
+# pode rodar dentro do cage e o ciclo encolhe para um processo.
+#
+# ── consequência para build incremental (§12.27/§12.29) ───────────────────
+#
+# Ligar isto muda o gerenciamento de /dev: o `target/` de um build anterior tem
+# `/dev` populado pelo `mdev` e não tem `/lib/udev/`. Este fragmento só é seguro
+# em build do zero. O `build-device.sh` recusa combinar `GIOCHI_WITH_GODOT=1`
+# com `GIOCHI_SYSTEM_KEEP_WORK=1` por isso.
+
+# Gerenciamento de /dev: eudev (obrigatório para wlroots/libinput).
+BR2_ROOTFS_DEVICE_CREATION_DYNAMIC_EUDEV=y
+BR2_PACKAGE_EUDEV=y
+
+# Wayland e o protocolo base.
+BR2_PACKAGE_WAYLAND=y
+BR2_PACKAGE_WAYLAND_PROTOCOLS=y
+
+# Mesa já entra com EGL/GLES/GBM/panfrost pelo fragmento do aparelho, e o
+# `BR2_PACKAGE_HAS_LIBEGL_WAYLAND` que o cage exige vem de graça:
+#
+#   $ grep -n 'select BR2_PACKAGE_HAS_LIBEGL_WAYLAND' package/mesa3d/Config.in
+#   370:	select BR2_PACKAGE_HAS_LIBEGL_WAYLAND
+#
+# Conferido no `.config` real do R35S, não suposto:
+#   BR2_PACKAGE_HAS_LIBEGL_WAYLAND=y
+
+# O compositor quiosque.
+BR2_PACKAGE_CAGE=y
+
+# Entrada de teclado no Wayland. O wlroots já seleciona, mas o cage lê o
+# keymap do xkbcommon direto — declarar evita depender de um `select` de
+# terceiro que pode mudar de versão para versão.
+BR2_PACKAGE_LIBXKBCOMMON=y
+BR2_PACKAGE_XKEYBOARD_CONFIG=y
+
+# Fonte para o Godot desenhar texto de UI própria (ele NÃO usa a fonte do
+# launcher). O Godot tem fonte embutida, mas cai nela só quando não acha
+# nenhuma — e a embutida não cobre acentuação portuguesa em todos os tamanhos.
+BR2_PACKAGE_DEJAVU=y
+BR2_PACKAGE_DEJAVU_SANS=y
+
+# ── o que o Godot pede e o aparelho já tem (não repetir aqui) ──────────────
+#
+#   libSDL2?          NÃO — o Godot não usa SDL2, tem camada de plataforma própria
+#   libfreetype       sim, pelo pacote do launcher (o Godot também a usa)
+#   libasound         sim — o driver de áudio do Godot é ALSA direto
+#   libGLESv2/libEGL  sim — mesa/panfrost
+#   /dev/dri/card0    sim — rockchip-drm + panfrost
+#   glibc 2.38        sim — medido em sysroot/lib/libc.so.6; o binário oficial do
+#                     Godot aarch64 é glibc e exige >= 2.31

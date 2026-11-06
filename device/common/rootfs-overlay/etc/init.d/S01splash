@@ -1,0 +1,80 @@
+#!/bin/sh
+# ============================================================
+# S01splash — bootsplash o mais cedo possível
+# ============================================================
+# Sobe o `psplash` antes de qualquer serviço, para cobrir o texto do kernel que
+# ficou no framebuffer. Sai quando o launcher assume a tela (`S99launcher`) ou
+# quando o boot termina sem launcher (`giochi-init`).
+#
+# ## Por que S01 e não S00
+#
+# O `rcS` do busybox roda os scripts em ordem alfabética depois de montar
+# `/proc`, `/sys` e `/dev`. Um `S00` rodaria antes de `/dev` existir, e o
+# `/dev/fb0` não estaria lá. `S01` é o primeiro ponto em que o framebuffer é
+# acessível de verdade.
+#
+# ## Por que não é fatal
+#
+# Sem splash o aparelho boota igual — só mostra texto. Derrubar o boot por causa
+# de cosmético transformaria um detalhe de apresentação num sistema que não
+# liga. Aqui, falha = aviso e segue.
+#
+# ## O FIFO
+#
+# O `psplash` cria `/tmp/psplash_fifo` e escuta nele. `psplash-write "PROGRESS n"`
+# anima a barra; `psplash-write "QUIT"` encerra. O `S99` e o `giochi-init` usam
+# o QUIT, mas se eles não rodarem (boot interrompido), o `-n` mantém o psplash
+# vivo em vez de morrer quando o primeiro cliente fecha o FIFO.
+
+case "$1" in
+    start)
+        command -v psplash >/dev/null 2>&1 || {
+            echo "splash: psplash não está na imagem — seguindo sem splash"
+            exit 0
+        }
+        [ -e /dev/fb0 ] || {
+            # Sem framebuffer não há onde desenhar. Acontece em aparelho cujo
+            # painel não subiu — e nesse caso o problema é o painel, não o
+            # splash; avisar aqui evita procurar no lugar errado.
+            echo "splash: /dev/fb0 ausente — sem splash (o painel subiu?)"
+            exit 0
+        }
+
+        # `-n`: não daemoniza, para este script poder esperar o desenho inicial.
+        # O `&` é do shell: o processo fica filho do init e sobrevive ao script.
+        psplash -n >/dev/null 2>&1 &
+        SPLASH_PID=$!
+        # Espera o FIFO aparecer, que é o sinal de que ele desenhou o primeiro
+        # quadro. Sem essa espera, o `PROGRESS` logo abaixo cairia no vazio.
+        i=0
+        while [ ! -e /tmp/psplash_fifo ] && [ "$i" -lt 30 ]; do
+            sleep 0.1
+            i=$((i + 1))
+        done
+        if [ -e /tmp/psplash_fifo ]; then
+            echo "splash: psplash rodando (pid $SPLASH_PID)"
+        else
+            echo "splash: psplash não criou o FIFO — seguindo"
+        fi
+        ;;
+    stop)
+        # `QUIT` é o caminho normal; o kill é a rede de segurança para o caso de
+        # o FIFO ter sumido (ex.: alguém limpou /tmp).
+        if [ -p /tmp/psplash_fifo ] && command -v psplash-write >/dev/null 2>&1; then
+            psplash-write "QUIT" 2>/dev/null
+        fi
+        for p in $(pidof psplash 2>/dev/null); do
+            kill "$p" 2>/dev/null
+        done
+        ;;
+    restart)
+        "$0" stop
+        "$0" start
+        ;;
+    *)
+        echo "Uso: $0 {start|stop|restart}"
+        exit 2
+        ;;
+esac
+
+exit 0

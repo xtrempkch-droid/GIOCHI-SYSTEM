@@ -199,3 +199,19 @@ CONFIG_CFG80211=m
 # `=y` e não `=m`: um módulo que depende do `S15modules` é uma tela que pode não
 # acender. O painel é o console desta placa.
 CONFIG_DRM_PANEL_GENERIC_DSI=y
+
+# ── console de vídeo e bootsplash ───────────────────────────
+# O painel é o console: `giochi-selftest` e o getty aparecem nele, e o psplash
+# pinta por cima no `S01`.
+#
+# `DEFERRED_TAKEOVER` faz o fbcon esperar haver texto antes de tomar a tela —
+# sem ele o fbcon pinta preto assim que carrega e apaga o que estava lá, criando
+# uma janela preta no meio do boot que parece travamento.
+#
+# `CONFIG_LOGO=n` tira o pinguim: com ele a sequência é "pinguim -> preto ->
+# nosso splash"; sem ele é "preto -> nosso splash", que parece o mesmo sistema
+# do começo ao fim.
+CONFIG_FRAMEBUFFER_CONSOLE=y
+CONFIG_FRAMEBUFFER_CONSOLE_DETECT_PRIMARY=y
+CONFIG_FRAMEBUFFER_CONSOLE_DEFERRED_TAKEOVER=y
+# CONFIG_LOGO is not set
