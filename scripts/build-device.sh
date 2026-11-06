@@ -156,6 +156,32 @@ if [[ "$CURRENT_PATCHES" != "$PREVIOUS_PATCHES" ]]; then
   printf '%s' "$CURRENT_PATCHES" >"$PATCH_STATE_FILE" 2>/dev/null || true
 fi
 
+# O FRAGMENTO do kernel tem o mesmo problema, por outro caminho: mudar
+# `CONFIG_*` não é "patch novo", mas o Buildroot também não reconfigura o
+# pacote — `.stamp_configured` já existe e o `olddefconfig` do kernel não roda de
+# novo. Aí o `assert-kernel-config` compara o fragmento com um `.config` velho e
+# **falha o build** dizendo que o símbolo não entrou, sem citar que a causa é
+# `KEEP_WORK=1`. O gate está certo; o incômodo é não ter saída.
+#
+# Medido em 06/11/2026 ao trocar `CONFIG_DRM_PANFROST` de `=m` para `=y`: o
+# fragmento novo pedia `=y`, o `.config` do kernel ainda tinha `=m`, e o build
+# parou no assert. Limpar o pacote resolve, e é o que este bloco faz sozinho.
+KERNEL_FRAGMENT_STATE_FILE="$WORK_DIR/kernel-fragment.state"
+# O hash é do arquivo em `device/`, NÃO da cópia em `work/`: este bloco roda antes
+# do staging (que acontece na parte de preparação, mais abaixo). Hashear a cópia
+# deixava a comparação um build atrasada — medido em 06/11/2026, o build seguinte
+# a uma mudança sempre via "fragmento mudou" e limpava o kernel sem necessidade,
+# porque o estado gravado era do arquivo velho e a cópia já estava atualizada.
+CURRENT_FRAGMENT="$(sha256sum "$DEVICE_DIR/linux.fragment" 2>/dev/null | awk '{print $1}')"
+PREVIOUS_FRAGMENT="$(cat "$KERNEL_FRAGMENT_STATE_FILE" 2>/dev/null || true)"
+if [[ -n "$CURRENT_FRAGMENT" && "$CURRENT_FRAGMENT" != "$PREVIOUS_FRAGMENT" ]]; then
+  if compgen -G "$BUILD_DIR/build/linux-*/.stamp_configured" >/dev/null; then
+    FORCE_KERNEL_REBUILD=1
+    KERNEL_REBUILD_REASON="fragmento do kernel mudou"
+  fi
+  printf '%s' "$CURRENT_FRAGMENT" >"$KERNEL_FRAGMENT_STATE_FILE" 2>/dev/null || true
+fi
+
 # Pacote REMOVIDO da config continua no target/ e entra na imagem.
 #
 # Medido: `BR2_PACKAGE_DROPBEAR` saiu do defconfig da X55, o `.config` novo não
@@ -692,7 +718,7 @@ if ! grep -q "^BR2_ROOTFS_OVERLAY=.*giochi-system-overlays" "$BUILD_DIR/.config"
 fi
 
 if ((FORCE_KERNEL_REBUILD)); then
-  echo "  patches:   conjunto mudou — limpando o pacote linux para reaplicar"
+  echo "  patches:   ${KERNEL_REBUILD_REASON:-conjunto de patches mudou} — limpando o pacote linux para reaplicar"
   make -C "$BR2_DIR" O="$BUILD_DIR" linux-dirclean >/dev/null 2>&1 || true
 fi
 

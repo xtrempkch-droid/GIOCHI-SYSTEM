@@ -53,8 +53,32 @@ Console portátil Rockchip **RK3326**, tela 640×480. Mesma base do R36S.
 DDR (`px30_ddr_333MHz`), o DTS e o painel. É um **segundo alvo de build**, não um
 ajuste de configuração.
 
-O loader do fabricante é o único que liga nesta placa — o U-Boot mainline testado
-deu tela preta sem print no serial.
+O loader do fabricante **não** é mais necessário: o U-Boot mainline liga nesta
+placa desde 06/11/2026. A frase anterior aqui dizia o contrário ("o U-Boot
+mainline testado deu tela preta sem print no serial") e estava **desatualizada** —
+ela descrevia o sintoma antes de a causa ser encontrada.
+
+O que acontecia: o mainline imprimia TPL, DDR e BL31 e parava em
+`Entry point address = 0x200000` sem mais nada. O culpado não era o U-Boot, era o
+código de placa do `odroid-go2`: `board/hardkernel/odroid_go2/go2.c`,
+`rk_board_late_init()` lê o SARADC canal 0 e compara com a tabela de resistores da
+Hardkernel (±50). O R35S **não tem esse resistor**, então dava
+`Unable to detect device type: -6` → `### ERROR ### Please RESET the board ###` —
+uma mensagem que não aparece porque a console do U-Boot estava a 115200 e a do
+kernel a 1500000.
+
+Duas correções, as duas no repositório:
+
+| Peça | O que faz |
+| --- | --- |
+| `uboot-patches/0001-giochi-odroid-go2-adc-nao-fatal.patch` | o ADC ausente vira aviso, não `reset` |
+| `uboot.fragment` | `CONFIG_BAUDRATE=1500000` (casa com a console) e `CONFIG_BOOTCOMMAND="bootflow scan mmc0"` (o padrão do `odroid-go2` começa em `mmc1`, que não existe aqui) |
+
+O build aplica os dois e imprime `uboot: fragmento aplicado (5 símbolos)` +
+`uboot: 1 patch(es) de U-Boot`. Se essas duas linhas sumirem do log, a imagem
+sai com o U-Boot de fábrica do defconfig e o aparelho volta a travar em
+`0x200000` — com o build inteiro verde.
+
 
 ### 2. Os botões exigem driver fora da árvore
 
@@ -180,6 +204,26 @@ ligá-lo. Não existe consulta para isso em DSI.
 
 A armadilha do "Playback Mux tem de ficar em HP" **é da X55**. Nesta placa o
 caminho é SPKO. Não copiar a configuração de áudio de um para o outro.
+
+**Medido em 06/11/2026, e este parágrafo já estava certo antes do código estar:**
+o driver mainline não tem opinião sobre o mux — `Playback Mux` é
+`SOC_ENUM_SINGLE_VIRT` (controle virtual de DAPM, nenhum registrador, nenhuma
+propriedade de DT) e o **default é `HP`**. Como nada no rootfs mexia nele, o
+aparelho saía de fábrica tocando só no fone, com o `giochi-selftest` reportando
+`[PASS] Playback Mux = HP` — a regra da X55 aplicada aqui, ou seja um `PASS`
+falso (§12.52 do `AGENTS.md`).
+
+O que existe agora:
+
+| Peça | O que faz |
+| --- | --- |
+| `rootfs-overlay/etc/giochi/asound.state` | estado do mixer com `Playback Mux = SPK` |
+| `etc/init.d/S51mixer` (overlay comum) | restaura o estado **se o aparelho declarar um** |
+| `giochi-selftest` | deriva o Mux esperado do `simple-audio-card,routing` do DT, e o `FAIL` cita o roteamento |
+
+Verificado no aparelho: com `HP` o selftest passa a **falhar** dizendo qual é o
+valor certo; depois de `/etc/init.d/S51mixer start`, `[PASS] Playback Mux = SPK
+(casa com o DTS: Speaker -> SPKO)`.
 
 Backlight: PWM1, período 25 µs, 256 níveis.
 

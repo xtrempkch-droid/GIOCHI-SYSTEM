@@ -43,3 +43,5 @@ import "./godot.test.mjs";
 import "./rtc-clock.test.mjs";
 import "./flash-grow.test.mjs";
 import "./flash-dd.test.mjs";
+import "./onboard-drivers.test.mjs";
+import "./runner-coverage.test.mjs";

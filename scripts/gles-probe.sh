@@ -60,13 +60,32 @@ mkdir -p "$REPO_ROOT/out/$DEVICE"
 echo "CC = $CC"
 # `-Wno-unused-parameter` porque o stub do SDL/EGL às vezes gera aviso em header
 # de sistema; não queremos que ruído esconda erro de verdade.
-"$CC" -O2 -static -o "$OUT" "$SRC" \
+#
+# Link DINÂMICO, e não `-static`: são duas razões, e a segunda é a que importa.
+#
+#  1. o Buildroot não instala `libEGL.a`/`libGLESv2.a` no sysroot, então
+#     `-static -lEGL` falha no linker com "cannot find -lEGL" (medido em
+#     06/11/2026). O script nunca tinha rodado nesta árvore;
+#  2. mesmo que os `.a` existissem, ligar estaticamente mediria a Mesa do
+#     SYSROOT, embutida no binário — não a Mesa que está no aparelho. O objetivo
+#     do probe é medir o stack que o aparelho entrega, com o driver DRI que o
+#     loader dele escolher. Binário dinâmico usa `/usr/lib/dri` do aparelho.
+"$CC" -O2 -o "$OUT" "$SRC" \
     -lEGL -lGLESv2 \
     || { echo "ERRO: compilação falhou" >&2; exit 1; }
 
 echo "binário: $OUT"
 file "$OUT" 2>/dev/null || true
 ls -l "$OUT"
+
+# Aviso que já custou uma medição errada: o probe abre /dev/dri. Se o panfrost
+# não estiver carregado (driver `=m` sem autoload), a Mesa cai no `swrast` e o
+# veredito continua "GLES respondeu" com a MESMA `GL_VERSION`. Quem lê só a
+# versão conclui que a GPU está bem quando ela está inerte.
+echo
+echo "Atenção ao campo GL_RENDERER, não ao GL_VERSION:"
+echo "  Mali-G31 (Panfrost)  = GPU de verdade"
+echo "  softpipe / llvmpipe  = CPU, com a mesma versão de GLES"
 
 if [ "$MODE" != "--run" ]; then
     echo

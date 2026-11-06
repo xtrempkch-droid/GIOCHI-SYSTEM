@@ -38,6 +38,10 @@ CONFIG_DRM=y
 CONFIG_DRM_ROCKCHIP=y
 CONFIG_DRM_DW_MIPI_DSI=y
 CONFIG_PHY_ROCKCHIP_INNO_DSIDPHY=y
+# GPU: sem este símbolo a Mesa cai no `swrast` e `GL_VERSION` continua dizendo
+# 3.1 — o aparelho renderiza na CPU e todo teste superficial aprova (medido no
+# R35S em 06/11/2026; ver `tests/gpu-drivers.test.mjs`).
+CONFIG_DRM_PANFROST=y
 CONFIG_DRM_PANEL_SITRONIX_ST7703=y
 CONFIG_BACKLIGHT_CLASS_DEVICE=y
 CONFIG_BACKLIGHT_PWM=y
@@ -61,4 +65,12 @@ CONFIG_ROCKCHIP_SARADC=y
 # Reguladores e clock: sem eles o PMIC RK817 não é configurado e o boot trava.
 CONFIG_REGULATOR=y
 CONFIG_REGULATOR_RK808=y
+
+# Energia e térmica. O DT declara o `charger` do rk817 (com `monitored-battery`)
+# e as `thermal-zones`; sem estes símbolos o kernel ignora os dois em silêncio.
+# Medido no R35S em 06/11/2026: `modprobe` de cada um criou `rk817-battery` e
+# `thermal_zone0/1`, provando que o hardware responde — faltava o driver no boot.
+CONFIG_CHARGER_RK817=y
+CONFIG_THERMAL=y
+CONFIG_ROCKCHIP_THERMAL=y
 CONFIG_COMMON_CLK_ROCKCHIP=y

@@ -164,7 +164,22 @@ fi
 if [ -e /dev/dri/renderD128 ]; then
     pass "render node presente (3D disponível para processos)"
 else
-    warn "sem /dev/dri/renderD128 — 3D pode não inicializar"
+    # Diagnóstico com a CAUSA, não com o sintoma. Sem render node a Mesa cai no
+    # `swrast` e continua respondendo "GLES 3.1" — medido no R35S em 06/11/2026,
+    # onde a única diferença era `GL_RENDERER = softpipe`. Um aviso genérico
+    # ("3D pode não inicializar") não leva a lugar nenhum; o nome do módulo leva.
+    GPU_MOD=""
+    for m in panfrost lima; do
+        if ls /lib/modules/*/kernel/drivers/gpu/drm/$m/$m.ko* >/dev/null 2>&1; then
+            GPU_MOD="$m"
+            break
+        fi
+    done
+    if [ -n "$GPU_MOD" ]; then
+        warn "sem /dev/dri/renderD128 — '$GPU_MOD' existe em /lib/modules mas não está carregado: 3D cai no softpipe (CPU) com GL_VERSION idêntica. Use CONFIG_DRM_PANFROST=y, não =m"
+    else
+        warn "sem /dev/dri/renderD128 — nenhum driver de GPU no rootfs: 3D será software"
+    fi
 fi
 
 DRM_DRIVER=""
@@ -231,12 +246,30 @@ fi
 # ── render 3D ────────────────────────────────────────────────
 head2 "render 3D"
 
-if [ -n "$DRM_DRIVER" ]; then
-    case "$DRM_DRIVER" in
-        panfrost|msm|etnaviv|lima|v3d|virtio_gpu|vgem) pass "driver de GPU reconhecido: $DRM_DRIVER" ;;
-        *) warn "driver DRM '$DRM_DRIVER' — não é GPU conhecida; 3D pode ser software" ;;
-    esac
+# O driver do `card0` é o controlador de DISPLAY (`rockchip-drm`, `msm`…), não a
+# GPU — perguntar a ele se a GPU existe dá WARN falso em aparelho saudável (o
+# panfrost mora no render node, outro minor). A pergunta certa é qual driver
+# atende o render node; `card0` fica como reserva para kernel sem render node.
+GPU_DRIVER=""
+if [ -e /sys/class/drm/renderD128/device/driver ]; then
+    GPU_DRIVER=$(basename "$(readlink -f /sys/class/drm/renderD128/device/driver 2>/dev/null)" 2>/dev/null)
 fi
+if [ -z "$GPU_DRIVER" ]; then
+    for c in /sys/class/drm/card*/device/driver; do
+        [ -e "$c" ] || continue
+        d=$(basename "$(readlink -f "$c" 2>/dev/null)" 2>/dev/null)
+        case "$d" in
+            panfrost|msm|etnaviv|lima|v3d|virtio_gpu|vgem|mali|kbase) GPU_DRIVER="$d"; break ;;
+        esac
+    done
+fi
+
+case "$GPU_DRIVER" in
+    panfrost|msm|etnaviv|lima|v3d|virtio_gpu|vgem|mali|kbase)
+        pass "driver de GPU reconhecido: $GPU_DRIVER" ;;
+    "") warn "nenhum driver de GPU atendendo os dispositivos DRM — 3D seria software" ;;
+    *)  warn "driver de GPU '$GPU_DRIVER' — não é GPU conhecida; 3D pode ser software" ;;
+esac
 
 # EGL/GLES: sem binário de teste não há como provar. Não fingir.
 if command -v kmscube >/dev/null 2>&1; then
@@ -545,13 +578,48 @@ else
     fail "sem /proc/asound — ALSA não carregou"
 fi
 
-# O `Playback Mux` do RK817 precisa estar em HP: o amplificador do falante é
-# alimentado por HPOL/HPOR, e em SPK o aparelho fica MUDO — o SPK DAC é o
-# class-D interno do RK817 e não está roteado nesta placa.
+# O `Playback Mux` do RK817 tem DOIS valores (HP | SPK) e a escolha certa depende
+# do roteamento do DTS — não é a mesma em todo aparelho. Este bloco dizia
+# "precisa estar em HP" com a justificativa da X55 ("o SPK DAC é class-D interno e
+# não está roteado nesta placa"), e isso é FALSO no R35S, cujo DTS roteia
+# `Speaker -> SPKO` e `Headphones -> HPOL/HPOR`. Resultado medido em 06/11/2026: o
+# R35S dava `[PASS] Playback Mux = HP` com o falante potencialmente mudo — um PASS
+# falso, que é pior que FAIL porque encerra a investigação.
+#
+# A expectativa agora vem do próprio device tree, que é a fonte da verdade do
+# roteamento:
+#   X55   : "Speaker Amp INL" -> HPOL   (amp alimentado por HPOL)  => Mux = HP
+#   R35S  : "Speaker"         -> SPKO   (falante no SPKO)          => Mux = SPK
 #
 # `amixer` NÃO existe no Buildroot 2024.02 (o pacote alsa-utils só traz
 # alsactl e alsamixer). Por isso o caminho principal aqui é o `alsactl store`,
 # que despeja todos os controles com nome e valor em formato de texto.
+EXPECT_MUX=""
+EXPECT_WHY=""
+# Globs, e NÃO `find`: o `find` do busybox não desce em `/proc/device-tree`
+# (`find /proc/device-tree -maxdepth 1` devolve só a raiz). Medido no R35S em
+# 06/11/2026 — a versão com `find` não achava o nó e o bloco caía no WARN
+# "não permitiu decidir", que parece um dado ausente e é a ferramenta errada.
+# Dois níveis cobrem o nó na raiz (`rk817-sound`) e sob um pai (`sound`).
+for f in /proc/device-tree/*/simple-audio-card,routing \
+         /proc/device-tree/*/*/simple-audio-card,routing; do
+    [ -r "$f" ] || continue
+    PARSED=$(tr '\0' '\n' < "$f" 2>/dev/null | awk '
+        NR % 2 == 1 { src = $0; next }
+        {
+            if (src ~ /[Ss]peaker/) {
+                if ($0 ~ /^SPK/) { print "SPK|" src " -> " $0; exit }
+                if ($0 ~ /HPO/)  { print "HP|"  src " -> " $0; exit }
+            }
+        }
+    ' 2>/dev/null)
+    if [ -n "$PARSED" ]; then
+        EXPECT_MUX=${PARSED%%|*}
+        EXPECT_WHY=${PARSED#*|}
+        break
+    fi
+done
+
 MUX=""
 if command -v amixer >/dev/null 2>&1; then
     MUX=$(amixer sget "Playback Mux" 2>/dev/null | sed -n "s/.*Item0: '\([A-Z]*\)'.*/\1/p" | head -n 1)
@@ -568,10 +636,13 @@ if [ -z "$MUX" ] && command -v alsactl >/dev/null 2>&1; then
     fi
 fi
 if [ -n "$MUX" ]; then
-    case "$MUX" in
-        HP) pass "Playback Mux = HP (falante roteado por HPOL/HPOR)" ;;
-        *)  fail "Playback Mux = $MUX — falante fica MUDO; precisa ser HP" ;;
-    esac
+    if [ -z "$EXPECT_MUX" ]; then
+        warn "Playback Mux = $MUX — roteamento do DTS não permitiu decidir o esperado (confira 'Speaker' em simple-audio-card,routing)"
+    elif [ "$MUX" = "$EXPECT_MUX" ]; then
+        pass "Playback Mux = $MUX (casa com o DTS: $EXPECT_WHY)"
+    else
+        fail "Playback Mux = $MUX — o DTS roteia '$EXPECT_WHY', então precisa ser $EXPECT_MUX (em $MUX o falante fica MUDO)"
+    fi
 elif command -v alsactl >/dev/null 2>&1 || command -v amixer >/dev/null 2>&1; then
     warn "controle 'Playback Mux' não encontrado no mixer"
 else
@@ -831,7 +902,7 @@ if [ "$FAIL" -gt 0 ]; then
     say "Há falha(s). Ordem de investigação, do mais provável:"
     say "  1. tela preta        -> DTB errado, não kernel (ver docs/troubleshooting.md)"
     say "  2. sem /dev/dri      -> CONFIG_PHY_ROCKCHIP_INNO_DSIDPHY=y (nunca =m)"
-    say "  3. mudou o Mux       -> Playback Mux precisa ser HP"
+    say "  3. mudou o Mux       -> Playback Mux casa com o roteamento do DTS (HP ou SPK)"
     say "  4. sem botão         -> buttons.map e o driver do joypad"
     exit 1
 fi

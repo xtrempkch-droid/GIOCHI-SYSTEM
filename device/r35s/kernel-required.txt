@@ -30,11 +30,25 @@ CONFIG_DRM=y
 CONFIG_DRM_ROCKCHIP=y
 CONFIG_DRM_DW_MIPI_DSI=y
 CONFIG_PHY_ROCKCHIP_INNO_DSIDPHY=y
+# GPU: pedido no fragmento, exigido aqui. Sem este símbolo o device tree declara
+# `gpu@ff400000` e o kernel não tem quem atenda — o sintoma é `softpipe` em
+# `GL_RENDERER` com `GL_VERSION` dizendo 3.1, ou seja, 3D na CPU e todo teste
+# superficial aprovando.
+CONFIG_DRM_PANFROST=y
 
 # Entrada: 16 botões via multiplexador de ADC + 2 eixos do stick esquerdo.
 CONFIG_INPUT_EVDEV=y
 CONFIG_JOYSTICK_ADC=y
 CONFIG_ROCKCHIP_SARADC=y
+
+# Energia e térmica. O DT declara o `charger` do rk817 (com `monitored-battery`)
+# e as `thermal-zones`; sem estes símbolos o kernel ignora os dois em silêncio e
+# o aparelho fica sem nível de bateria e sem proteção térmica. Medido no R35S em
+# 06/11/2026: `modprobe` de cada um criou `rk817-battery` e `thermal_zone0/1`,
+# provando que o hardware responde — faltava o driver no boot.
+CONFIG_CHARGER_RK817=y
+CONFIG_THERMAL=y
+CONFIG_ROCKCHIP_THERMAL=y
 
 # O driver que de fato atende o nó `rocknix-singleadc-joypad` do DTS. Não é do
 # mainline: vem do patch `0002-giochi-joypad-singleadc.patch`. Se o patch parar

@@ -1,0 +1,61 @@
+#!/bin/sh
+#
+# Restaura o estado do mixer do aparelho, quando ele declara um.
+#
+# Por que existe: o `Playback Mux` do RK817 (`HP` | `SPK`) é um controle VIRTUAL
+# de DAPM — nenhum registrador guarda o valor, e o driver mainline não lê
+# propriedade de DT para ele (`SOC_ENUM_SINGLE_VIRT` em
+# `sound/soc/codecs/rk817_codec.c`). Quem escolhe é userspace, e sem `amixer` no
+# rootfs (§12.16) a única via é `alsactl restore`.
+#
+# O default do driver é `HP`, e isso NÃO é universalmente certo:
+#
+#   X55  — `Speaker Amp INL <- HPOL`: o amplificador é alimentado por HPOL/HPOR,
+#          então `HP` é o valor correto e nada precisa ser feito;
+#   R35S — `Speaker -> SPKO`: com `HP` o falante não recebe sinal e o aparelho só
+#          toca no fone. Medido em 06/11/2026.
+#
+# O arquivo é POR APARELHO (`/etc/giochi/asound.state`). A ausência dele não é
+# erro: sem estado declarado, vale o default do driver — é o caso da X55 e do
+# X35H hoje.
+#
+# Sem `stop`: estado de mixer não precisa ser salvo no desligamento; o arquivo é
+# declarativo e vem da imagem.
+
+STATE=/etc/giochi/asound.state
+
+case "$1" in
+  start)
+    [ -r "$STATE" ] || exit 0
+
+    # O `rcS` pode passar antes de o card de som existir (o ASoC registra o card
+    # em probe assíncrono). Esperar custa segundos e evita um restore perdido por
+    # ordem de boot — o sintoma seria silêncio só em alguns boots, que é o pior
+    # tipo de defeito intermitente.
+    i=0
+    while [ "$i" -lt 20 ] && [ ! -e /proc/asound/card0 ]; do
+      i=$((i + 1))
+      sleep 1
+    done
+    [ -e /proc/asound/card0 ] || {
+      echo "mixer: nenhum card de som após 20s; estado não restaurado"
+      exit 0
+    }
+
+    if alsactl -f "$STATE" restore >/dev/null 2>&1; then
+      echo "mixer: estado de $STATE restaurado"
+    else
+      # Não falha o boot: áudio é acessório para o shell por USB, que é o canal
+      # do sistema base. O `giochi-selftest` é que reporta o mux errado.
+      echo "mixer: falha ao restaurar $STATE" >&2
+    fi
+    ;;
+  stop|restart|reload)
+    ;;
+  *)
+    echo "Uso: $0 {start|stop|restart}"
+    exit 1
+    ;;
+esac
+
+exit 0

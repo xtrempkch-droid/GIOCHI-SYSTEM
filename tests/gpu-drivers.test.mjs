@@ -83,16 +83,92 @@ test("a matriz diz que o launcher e o Godot Compatibility NAO precisam de geomet
   assert.match(godotRow, /\|\s*\*\*não\*\*[^|]*\|/, "Godot Compatibility não precisa");
 });
 
-test("o numero que falta esta declarado como faltando", () => {
-  // A honestidade do documento depende disto: comparamos HARDWARE (com blob)
-  // contra o features.txt do Mesa; o panfrost rodando nunca foi medido. Se
-  // alguém apagar esta seção, o doc passa a sugerir que foi.
-  assert.match(DOC, /rmmod mali_kbase/);
-  assert.match(DOC, /nunca foi medido|nunca foi medido/i);
+test("a medicao do panfrost esta registrada, com o renderer que a distingue", () => {
+  // Este teste antes exigia `/nunca foi medido/` — o doc tinha de declarar que
+  // comparava HARDWARE (blob da ARM) contra o features.txt do Mesa, sem medir o
+  // panfrost rodando. Em 06/11/2026 isso foi medido no R35S com a nossa imagem.
+  //
+  // O que o teste protege agora é o FATO que torna a medição válida: o número
+  // que separa GPU de CPU é `GL_RENDERER`. `GL_VERSION` é IDÊNTICA nos dois
+  // casos (OpenGL ES 3.1 Mesa 24.0.0), medido com e sem panfrost. Um doc que
+  // registre só a versão não prova nada.
+  assert.match(DOC, /Mali-G31 \(Panfrost\)/, "o renderer medido precisa estar no doc");
+  assert.match(DOC, /softpipe/, "o caso de fallback (CPU) precisa estar no doc");
+  assert.match(
+    DOC,
+    /GL_VERSION[^\n]*id[eê]ntica|id[eê]ntica[^\n]*GL_VERSION/i,
+    "o doc precisa avisar que GL_VERSION não distingue GPU de CPU",
+  );
+  assert.match(DOC, /GL_OES_geometry_shader\s*=\s*N[ÃA]O/i, "geometry shader ausente, confirmado");
 });
 
 test("o gles-probe.py continua sendo o instrumento da medicao pendente", () => {
   const probe = statSync(new URL("../scripts/gles-probe.py", import.meta.url));
   assert.ok(probe.size > 4000, "scripts/gles-probe.py encolheu?");
   assert.match(DOC, /gles-probe\.py/);
+});
+
+// ── a GPU é onboard: o driver não pode ser módulo ───────────────────────────
+//
+// Medido no R35S em 06/11/2026. O fragmento do aparelho declarava
+// `CONFIG_DRM_PANFROST=m` com a justificativa "como no vendor, para o mali_kbase
+// poder carregar depois". O rootfs do Buildroot não tem `/etc/modules` nem
+// `modules-load`, então o `.ko` ficava no disco e ninguém o carregava.
+//
+// Consequência medida, e é o motivo deste teste existir: sem panfrost a Mesa cai
+// no `swrast`, e o probe responde IGUAL nos dois casos —
+//
+//   GL_RENDERER = Mali-G31 (Panfrost)  |  GL_RENDERER = softpipe
+//   GL_VERSION  = OpenGL ES 3.1 Mesa   |  GL_VERSION  = OpenGL ES 3.1 Mesa
+//
+// A única diferença é o nome do renderer. `kmscube` também roda. Ou seja: todo
+// teste que pergunta "tem GLES 3.1?" aprova um aparelho renderizando na CPU.
+//
+// A regra que fecha isso é a mesma do áudio (§12.43): hardware onboard está
+// presente em TODO boot, então `=y`. Módulo é para hardware que pode não estar
+// lá (dongle Wi-Fi), não para o que sustenta a tela.
+test("nenhum aparelho pede o panfrost como módulo", () => {
+  const root = new URL("../device/", import.meta.url).pathname;
+  const offenders = [];
+
+  for (const file of listFiles(root)) {
+    if (!/linux\.fragment$/.test(file)) continue;
+    const text = readFileSync(file, "utf8");
+    // Linha efetiva (fora de comentário) que peça o panfrost como módulo.
+    const asModule = text
+      .split("\n")
+      .filter((line) => !/^\s*#/.test(line))
+      .filter((line) => /^\s*CONFIG_DRM_PANFROST\s*=\s*m\s*$/.test(line));
+    if (asModule.length > 0) offenders.push(file.replace(root, "device/"));
+  }
+
+  assert.deepEqual(
+    offenders,
+    [],
+    `panfrost como módulo em: ${offenders.join(", ")} — sem autoload a GPU fica ` +
+      `inerte e a Mesa cai no softpipe com GL_VERSION idêntica`,
+  );
+});
+
+test("os aparelhos com GPU no device tree exigem o panfrost no kernel", () => {
+  // O fragmento é delta: um `allow-drop` acidental, ou o patch do DTS parando de
+  // aplicar, tiraria o símbolo e a imagem sairia igual (verde) e sem GPU. A
+  // `kernel-required.txt` é o gate — mas só vale para quem a declara.
+  const root = new URL("../device/", import.meta.url).pathname;
+  const withGpu = ["r35s", "powkiddy x55", "powkiddy x35h"];
+
+  for (const device of withGpu) {
+    const fragment = `${root}${device}/linux.fragment`;
+    const required = `${root}${device}/kernel-required.txt`;
+    assert.match(
+      readFileSync(fragment, "utf8"),
+      /^\s*CONFIG_DRM_PANFROST\s*=\s*y\s*$/m,
+      `${device}: fragmento deve ligar CONFIG_DRM_PANFROST=y`,
+    );
+    assert.match(
+      readFileSync(required, "utf8"),
+      /^\s*CONFIG_DRM_PANFROST\s*=\s*y\s*$/m,
+      `${device}: kernel-required.txt deve exigir CONFIG_DRM_PANFROST=y`,
+    );
+  }
 });

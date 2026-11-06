@@ -39,9 +39,28 @@ CONFIG_BACKLIGHT_PWM=y
 CONFIG_PWM=y
 CONFIG_PWM_ROCKCHIP=y
 
-# GPU. `=m` como no vendor: o driver pode ser carregado depois, e assim o
-# `mali_kbase` proprietário também pode, se algum dia a loja oferecer.
-CONFIG_DRM_PANFROST=m
+# GPU: `=y`, e NÃO `=m` como o vendor declara.
+#
+# O raciocínio anterior aqui era "`=m` como no vendor, para o `mali_kbase`
+# proprietário também poder carregar depois". Medido no R35S em 06/11/2026, ele
+# custa a GPU inteira: o rootfs do Buildroot não tem `/etc/modules` nem
+# `modules-load`, então o `.ko` fica no disco e ninguém o carrega — não sobra nem
+# `/dev/dri/renderD128`. É exatamente a armadilha do áudio (§12.43 deste
+# AGENTS.md), uma camada acima.
+#
+# O que torna isso perigoso, e não só quebrado: sem panfrost a Mesa cai no
+# `swrast`, e o probe devolve
+#
+#   com panfrost:  GL_RENDERER = Mali-G31 (Panfrost)   GL_VERSION = OpenGL ES 3.1
+#   sem panfrost:  GL_RENDERER = softpipe              GL_VERSION = OpenGL ES 3.1
+#
+# — a MESMA versão e o MESMO "GLES respondeu". Quem pergunta "tem GLES 3.1?"
+# recebe sim nos dois casos, com o aparelho renderizando na CPU.
+#
+# GPU é hardware onboard, presente em todo boot: `=y` é a regra do repositório.
+# E o `mali_kbase` da loja não se beneficia do `=m` — os dois drivers disputam o
+# mesmo nó `gpu@ff400000`, então nunca conviveriam carregados.
+CONFIG_DRM_PANFROST=y
 
 # ── armazenamento ───────────────────────────────────────────
 # O cartão desta placa é SDHCI do DesignWare. Sem `MMC_DW_ROCKCHIP` não há rootfs.
@@ -128,6 +147,29 @@ CONFIG_REGULATOR=y
 CONFIG_REGULATOR_RK808=y
 CONFIG_RTC_CLASS=y
 CONFIG_RTC_DRV_RK808=y
+
+# BATERIA: o nó `charger` do rk817 existe no DT (com `monitored-battery` para o
+# `simple-battery`), e o driver ficou no default do defconfig arm64 — `=m`, sem
+# ninguém para carregá-lo. Medido no R35S em 06/11/2026:
+#
+#   antes:   /sys/class/power_supply/ VAZIO  → selftest "sem bateria detectada"
+#   modprobe rk817_charger →
+#            rk817-battery  TYPE=Battery PRESENT=1 STATUS=Discharging
+#            rk817-charger  TYPE=USB
+#
+# Sem isto o launcher não tem nível de carga para mostrar, e o aparelho desliga
+# sem aviso. `=y` pelo mesmo motivo do panfrost (§12.51): bateria é onboard.
+CONFIG_CHARGER_RK817=y
+
+# THERMAL: o DT declara `thermal-zones` (soc e gpu), mas sem o driver não há
+# `thermal_zone*` — só `cooling_device*` órfãos. Medido: `modprobe
+# rockchip_thermal` fez aparecer `thermal_zone0 = soc-thermal 44090` e
+# `thermal_zone1 = gpu-thermal 47727`. Sem ele o aparelho não tem proteção
+# térmica nem leitura de temperatura, e o selftest avisa "sem zona térmica".
+CONFIG_ROCKCHIP_THERMAL=y
+CONFIG_THERMAL=y
+CONFIG_CPU_THERMAL=y
+
 # A pilha de frequência do PX30 no mainline é `cpufreq-dt`, não
 # `rockchip-cpufreq` — o símbolo do antecessor foi removido no 6.12 (§12.9).
 #

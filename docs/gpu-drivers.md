@@ -156,29 +156,66 @@ O que **não** se faz:
 
 ---
 
-## 6. O número que ainda falta
+## 6. O número — agora medido, não deduzido
 
-Tudo acima comparou o **hardware** (medido no R35S, mas com o blob da ARM) com o
-**Mesa 24.0.0 da nossa árvore** (lido no `features.txt`). O que nunca foi medido
-é o **panfrost rodando**: `GL_VERSION` real, `MAX_SAMPLES`, e a confirmação de
-que a extensão de geometry shader **não** aparece.
+Até 06/11/2026 tudo acima comparava o **hardware** (medido no R35S, mas com o
+blob da ARM) com o **Mesa 24.0.0 da nossa árvore** (lido no `features.txt`). O
+`panfrost` rodando nunca tinha sido medido.
 
-Isso exige a nossa imagem num aparelho livre, ou o A/B `rmmod mali_kbase` +
-`modprobe panfrost` num aparelho que possamos congelar por alguns minutos.
+**Foi medido.** R35S, nossa imagem (`commit=779fc64`), `panfrost` carregado,
+`gles-probe.c` compilado pelo cross-toolchain do próprio build e enviado por SSH:
 
-O A/B é o experimento mais barato e o mais informativo: **mesmo aparelho, mesmo
-jogo, dois drivers.** Se o panfrost entregar GLES 3.1 com compute e sem geometry
-shader, o quadro acima está confirmado e a decisão fecha. Se entregar menos que
-isso (por exemplo, GLES 3.0 sem compute), o item "Godot Compatibility" precisa ser
-reavaliado — e essa seria uma descoberta que muda o roadmap, não um detalhe.
+```text
+GL_RENDERER         = Mali-G31 (Panfrost)
+GL_VERSION          = OpenGL ES 3.1 Mesa 24.0.0
+GLSL_VERSION        = OpenGL ES GLSL ES 3.10
+GL_MAX_TEXTURE_SIZE = 8192
+extensões GL        = 128
 
-Comando, quando houver aparelho livre:
+GL_OES_geometry_shader       = NÃO
+GL_EXT_geometry_shader       = NÃO
+GL_OES_tessellation_shader   = NÃO
+GL_OES_texture_float         = SIM
+GL_EXT_texture_filter_anisotropic = SIM
+GL_KHR_debug                 = SIM
+```
+
+O quadro da seção 2 está **confirmado**: GLES 3.1 com compute, sem geometry
+shader e sem tessellation. Launcher, SDL2 e Godot 4 Compatibility passam; o
+arcade depende do patch que já existe.
+
+O A/B que o documento pedia (`rmmod` do blob + `modprobe panfrost`) não foi
+necessário: o blob da ARM não está na nossa imagem, então o "antes" foi obtido
+tirando o panfrost — mesmo aparelho, mesmo stack, um driver a menos.
+
+### A armadilha que quase transformou isso em "está tudo bem"
+
+Sem panfrost a Mesa cai no `swrast`, e o probe responde:
+
+```text
+com panfrost:  GL_RENDERER = Mali-G31 (Panfrost)   GL_VERSION = OpenGL ES 3.1 Mesa 24.0.0
+sem panfrost:  GL_RENDERER = softpipe              GL_VERSION = OpenGL ES 3.1 Mesa 24.0.0
+```
+
+**A `GL_VERSION` é idêntica** (`OpenGL ES 3.1 Mesa 24.0.0`). Todo teste que
+pergunta "tem GLES 3.1?" — e todo `VEREDITO: GLES respondeu` — aprova um
+aparelho renderizando na CPU. A única pergunta que separa os dois casos é
+**`GL_RENDERER`**.
+
+E era exatamente esse o estado da imagem do R35S: `CONFIG_DRM_PANFROST=m`, sem
+`/etc/modules` e sem `modules-load`, o `.ko` no disco e ninguém para carregá-lo.
+Na prática 3D na CPU, com build verde e selftest aprovando. Corrigido para `=y`
+(`device/r35s/linux.fragment`), com gate em `kernel-required.txt` e teste em
+`tests/gpu-drivers.test.mjs`.
+
+Comando, para repetir em qualquer aparelho:
 
 ```bash
-# no aparelho
-rmmod mali_kbase && modprobe panfrost
-python3 gles-probe.py
+bash scripts/gles-probe.sh r35s              # compila (dinâmico, usa a Mesa do aparelho)
+scp out/r35s/gles-probe root@10.55.0.2:/tmp/ && ssh root@10.55.0.2 /tmp/gles-probe
 ```
+
+Leia `GL_RENDERER`, não `GL_VERSION`.
 
 ---
 

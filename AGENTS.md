@@ -1,12 +1,11 @@
 # AGENTS.md — Giochi System
 
 > Handoff técnico do repositório. Leia antes de continuar o trabalho.
-> Atualizado em: 06/11/2026 (revisão 5 — **o R35S falou**: a linha serial, que
-> devolvia só ruído em 04/11, ficou limpa depois da solda no TTL. Console
-> `ttyS2@1500000` medido e preso em teste; joypad com fonte GPL confirmada; o
-> desenho de partição de dados do ROCKNIX medido; os **cinco** painéis em texto
-> comparável; e a **decisão de driver de GPU** fechada — o panfrost custa
-> exatamente um item, e ele tem patch. Ver §13-A e
+> Atualizado em: 06/11/2026 (revisão 6 — **o R35S testado por dentro**: SSH por
+> `usb0`, `PASS 34 · WARN 7 · FAIL 0 · SKIP 4`, áudio confirmado, e a **GPU
+> medida** — GLES 3.1 no panfrost, sem geometry shader, que era o número que
+> faltava. A medição quase deu "está tudo bem": a imagem saía com `softpipe` e a
+> `GL_VERSION` respondia igual. Ver §12.51 e
 > [`docs/gpu-drivers.md`](docs/gpu-drivers.md).)
 
 ---
@@ -46,7 +45,7 @@ Repositório: `https://github.com/xtrempkch-droid/GIOCHI-SYSTEM` — branch `mai
 - Estrutura de repositório, `.gitignore`, `.gitattributes`, licença MIT.
 - `device/devices.json` como fonte da verdade da lista **e** da matriz de CI.
 - `device.json` por aparelho, validado por schema em `scripts/lib/devices.mjs`.
-- 6 aparelhos registrados: `qemu-aarch64` (único habilitado) + 5 drafts.
+- 7 aparelhos registrados: `qemu-aarch64` (único habilitado) + 6 drafts.
 - Buildroot fixado em **2024.02** (`buildroot.version`).
 - Pipeline: `build-device.sh` → `prepare-config.mjs` → `olddefconfig` →
   `assert-config.mjs` → `make` → artefatos + `SHA256SUMS`.
@@ -78,8 +77,8 @@ Repositório: `https://github.com/xtrempkch-droid/GIOCHI-SYSTEM` — branch `mai
 
 | Verificação | Resultado |
 | --- | --- |
-| `node tests/run-all.mjs` | **150/150** (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, devices 13, assert-config 12, fdt 11, …) |
-| `node scripts/validate-devices.mjs` | OK — 6 devices, 1 habilitado |
+| `node tests/run-all.mjs` | **397/397** (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, devices 13, assert-config 12, fdt 11, …) |
+| `node scripts/validate-devices.mjs` | OK — 7 devices, 1 habilitado |
 | `node scripts/list-devices.mjs --github-matrix` | matriz com `qemu-aarch64` |
 | matriz com `--device powkiddy-x55 --allow-draft` | devolve **só** o X55 |
 | matriz com `device=all --allow-draft` | **não** puxa rascunho (só `qemu-aarch64`) |
@@ -427,7 +426,7 @@ si (§12.4), mas provavelmente **não** era a causa dos 3 s.
 
 ```bash
 node scripts/validate-devices.mjs
-node tests/run-all.mjs                          # 36 testes
+node tests/run-all.mjs                          # 397 testes
 node scripts/list-devices.mjs
 node scripts/list-devices.mjs --github-matrix
 node scripts/list-devices.mjs --github-matrix --device powkiddy-x55 --allow-draft
@@ -467,7 +466,7 @@ absoluto** do host — §12.40).
 
 ## 10. Testes
 
-`node tests/run-all.mjs` → **106/106**:
+`node tests/run-all.mjs` → **397/397**:
 
 | Arquivo | Testes | Cobre |
 | --- | --- | --- |
@@ -2349,6 +2348,194 @@ se o disco estiver certo, mas se ele foi adicionado antes do `chmod`, corrija co
 `git update-index --chmod=+x <arquivo>` (ou `git add --chmod=+x`). Conferir com
 `git ls-files -s`: a primeira coluna tem de ser `100755`.
 
+### 12.51 `softpipe` responde "GLES 3.1" — a versão não prova que a GPU existe
+
+Medido no R35S em 06/11/2026, com a nossa imagem (`commit=779fc64`).
+
+O fragmento do aparelho declarava:
+
+```make
+# GPU. `=m` como no vendor: o driver pode ser carregado depois, e assim o
+# `mali_kbase` proprietário também pode, se algum dia a loja oferecer.
+CONFIG_DRM_PANFROST=m
+```
+
+O raciocínio foi copiado do vendor e é errado por duas vias. A primeira é que o
+rootfs do Buildroot **não tem `/etc/modules` nem `modules-load`**: o `.ko` fica
+no disco e ninguém o carrega. A segunda é que `mali_kbase` e panfrost disputam o
+mesmo nó `gpu@ff400000` — nunca conviveriam carregados, então o `=m` não comprava
+nada. É a armadilha do §12.43, uma camada acima.
+
+O resultado no aparelho: `/dev/dri/` com só `card0`, nenhum `renderD128`.
+
+**O que faz isso ser perigoso, e não só quebrado.** Sem panfrost a Mesa cai no
+`swrast`, e o probe responde:
+
+```text
+com panfrost:  GL_RENDERER = Mali-G31 (Panfrost)   GL_VERSION = OpenGL ES 3.1 Mesa 24.0.0
+sem panfrost:  GL_RENDERER = softpipe              GL_VERSION = OpenGL ES 3.1 Mesa 24.0.0
+```
+
+**A `GL_VERSION` é idêntica**, e o veredito do probe ("GLES respondeu") também.
+Quem pergunta "tem GLES 3.1?" — que é a pergunta que o `forge.json` faz para
+declarar capacidade, e a que qualquer teste ingênuo faz — recebe **sim** nos dois
+casos, com o aparelho renderizando na CPU de 1 GB. `kmscube` também roda.
+
+A única pergunta que separa GPU de CPU é **`GL_RENDERER`**. É a mesma família do
+§12.29 ("biblioteca presente não prova uso") e do §12.30 ("o teste perguntou a
+coisa errada"): o indireto respondeu, e a resposta não distinguia nada.
+
+**Regra que fecha:** GPU é hardware **onboard**, presente em todo boot — então
+`=y`, como já era no X55 e no X35H. `=m` é para hardware que pode **não estar
+lá** (dongle Wi-Fi, §12.31), nunca para o que sustenta a tela.
+
+Peças da correção:
+
+| Peça | Por quê |
+| --- | --- |
+| `CONFIG_DRM_PANFROST=y` no fragmento do R35S | onboard: carrega no boot, sem depender de script |
+| `CONFIG_DRM_PANFROST=y` na `kernel-required.txt` dos **três** aparelhos com GPU | o fragmento é delta; sem o gate o símbolo some e a imagem sai verde e sem GPU |
+| `tests/gpu-drivers.test.mjs` | proíbe `CONFIG_DRM_PANFROST=m` em qualquer aparelho e exige o símbolo no `kernel-required.txt` |
+| `giochi-selftest` | sem render node, ele agora **nomeia o módulo** e a correção (`=y`, não `=m`) em vez de "3D pode não inicializar" |
+
+#### A GPU não estava sozinha: bateria e térmica caíram na mesma armadilha
+
+Depois de corrigir o panfrost, os dois WARNs que sobravam no selftest —
+`sem bateria detectada` e `sem zona térmica` — foram investigados por serem
+suspeitos: o R35S **tem** bateria. Os dois eram o mesmo defeito, na mesma imagem,
+na mesma sessão. E o hardware respondeu a um `modprobe` manual em ambos:
+
+| Peça | DT declara | Antes | `modprobe` → | Depois |
+| --- | --- | --- | --- | --- |
+| bateria | nó `charger` no `rk817`, com `monitored-battery` para o `simple-battery` | `/sys/class/power_supply/` **vazio** | `rk817-battery` (`TYPE=Battery PRESENT=1 STATUS=Discharging`) + `rk817-charger` (`TYPE=USB`) | `CONFIG_CHARGER_RK817=y` |
+| térmica | `thermal-zones` com `soc-thermal` e `gpu-thermal` | só `cooling_device0/1` órfãos, nenhum `thermal_zone*` | `thermal_zone0 = soc-thermal 44090`, `thermal_zone1 = gpu-thermal 47727` | `CONFIG_ROCKCHIP_THERMAL=y` |
+
+Os dois símbolos vinham **`=m` do defconfig arm64**, e o fragmento do R35S
+simplesmente não os mencionava — enquanto o X55 e o X35H já os tinham `=y` desde
+o começo. Ou seja: não foi uma decisão, foi um **esquecimento**, e a diferença
+entre os aparelhos é o que o denuncia. É o §12.26 na forma silenciosa: o que não
+está escrito não dá erro.
+
+Consequência de produto, não de laboratório: sem `power_supply`, a interface não
+tem nível de carga para mostrar e o aparelho desliga sem aviso; sem
+`thermal_zone`, não há proteção térmica — o `tsadc` fica sem cliente.
+
+`tests/onboard-drivers.test.mjs` prende a invariante nos três aparelhos RK:
+`CONFIG_DRM_PANFROST`, `CONFIG_CHARGER_RK817` e `CONFIG_ROCKCHIP_THERMAL` têm de
+estar `=y` **e** na `kernel-required.txt`. Não é sobre estes três nomes: é sobre
+hardware que existe em todo boot não poder depender de um autoload que o rootfs
+não tem.
+
+**O amplificador continua `=m`, de propósito.** `CONFIG_SND_SOC_SIMPLE_AMPLIFIER=m`
+é o que o X55 precisou mudar para `=y` (§3) porque o DTS dele tem
+`aux-devs = <&spk_amp>`. O `rk817-sound` do R35S **não tem** `aux-devs` — conferido
+no DT do aparelho —, então lá o módulo é código morto e não faz falta.
+
+#### O selftest também perguntava ao dispositivo errado
+O bloco de 3D lia o driver de **`card0`** e comparava com uma lista de GPUs. Mas
+`card0` é o controlador de *display* (`rockchip-drm`, `msm`…) — o panfrost mora no
+**render node**, outro minor. Em aparelho saudável o resultado era sempre
+
+```text
+[WARN] driver DRM 'rockchip-drm' — não é GPU conhecida; 3D pode ser software
+```
+
+— um WARN falso em cima de uma GPU funcionando. Agora a pergunta é feita a
+`/sys/class/drm/renderD128/device/driver`, com as `card*` como reserva. Medido nos
+dois estados no aparelho: `[PASS] driver de GPU reconhecido: panfrost` com, e o
+WARN com a causa sem.
+
+#### `gles-probe.sh` nunca tinha compilado
+
+O script usava `-static -lEGL -lGLESv2`. O Buildroot não instala `libEGL.a`, então
+ele morria no linker com `cannot find -lEGL` — e ninguém percebeu porque o script
+está na lista dos que não têm teste. Ligar estaticamente também estaria errado
+por princípio: mediria a Mesa do **sysroot**, embutida, não a do **aparelho**.
+Agora é dinâmico, e o aviso na saída diz para ler `GL_RENDERER`, não `GL_VERSION`.
+
+#### Fragmento do kernel mudou com `KEEP_WORK=1`: mesma família do §12.11
+
+Editar `linux.fragment` num build retomado **não** reconfigura o kernel — o
+`.stamp_configured` já existe, o `olddefconfig` não roda de novo, e o
+`assert-kernel-config` falha dizendo que o símbolo pedido não entrou, **sem citar
+`KEEP_WORK`**. O gate está certo (imagem errada não sai), mas não havia saída
+óbvia. `build-device.sh` passou a hashear o fragmento em
+`work/<device>/kernel-fragment.state` e a rodar `linux-dirclean` quando ele muda,
+como já fazia com os patches.
+
+### 12.52 A regra do X55 dava `PASS` no R35S com o falante mudo
+
+Medido no R35S em 06/11/2026, procurando o que os WARNs escondiam.
+
+O `Playback Mux` do RK817 tem dois valores, `HP` e `SPK`, e o driver mainline
+**não** tem opinião sobre qual usar: é `SOC_ENUM_SINGLE_VIRT` — controle virtual
+de DAPM, nenhum registrador guarda o valor, e não existe propriedade de DT para
+ele (conferido em `sound/soc/codecs/rk817_codec.c`). Quem decide é userspace. O
+default é `HP`.
+
+A tabela de rotas do próprio driver diz o que cada valor faz:
+
+```text
+{"Playback Mux", "HP",  "DAC L"},  {"Playback Mux", "HP",  "DAC R"},
+{"Playback Mux", "SPK", "SPK DAC"},
+{"SPKO", NULL, "Playback Mux"}, {"HPOL", ...}, {"HPOR", ...}
+```
+
+E o roteamento de cada aparelho decide qual é o certo:
+
+| Aparelho | `simple-audio-card,routing` | Mux correto |
+| --- | --- | --- |
+| X55 | `"Speaker Amp INL", "HPOL"` — o amplificador é alimentado por HPOL/HPOR | **HP** |
+| R35S | `"Speaker", "SPKO"` — o falante está no class-D | **SPK** |
+
+O `giochi-selftest` testava `MUX = HP → pass`, herdado da X55, e reportava no
+R35S:
+
+```text
+[PASS] Playback Mux = HP (falante roteado por HPOL/HPOR)
+```
+
+com o falante **sem sinal**: em `HP` só HPOL/HPOR recebem o DAC; o `SPKO` fica
+mudo. O texto do `PASS` era falso em duas coisas ao mesmo tempo — o aparelho não
+tem amplificador, e o caminho não era aquele.
+
+É pior que um `FAIL` falso (§12.34), porque encerra a investigação: ninguém olha
+de novo para um bloco verde. E é o §12.26 em forma de teste — **herdar a premissa
+de outro aparelho e não perceber**.
+
+Correção em três peças:
+
+| Peça | O que faz |
+| --- | --- |
+| `giochi-selftest` | deriva o Mux esperado do **DT do próprio aparelho** (`Speaker -> SPK*` ⇒ SPK; `Speaker -> HPO*` ⇒ HP), e o `FAIL` cita o roteamento e a consequência |
+| `device/r35s/rootfs-overlay/etc/giochi/asound.state` | estado do mixer com `Playback Mux = SPK` (formato do `alsactl store`) |
+| `device/common/rootfs-overlay/etc/init.d/S51mixer` | restaura `/etc/giochi/asound.state` **se ele existir**; ausente não é erro (X55 e X35H seguem no default do driver) |
+
+Verificado no aparelho, ponta a ponta: com `Mux = HP` o selftest passou a
+reportar
+
+```text
+[FAIL] Playback Mux = HP — o DTS roteia 'Speaker -> SPKO', então precisa ser SPK
+```
+
+e depois de `/etc/init.d/S51mixer start`, `[PASS] Playback Mux = SPK (casa com o
+DTS: Speaker -> SPKO)`. `tests/onboard-drivers.test.mjs` prende o par: o valor do
+`asound.state` tem de casar com o roteamento do DTSI no repositório.
+
+**Por que `alsactl restore` e não `amixer`:** `amixer` não existe no Buildroot
+2024.02 (§12.16). E `alsactl` não é contorno — é o mecanismo que o ALSA prevê
+para estado de placa.
+
+#### A ferramenta que não descia
+
+A primeira versão da correção procurava o nó com
+`find /proc/device-tree -maxdepth 3 -name 'simple-audio-card,routing'`. O `find`
+do **busybox não desce em `/proc/device-tree`**: `find /proc/device-tree -maxdepth 1`
+devolve só a raiz. O bloco caía num WARN ("não permitiu decidir o esperado") que
+parece dado ausente e é ferramenta errada. Trocado por glob de shell em dois
+níveis, que funciona — e é o que responde a pergunta. Detectado só porque o teste
+foi feito no aparelho, não no desktop.
+
 ## 13. Aparelhos
 
 | ID | Pasta | SoC | Arch | Status | Falta |
@@ -2357,7 +2544,7 @@ se o disco estiver certo, mas se ele foi adicionado antes do `chmod`, corrija co
 | `powkiddy-x55` | `powkiddy x55/` | RK3566 | arm64 | draft | **boota com tela, áudio, Wi-Fi, BT e 16 botões + 4 eixos**; falta o launcher (do `Giochi app`) |
 | `powkiddy-x35s` | `powkiddy x35s/` | **RK3566** | arm64 | draft | DTS (compartilha com o X35H) e build |
 | `powkiddy-x35h` | `powkiddy x35h/` | **RK3566** | arm64 | draft | **boota com tela 640x480, `usb0` e SSH**; imagem de 04/11 já tem o `respawn`. Falta o launcher, o teste A/B de cartão e os eixos analógicos |
-| `r35s` | `r35s/` | RK3326 | arm64 | draft | **BOOTOU em 06/11/2026: tela 640x480, `r36s_Gamepad` com 16 botões + 4 eixos, shell serial** (§13-B). Falta áudio e launcher |
+| `r35s` | `r35s/` | RK3326 | arm64 | draft | **BOOTOU em 06/11/2026 e testado por SSH em 06/11**: tela 640x480, `r36s_Gamepad` com 16 botões + 4 eixos, áudio (`rk817_int`), bateria, térmica e GPU (§12.51, §12.52) |
 | `steamdeck` | `steamdeck/` | x86_64 | x86_64 | draft | kernel, firmware, áudio, Wi-Fi, controle |
 | `generic-x64` | `generic-x64/` | x86_64 | x86_64 | draft | **nunca compilado**; `pc_x86_64_efi_defconfig` declarado para permitir dispatch com `allow_draft` |
 
@@ -2682,8 +2869,15 @@ tem precedência histórica e a divergência precisa ser resolvida explicitament
   16 botões e 4 eixos; X35H: tela 640x480, `usb0` e SSH; R35S: tela 640x480,
   `r36s_Gamepad` com 16 botões + 4 eixos e shell serial, §13-B). Os três
   continuam `draft` porque `ready` exige a interface, que é do `Giochi app`.
-- **O R35S ainda não tem áudio**: `--- no soundcards ---` e `libasound` ausente.
-  O card `rk817_int` não aparece, provavelmente `deferred probe` do ASoC.
+- **O R35S tem áudio** — medido em 06/11/2026 na imagem `779fc64`:
+  `placas de som: 0 [rk817int]: simple-card - rk817_int` e `Playback Mux = HP`,
+  com `libasound` presente. O `--- no soundcards ---` da primeira sessão estava
+  resolvido pelo par `CONFIG_SND_SIMPLE_CARD=y` + `BR2_PACKAGE_ALSA_LIB` (§12.43).
+- **R35S: GPU, bateria e térmica só funcionam com `=y`** — a imagem `779fc64`
+  saía com `panfrost`, `rk817_charger` e `rockchip_thermal` todos `=m` e sem
+  autoload: `softpipe` no 3D, `/sys/class/power_supply` vazio e nenhum
+  `thermal_zone`. Os três foram medidos com `modprobe` no aparelho e corrigidos
+  (§12.51); a imagem com a correção é a próxima a ser gerada.
 - X35S e Steam Deck nunca bootaram; X35S nem tem defconfig.
 - O build completo do `qemu-aarch64` passou no CI (run #15). O build local do X55
   passou em 04/11, mas **nunca no CI** — o dispatch do X55 ainda não foi reenviado.
@@ -2704,7 +2898,7 @@ o cartão — não só no `target/`.
 
 | Item | Estado |
 | --- | --- |
-| Código e configuração | **pronto** — 150/150 testes, tudo no `origin` |
+| Código e configuração | **pronto** — 397/397 testes |
 | Imagem X55 (`Image` + `rootfs.ext4` + DTB + bootloader) | **existe** em `out/powkiddy-x55/`, `built_at_utc=2026-11-04T21:05:13Z` |
 | `/etc/inittab` na imagem | **linha 30: `::respawn:/usr/bin/giochi-init`** — conferida com `debugfs` no `rootfs.ext4` |
 | `work/` do X55 | preservado em `~/.cache/giochi-system/work/powkiddy-x55` (17 GB, já com `target/` finalizado) |
@@ -2777,11 +2971,28 @@ sem medir o build completo.
    diferença não é de chip, é de driver empacotado — ver
    [`docs/evaluacao-pyglet-arcade.md`](docs/evaluacao-pyglet-arcade.md).
 
-   Continua pendente o que o probe foi escrito para responder: **o número do
-   nosso stack** (Mesa 24.x do Buildroot 2024.02, `panfrost`). Para isso é
-   preciso a nossa imagem num aparelho livre, ou o A/B `rmmod mali_kbase` +
-   `modprobe panfrost` — que **não foi feito** porque congelaria a tela de um
-   aparelho que não é nosso e estava em uso.
+   **O número do NOSSO stack foi medido em 06/11/2026**, no R35S com a nossa
+   imagem, `gles-probe.c` compilado pelo cross-toolchain do build (§12.51):
+
+   ```text
+   GL_RENDERER         = Mali-G31 (Panfrost)
+   GL_VERSION          = OpenGL ES 3.1 Mesa 24.0.0
+   GLSL_VERSION        = OpenGL ES GLSL ES 3.10
+   GL_MAX_TEXTURE_SIZE = 8192
+   extensões GL        = 128
+   GL_OES_geometry_shader     = NÃO
+   GL_OES_tessellation_shader = NÃO
+   GL_OES_texture_float       = SIM
+   ```
+
+   O A/B que este item pedia (`rmmod mali_kbase` + `modprobe panfrost`) não foi
+   necessário: o blob da ARM não está na nossa imagem, então o "antes" saiu de
+   tirar o panfrost — mesmo aparelho, mesmo stack.
+
+   A decisão do §15 está confirmada com medição, não com expectativa: GLES 3.1
+   com compute, sem geometry shader. Registro também o que quase a invalidou —
+   sem panfrost o probe devolve **a mesma `GL_VERSION`** com `GL_RENDERER =
+   softpipe`. `GL_VERSION` não distingue GPU de CPU; `GL_RENDERER` sim.
 3. **Partição de dados da loja** — proposta de piso 4 GiB + resto do cartão. Não
    implementado, e há duas consequências de desenho antes de codar: a `.img` tem
    tamanho fixo (2 GiB hoje), então "o resto do cartão" só existe se a partição
@@ -2804,8 +3015,8 @@ quem está usando. O mesmo vale para `adb`/SSH/serial — conectar já interfere
 Ordem sugerida para a próxima sessão (nada aqui precisa da X55):
 
 ```bash
-node scripts/validate-devices.mjs      # 6 devices, 1 habilitado
-node tests/run-all.mjs                 # 150/150
+node scripts/validate-devices.mjs      # 7 devices, 1 habilitado
+node tests/run-all.mjs                 # 397/397
 node scripts/list-devices.mjs --github-matrix
 ```
 
@@ -2837,3 +3048,99 @@ com espaço), ou pelo GitHub Actions.
 
 `out/`, `work/`, `.cache/`, imagens `.img`/`.ext4`/`.ext2`, logs, `.env`,
 segredos, `node_modules/`. O `.gitignore` cobre.
+
+## 20. Salva-vidas: estado no fim da sessão de 06/11/2026
+
+**O shell desta sessão morreu.** Todo comando passou a devolver
+`Exec format error (os error 8)` — inclusive `/bin/echo` e `true`, ou seja, o
+problema é de criação de processo no ambiente, não de PATH nem de script. As
+ferramentas de arquivo continuam funcionando (`view`, `edit`), então o trabalho
+foi preservado em disco mas **não pôde ser commitado** pelo agente.
+
+### O que JÁ está em `origin/main`
+
+```text
+4b1ee8f  flash-dd: o método tradicional (dd puro), e o r35s gravado no cartão
+779fc64  flash-sd: --grow usa o cartão todo (2 GiB de imagem num cartão de 128 GB)
+c04747d  r35s: RTC persistente, quota de restart por tipo de saída, splash e dongle
+```
+
+`node tests/run-all.mjs` → **386/386** no último run antes da morte do shell.
+
+### O que ficou SEM commit (dois arquivos — este e o README)
+
+`device/r35s/README.md` — a frase "o loader do fabricante é o único que liga
+nesta placa; o U-Boot mainline testado deu tela preta sem print no serial"
+estava **desatualizada e errada**. O mainline liga desde 06/11/2026: a causa era
+`rk_board_late_init()` do `odroid-go2` lendo o SARADC e dando
+`Unable to detect device type: -6` → `### ERROR ### Please RESET the board ###`, e
+as duas correções (`uboot-patches/0001-…-adc-nao-fatal.patch` +
+`uboot.fragment`) já estão no repositório e o build de hoje as aplicou
+(`uboot: fragmento aplicado (5 símbolos)`, `uboot: 1 patch(es) de U-Boot`).
+
+**Para commitar quando o shell voltar:**
+
+```bash
+cd /home/charles/Giochi/GIOCHI-SYSTEM
+node tests/run-all.mjs                                   # esperado: 397/397
+git add device/r35s/README.md AGENTS.md
+git commit -m "r35s: o U-Boot mainline liga; a frase do README estava desatualizada
+
+O README dizia que 'o loader do fabricante é o único que liga nesta placa' e
+que 'o U-Boot mainline testado deu tela preta sem print no serial'. Era o
+registro do SINTOMA antes da causa ser encontrada, e virou fato por repetição.
+
+A causa medida: rk_board_late_init() do odroid-go2 lê o SARADC canal 0 e
+compara com a tabela de resistores da Hardkernel; o R35S não tem esse resistor,
+então 'Unable to detect device type: -6' -> '### ERROR ### Please RESET the
+board ###' — invisível porque a console do U-Boot estava a 115200 e a do
+kernel a 1500000.
+
+As duas correções já estavam no repositório (uboot-patches/0001 + uboot.fragment)
+e o build de 06/11 as aplicou. O README é que não tinha sido atualizado.
+
+Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+git push git@github.com:xtrempkch-droid/GIOCHI-SYSTEM.git HEAD:main
+```
+
+### O cartão do R35S: gravado e conferido (não se perde)
+
+Cartão **SE32G de 29,7 GiB**, `/dev/sdb`, gravado com `dd` puro
+(`scripts/flash-dd.sh`, 2 GiB em 61 s a 35 MB/s, via `pkexec`).
+
+Conferido **lendo o cartão**, sem confiar no `dd`:
+
+| Parte | SHA256 medido | Igual a |
+| --- | --- | --- |
+| firmware no setor 64 | `1770c1a0…` | `out/r35s/u-boot-rockchip.bin` |
+| FAT: `Image` | md5 `35d8eb3c…` | `out/r35s/Image` |
+| FAT: DTB | md5 `7be37912…` | `rk3326-gameconsole-r36s-giochi.dtb` |
+| `p2` (1024 MiB) | `0e45addb…` | `out/r35s/rootfs.ext4` |
+
+`extlinux.conf` no cartão: `fdt /dtbs/rk3326-gameconsole-r36s-giochi.dtb`,
+`timeout 30`, cmdline com `console=ttyS2,1500000n8` e **sem** `menu title` (§12.38).
+
+O `build-info.txt` **dentro** do cartão diz `commit=779fc64…` — foi a correção
+desta sessão: antes só o `out/build-info.txt` levava o commit, então a imagem no
+aparelho não dizia de onde veio.
+
+### O que NÃO foi feito
+
+- **Não bootou.** O cartão está gravado e desmontado; falta colocar no aparelho e
+  ler a serial (1500000). Nada foi medido no hardware nesta rodada.
+- **O cartão de 128 GB** (116,1 GiB) não está mais no leitor. O de 29,7 GiB é o
+  que estava. Suspeita registrada: a gravação anterior foi para o de 128 GB e o
+  cartão que voltou ao leitor foi o pequeno — a `.img` do X35H de 03/11 que está
+  nele (antes desta gravação) era a antiga, com `menu title` e `Image` de 03/11.
+- **`--grow` não foi exercitado em cartão real**, só em arquivo: `sfdisk -N 2 ',+'`
+  cresceu 200 → 896 MiB num disco de 1024 MiB e `resize2fs` foi de 200 MiB para
+  2 GiB. A `.img` do R35S no cartão de 29,7 GiB ficou com os 2 GiB da imagem
+  (a gravação foi `dd` puro, sem `--grow`).
+
+### A lição que fica
+
+O shell morrer no meio não apagou nada porque cada passo tinha sido **medido e
+escrito** antes do passo seguinte. O que faltou foi o commit — por isso esta
+seção existe. Se a próxima sessão começar com `git status` mostrando só
+`device/r35s/README.md` modificado, está tudo consistente com o que está aqui.
+
