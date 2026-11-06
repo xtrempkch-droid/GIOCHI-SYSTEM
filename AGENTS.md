@@ -1870,7 +1870,7 @@ dry-run: custa 1 s e teria evitado dois builds.
 | `powkiddy-x55` | `powkiddy x55/` | RK3566 | arm64 | draft | **boota com tela, áudio, Wi-Fi, BT e 16 botões + 4 eixos**; falta o launcher (do `Giochi app`) |
 | `powkiddy-x35s` | `powkiddy x35s/` | **RK3566** | arm64 | draft | DTS (compartilha com o X35H) e build |
 | `powkiddy-x35h` | `powkiddy x35h/` | **RK3566** | arm64 | draft | **boota com tela 640x480, `usb0` e SSH**; imagem de 04/11 já tem o `respawn`. Falta o launcher, o teste A/B de cartão e os eixos analógicos |
-| `r35s` | `r35s/` | RK3326 | arm64 | draft | **imagem é gerável** (U-Boot `odroid-go2` + rkbin PX30); **não bootou em hardware**. DTS, drivers e fragmento **compilam no 6.12**. Console medido (§13-A) |
+| `r35s` | `r35s/` | RK3326 | arm64 | draft | **BOOTOU em 06/11/2026: tela 640x480, `r36s_Gamepad` com 16 botões + 4 eixos, shell serial** (§13-B). Falta áudio e launcher |
 | `steamdeck` | `steamdeck/` | x86_64 | x86_64 | draft | kernel, firmware, áudio, Wi-Fi, controle |
 | `generic-x64` | `generic-x64/` | x86_64 | x86_64 | draft | **nunca compilado**; `pc_x86_64_efi_defconfig` declarado para permitir dispatch com `allow_draft` |
 
@@ -2030,6 +2030,91 @@ parser** (`#END` começava com `#` e era descartado como comentário vazio, ent�
 todo painel saía "SEM #END") e uma premissa errada (`.find()` pegava o `0x11` do
 meio). Vale como lembrete: teste que falha costuma estar certo.
 
+## 13-B. O R35S BOOTOU — tela, botões e shell (06/11/2026)
+
+**Primeiro boot com a nossa imagem.** Não é estimativa: o console serial a
+1500000 entregou o login, e tudo abaixo foi lido por SSH serial no aparelho.
+
+```text
+Giochi System 6.12.0 (/dev/console)
+giochi-system-r35s login:
+# uname -a
+Linux giochi-system-r35s 6.12.0 #1 SMP PREEMPT ... aarch64 GNU/Linux
+```
+
+| Capacidade | Estado medido |
+| --- | --- |
+| Boot até o `getty` | **PASS** — `::respawn:/usr/bin/giochi-init` no inittab |
+| Painel | **640x480, `card0-DSI-1` connected**, `fbcon` em 80x30, backlight 128/255 |
+| `/dev/dri` | `card0` (era **vazio** antes do patch do painel) |
+| Gamepad | `r36s_Gamepad` em `event1`, EV_KEY + EV_ABS + EV_FF |
+| Botões | **16 bits** em `capabilities/key` |
+| Eixos | **8 bits** em `capabilities/abs` (4 pares) |
+| `usb0` | UP, `10.55.0.2` (o PC não tinha RNDIS, então foi por serial) |
+| Áudio | **sem soundcard** — `--- no soundcards ---` |
+| Launcher | ausente (é do `Giochi app`) |
+
+`giochi-selftest`: **PASS 27 · WARN 8 · FAIL 4 · SKIP 5** — e **dois dos quatro
+FAIL eram falso negativo**, corrigidos nesta mesma sessão (abaixo).
+
+### As três causas que impediram o boot, na ordem em que apareceram
+
+| Sintoma no aparelho | Causa | Onde está |
+| --- | --- | --- |
+| `Enter choice:` para sempre, `not found` repetindo | `menu title` liga `prompt=1` e ignora o timeout; CR vazio vira escolha inválida e `m->timeout = 0` | §12.38 |
+| Boota, login, **tela preta** | `compatible = "rocknix,generic-dsi"` sem driver → `panel@0` órfão → sem conector → sem `/dev/dri` | §12.39 |
+| Botões e eixos ausentes (antes do patch) | `compatible = "rocknix-singleadc-joypad"` sem driver | §12.39 |
+
+As duas últimas são a **mesma classe**: o DTS declara um `compatible` fora da
+árvore, e ninguém levava o `.c` para dentro do kernel. O kernel não reclama de nó
+órfão, então as duas falhas são invisíveis no `dmesg` — só `ls /dev/dri` e
+`/proc/bus/input/devices` denunciam.
+
+### Dois FAIL falsos, e o padrão que eles repetem
+
+Com a tela funcionando, o `giochi-selftest` ainda acusava:
+
+```text
+[FAIL] sem gpio-keys-control — nenhum botão de gamepad
+[FAIL] sem adc-joystick — os analógicos não existem (CONFIG_JOYSTICK_ADC?)
+```
+
+Os dois eram falsos: `r36s_Gamepad` estava em `event1` com 16 botões e 8 bits de
+eixo. O teste procurava o **nome do driver dos outros aparelhos** (X55/X35H usam
+`gpio-keys`, mainline usa `adc-joystick`) e o R35S usa o `rocknix-joypad`.
+
+Correção pelo mesmo princípio do §12.30/§12.34: perguntar pela **consequência**.
+Agora ele aceita os três nomes, conta `capabilities/key` e `capabilities/abs` de
+quem existir, escolhe o nó com mais botões (para não pegar `gpio-keys-vol`) e
+**reporta o nome de origem** no `PASS`. `tests/selftest-contract.test.mjs` prova a
+lógica em sysfs sintético, com os dois nós.
+
+### O que a tela preta ensinou sobre diagnosticar
+
+Enquanto eu perseguia MMC e tabela de partição, o kernel **já estava bootando**.
+O que separou os dois mundos foi ler o console em vez de inferir pelo sintoma
+visual: "tela preta + LED aceso" tem pelo menos quatro causas com o mesmo
+aspecto — kernel que não carrega, kernel sem driver de painel, painel sem
+backlight, e backlight sem conteúdo. Só o texto da serial distingue.
+
+### Como atualizar o aparelho sem tirar o cartão
+
+O cartão estava dentro do aparelho e o PC só tinha TTL (sem RNDIS no `usb0`).
+`docker/serial-push-blob.py` envia por heredoc + base64 com md5 dos dois lados:
+14,9 MB (o `Image` comprimido) em **193 s a ~100 kB/s**.
+
+Duas armadilhas medidas, as duas silenciosas:
+
+| Armadilha | Efeito |
+| --- | --- |
+| eco do tty ligado | o arquivo remoto ficou com **0 byte** e o shell entrou em modo continuação (`>`), porque uma linha chegou cortada no meio de uma aspa |
+| um `printf` por bloco (700 chars) | o shell parseia 14 mil comandos; quando o buffer do tty enche, bytes são descartados sem erro — md5 divergia a 38 kB/s, que parecia "ok" |
+
+Heredoc não parseia linha nenhuma: `cat` copia e a linha do base64 atravessa na
+velocidade do link. A troca subiu a taxa de 38 para 100 kB/s **e** o md5 passou a
+bater. O destino é `Image.new`, e o `Image` só é substituído depois de o md5
+conferir no aparelho — se a transferência cair, o aparelho continua bootando.
+
 ## 14. Próximos passos, por ordem de risco
 
 1. **Interface de jogos (produto, não sistema).** Os controles de hardware estão
@@ -2106,14 +2191,13 @@ tem precedência histórica e a divergência precisa ser resolvida explicitament
 
 ## 17. Limitações conhecidas
 
-- **X55 e X35H bootam em hardware** (X55: tela, áudio, Wi-Fi, BT, 16 botões e 4
-  eixos; X35H: tela 640x480, `usb0` e SSH). Os dois continuam `draft` porque
-  `ready` exige a interface, que é do `Giochi app`.
+- **X55, X35H e R35S bootam com a NOSSA imagem** (X55: tela, áudio, Wi-Fi, BT,
+  16 botões e 4 eixos; X35H: tela 640x480, `usb0` e SSH; R35S: tela 640x480,
+  `r36s_Gamepad` com 16 botões + 4 eixos e shell serial, §13-B). Os três
+  continuam `draft` porque `ready` exige a interface, que é do `Giochi app`.
+- **O R35S ainda não tem áudio**: `--- no soundcards ---` e `libasound` ausente.
+  O card `rk817_int` não aparece, provavelmente `deferred probe` do ASoC.
 - X35S e Steam Deck nunca bootaram; X35S nem tem defconfig.
-- **O R35S boota com o firmware de fábrica (ROCKNIX 7.1.2), não com o nosso.** Já
-  tem defconfig, DTS e drivers que compilam no 6.12, e a imagem é gerável — mas
-  o **loader não está provado em hardware** (§13-A). X35S e Steam Deck nem
-  defconfig têm.
 - O build completo do `qemu-aarch64` passou no CI (run #15). O build local do X55
   passou em 04/11, mas **nunca no CI** — o dispatch do X55 ainda não foi reenviado.
 - `bash -n` prova sintaxe, não comportamento; o `sh` local não é busybox ash.

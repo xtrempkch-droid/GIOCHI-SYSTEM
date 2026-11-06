@@ -12,7 +12,27 @@ Console portátil Rockchip **RK3326**, tela 640×480. Mesma base do R36S.
 | Wi-Fi / Bluetooth | **não tem rádio** |
 | Botões | `rocknix-singleadc-joypad` (`r36s_Gamepad`, `js0`+`event3`) — **driver fora da árvore**, GPL |
 | Console serial | `ttyS2` @ **1500000** — medido no aparelho, ver abaixo |
-| Status | `draft` — não inicializável |
+| Status | `draft` — **BOOTOU em 06/11/2026**: tela 640x480, 16 botões + 4 eixos, shell serial. Falta áudio e launcher |
+
+> **Boot próprio, medido em 06/11/2026.** Não é mais "não inicializável". O
+> console serial a 1500000 entrega o login, o painel acende em 640x480
+> (`card0-DSI-1 connected`, `fbcon` 80x30), o `r36s_Gamepad` aparece em `event1`
+> com 16 bits de botão e 8 de eixo, e `usb0` sobe com `10.55.0.2`.
+>
+> ```text
+> Giochi System 6.12.0 (/dev/console)
+> giochi-system-r35s login:
+> # uname -a
+> Linux giochi-system-r35s 6.12.0 ... aarch64 GNU/Linux
+> ```
+>
+> O caminho até aqui teve três causas, cada uma invisível no sintoma visual: o
+> menu do `extlinux` que não expirava, o driver do joypad fora da árvore e o
+> driver do painel fora da árvore. As duas últimas produzem o **mesmo** sintoma
+> de "não ligou" — só a serial separa.
+>
+> **Falta:** o card de áudio (`--- no soundcards ---`, `libasound` ausente) e o
+> launcher, que é do `Giochi app`.
 
 ## As três coisas que tornam esta placa diferente
 

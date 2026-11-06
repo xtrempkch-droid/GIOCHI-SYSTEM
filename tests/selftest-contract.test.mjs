@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -192,4 +192,83 @@ test("a proporção calculada bate com as resoluções reais dos aparelhos", () 
   assert.equal(razao("1280x720"), "1.78", "16:9");
   assert.equal(razao("720x1280"), "0.56", "X55 é retrato");
   assert.equal(razao("800x480"), "1.67");
+});
+
+// ── o gamepad do R35S é um nome diferente, não ausência de gamepad ────────
+//
+// Medido no aparelho em 06/11/2026: `r36s_Gamepad` registrado em `event1`,
+// dirigido pelo `rocknix-singleadc-joypad`, com EV_KEY + EV_ABS + EV_FF. E o
+// `giochi-selftest` dava **dois FAIL**: "sem gpio-keys-control" e "sem
+// adc-joystick". Ele procurava o nome do driver dos OUTROS aparelhos.
+//
+// É a mesma classe do §12.30 e §12.34 — FAIL falso é pior que teste nenhum,
+// porque ensina o operador a ignorar o bloco inteiro.
+
+test("a contagem de botões aceita os três nomes de gamepad, não só um", () => {
+  const sh = readFileSync(SELFTEST, "utf8");
+  const bloco = sh.slice(sh.indexOf("PAD_BUTTONS=0"), sh.indexOf("MAP_FILE="));
+  // Os três drivers desta árvore.
+  assert.match(bloco, /gpio-keys-control/, "X55/X35H usam gpio-keys");
+  assert.match(bloco, /adc-joystick/, "mainline usa adc-joystick");
+  assert.match(bloco, /\*Gamepad\*|Gamepad\),/, "R35S usa r36s_Gamepad");
+  // E a mensagem de falha não pode nomear um driver só.
+  assert.ok(
+    !/fail "sem gpio-keys-control/.test(sh),
+    "a mensagem de FAIL não pode acusar a ausência de UM driver específico",
+  );
+});
+
+test("a contagem pergunta a CONSEQUÊNCIA (bits), não o nome do nó", () => {
+  const sh = readFileSync(SELFTEST, "utf8");
+  const bloco = sh.slice(sh.indexOf("PAD_BUTTONS=0"), sh.indexOf("MAP_FILE="));
+  // capabilities/key e capabilities/abs são o que o driver realmente declara.
+  assert.match(bloco, /capabilities\/key/);
+  assert.match(bloco, /capabilities\/abs/);
+  assert.match(bloco, /count_bits/);
+});
+
+test("a lógica conta os bits do gamepad e ignora o nó de volume", () => {
+  // Prova em sysfs sintético: dois nós, um deles `gpio-keys-vol` com 1 bit.
+  // O selftest tem de escolher o de 16 e reportar o NOME de origem.
+  const tmp = mkdtempSync(path.join(tmpdir(), "giochi-pad-"));
+  try {
+    const mk = (nome, keyBits, absBits) => {
+      const d = path.join(tmp, "sys/class/input", `event${nome === "r36s_Gamepad" ? 1 : 0}`,
+        "device/capabilities");
+      mkdirSync(d, { recursive: true });
+      writeFileSync(path.join(d, "../name"), nome);
+      writeFileSync(path.join(d, "key"), `${keyBits}\n`);
+      if (absBits) writeFileSync(path.join(d, "abs"), `${absBits}\n`);
+    };
+    mk("r36s_Gamepad", "ffff0000000000000", "3003f0000000000");
+    mk("gpio-keys-vol", "40000000");
+
+    const sh = readFileSync(SELFTEST, "utf8");
+    const bloco = sh.slice(sh.indexOf("PAD_BUTTONS=0"), sh.indexOf("MAP_FILE="))
+      .replaceAll("/sys/class/input", path.join(tmp, "sys/class/input"));
+
+    const script = `
+count_bits() {
+    awk '{
+        s = $0; n = 0; tabela = "0123456789abcdef"
+        for (i = 1; i <= length(s); i++) {
+            c = substr(s, i, 1); v = index(tabela, c) - 1
+            if (v <= 0) continue
+            while (v > 0) { n += v % 2; v = int(v / 2) }
+        }
+        print n
+    }'
+}
+read_or() { cat "$1" 2>/dev/null | tr -d '\\0'; }
+${bloco}
+echo "$PAD_BUTTONS|$PAD_AXES|$PAD_ORIGEM"
+`;
+    const saida = execFileSync("sh", ["-c", script], { encoding: "utf8" }).trim();
+    const [botoes, eixos, origem] = saida.split("|");
+    assert.equal(botoes, "16", `botões: ${saida}`);
+    assert.equal(eixos, "8", `eixos: ${saida}`);
+    assert.equal(origem, "r36s_Gamepad", "tem de reportar o nome de origem");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 });
