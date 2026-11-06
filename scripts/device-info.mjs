@@ -90,6 +90,14 @@ switch (field) {
       console.log(path.join(device.directory, patchPath));
     }
     break;
+  case "bootloader":
+    // Vazio = esquema mainline do Buildroot (idbloader TPL+SPL + u-boot.itb).
+    // `rockchip-legacy` = as três peças do BootROM (idbloader + uboot.img +
+    // trust.img), necessário no RK3326. Ver docs, §13-A do AGENTS.md.
+    if (device.bootloader !== undefined) {
+      console.log(device.bootloader);
+    }
+    break;
   case "dtsPaths":
     for (const dtsPath of device.dtsPaths ?? []) {
       console.log(dtsPath);

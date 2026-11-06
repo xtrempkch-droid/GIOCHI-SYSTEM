@@ -30,5 +30,6 @@
   "docs": "README.md",
   "kernelPatches": [
     "patches/0001-giochi-system-r35s-dts-e-painel.patch"
-  ]
+  ],
+  "bootloader": "rockchip-legacy"
 }

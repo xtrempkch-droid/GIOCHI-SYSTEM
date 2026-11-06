@@ -315,6 +315,20 @@ export async function validateDevice(device) {
     errors.push(error.message);
   }
 
+  // bootloader: qual esquema de carregamento o SoC aceita.
+  //   ausente            → mainline do Buildroot (idbloader TPL+SPL + u-boot.itb)
+  //   "rockchip-legacy"  → três peças do BootROM (RK3326/PX30)
+  // Valor desconhecido é ERRO, não aviso: um nome errado faria o build gerar a
+  // imagem com o firmware padrão e o aparelho travar sem mensagem.
+  if (device.bootloader !== undefined) {
+    const permitidos = ["rockchip-legacy"];
+    if (!permitidos.includes(device.bootloader)) {
+      errors.push(
+        `bootloader "${device.bootloader}" desconhecido; use ${permitidos.join(" ou ")}.`,
+      );
+    }
+  }
+
   // dtsPaths: DTS/DTSI fora da árvore do kernel. Caminhos RELATIVOS à pasta do
   // aparelho, porque o build faz staging deles (§12.6: lista separada por
   // espaço) e usa o caminho preparado, não o do repositório.

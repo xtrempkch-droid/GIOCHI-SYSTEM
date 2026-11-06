@@ -103,3 +103,26 @@ test("o legacy está declarado nos artefatos do aparelho", () => {
     "sem declarar, a coleta do build não copia e a imagem sai com o firmware antigo",
   );
 });
+
+test("o build GERA o legacy — não é passo manual", () => {
+  // Antes disto o `u-boot-legacy.bin` era criado à mão, e um build do zero
+  // produzia a imagem com o firmware mainline: o aparelho travaria em 0x200000
+  // com o build inteiro verde. É a classe do §12.27 (arquivo que existe só
+  // enquanto ninguém limpa).
+  assert.equal(device.bootloader, "rockchip-legacy", "o aparelho tem de declarar");
+  const build = readFileSync(`${ROOT}scripts/build-device.sh`, "utf8");
+  assert.match(build, /bootloader/, "build-device.sh não lê o campo");
+  assert.match(build, /make-rk3326-bootloader\.sh/, "build-device.sh não chama o gerador");
+  // E a falha do gerador tem de ABORTAR: imagem sem firmware reconhecível não
+  // é imagem, é um cartão que não faz nada.
+  const trecho = build.slice(build.indexOf("make-rk3326-bootloader.sh"));
+  assert.match(trecho.slice(0, 600), /exit 1/, "falha do gerador tem de ser fatal");
+});
+
+test("bootloader desconhecido é ERRO no schema, não aviso", () => {
+  // Um nome errado faria o build gerar a imagem com o firmware padrão e o
+  // aparelho travar sem mensagem — falha silenciosa clássica.
+  const schema = readFileSync(`${ROOT}scripts/lib/devices.mjs`, "utf8");
+  assert.match(schema, /rockchip-legacy/);
+  assert.match(schema, /bootloader \"\$\{device.bootloader\}\" desconhecido/);
+});

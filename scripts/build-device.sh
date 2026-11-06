@@ -919,6 +919,29 @@ if [[ "$copied" -eq 0 ]]; then
   exit 1
 fi
 
+# Bootloader legacy da Rockchip (device.json → bootloader: "rockchip-legacy").
+#
+# Necessário nos SoCs em que o esquema mainline do Buildroot (idbloader TPL+SPL
+# + u-boot.itb FIT) não entrega o U-Boot ao hardware. Medido no RK3326
+# (06/11/2026): TPL, DDR e BL31 rodam e o U-Boot morre em 0x200000, console
+# mudo. O legacy usa as três peças separadas do BootROM.
+#
+# Gerar aqui, e não num passo manual, é o que impede a imagem sair com o
+# firmware errado depois de um build do zero. O `make-sd-image.sh` prefere
+# `u-boot-legacy.bin` quando ele existe.
+DEVICE_BOOTLOADER="$(node "$ROOT/scripts/device-info.mjs" "$DEVICE_ID" bootloader 2>/dev/null || true)"
+if [[ "$DEVICE_BOOTLOADER" == "rockchip-legacy" ]]; then
+  echo "Bootloader legacy da Rockchip (declarado pelo aparelho)..."
+  if bash "$ROOT/scripts/make-rk3326-bootloader.sh" "$WORK_DIR" "$OUT_DIR/u-boot-legacy.bin"; then
+    copied=$((copied + 1))
+  else
+    echo "ERRO: não foi possível gerar u-boot-legacy.bin." >&2
+    echo "O aparelho declara bootloader=rockchip-legacy, então a imagem de" >&2
+    echo "cartão sairia sem firmware que o BootROM reconheça." >&2
+    exit 1
+  fi
+fi
+
 cp -a "$BUILD_DIR/.config" "$OUT_DIR/buildroot.config"
 sed -i 's#^BR2_TARGET_GENERIC_ROOT_PASSWD=.*#BR2_TARGET_GENERIC_ROOT_PASSWD="__REDACTED__"#' "$OUT_DIR/buildroot.config"
 cp -a "$DEVICE_DIR/device.json" "$OUT_DIR/device.json"

@@ -297,6 +297,46 @@ Registro porque cada linha eliminou uma hipótese, e refazer custa uma noite.
 constante repetido é nível elétrico — a linha está sendo lida num estado fixo, e
 `0xED`/`0xFF` é o que um UART entrega com RX flutuando ou sem terra.
 
+### A mesma assinatura voltou em 06/11/2026 — e a solda não era o problema
+
+Depois da soldagem a linha funcionou por horas: lemos BL31, a cmdline do ROCKNIX,
+o painel, o gamepad, e puxamos 41 kB da config do kernel pelo fio. **A solda
+estava boa.**
+
+No mesmo dia, ao testar de novo, a captura devolveu:
+
+```text
+3521 bytes crus, 16 não-zero
+0xED × 8 repetido + zeros
+```
+
+O adaptador estava no barramento, `Device 024` (o mesmo de antes, **sem
+reenumerar**). Ou seja: nem porta ocupada, nem adaptador caído. A linha voltou ao
+estado de antes da solda.
+
+**O que muda entre as duas sessões: manuseio.** O cartão foi removido e
+reinserido duas vezes (para gravar e para testar), e o fio é curto. A conclusão
+prática é que este `0xED` reaparece por **tração no fio**, não por defeito da
+solda — e o diagnóstico com o adaptador no barramento é o mesmo de antes.
+
+Regra que fica: **antes de culpar o aparelho, olhar o padrão dos bytes.** Texto
+limpo = aparelho falando. `0xED`/`0xFF` repetido = o fio, quase sempre o GND.
+
+### Quando o serial não dá, a tela responde
+
+Vale registrar porque economiza uma noite: em placa de handheld, **a tela é um
+canal de diagnóstico independente do TTL**, e responde uma pergunta que o serial
+não responde quando a linha está ruim:
+
+| Tela | Serial | Leitura |
+| --- | --- | --- |
+| com imagem ou backlight aceso | mudo | bootou — o defeito é só o console |
+| **preta** | mudo | não chegou ao userspace; não diz onde, mas diz que não bootou |
+| preta | BL31 e silêncio em `0x200000` | o U-Boot morreu no salto |
+
+A diferença entre as duas últimas linhas é enorme e é a que decide onde investir:
+uma acusa o carregador, a outra acusa o kernel/rootfs.
+
 **Conclusão:** o problema está no **caminho elétrico entre o aparelho e o
 adaptador**, não em configuração. Fios soltos (jumpers, garras, pressão em
 pad) produzem exatamente esta assinatura: contato intermitente, ruído de um
