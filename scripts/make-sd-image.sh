@@ -105,7 +105,7 @@ elif [[ -f "$OUT_DIR/idbloader.img" && -f "$OUT_DIR/u-boot.itb" ]]; then
 else
   echo "ERRO: firmware do U-Boot ausente em $OUT_DIR." >&2
   echo "Esperado u-boot-rockchip.bin, ou idbloader.img + u-boot.itb." >&2
-  echo "Sem firmware o RK3566 não lê o cartão: ele busca em setores fixos." >&2
+  echo "Sem firmware o SoC não lê o cartão: ele busca em setores fixos." >&2
   exit 2
 fi
 
@@ -251,7 +251,7 @@ if ! KERNEL_CMDLINE="$(node "$ROOT/scripts/device-info.mjs" "$DEVICE_ID" cmdline
 fi
 echo "  cmdline: $KERNEL_CMDLINE"
 
-echo "Gravando firmware nos offsets do RK3566..."
+echo "Gravando firmware nos offsets do BootROM (setor 64)..."
 case "$FIRMWARE_MODE" in
   combined)
     # Contém os dois pedaços já posicionados a partir do setor 64.

@@ -5,7 +5,7 @@
   "description": "Console portátil Rockchip RK3326, tela 640x480. Device tree vindo do padrão ROCKNIX, que funciona em hardware real.",
   "arch": "arm64",
   "hostname": "giochi-system-r35s",
-  "buildrootDefconfig": "",
+  "buildrootDefconfig": "giochi_r35s_defconfig",
   "buildrootFragment": "buildroot.fragment",
   "rootfsOverlays": [
     "rootfs-overlay"
@@ -16,16 +16,13 @@
   "runner": "ubuntu-24.04",
   "timeoutMinutes": 300,
   "status": "draft",
-  "bootNotes": "SoC RK3326 (nao RK3566): sem NPU, Mali-G31, 1 GB de RAM. Medido no aparelho em 06/11/2026 pela console serial: painel 640x480 em card0-DSI-1, gamepad r36s_Gamepad (js0+event3), 981 MiB visiveis. Os dois drivers (rocknix-singleadc-joypad e o painel generic-dsi) sao GPL, estao vendorizados em kernel-modules/ e COMPILAM contra o nosso kernel 6.12. O DTS vendorizado tambem compila contra o 6.12. BLOQUEIO: o carregador de boot (idbloader/BL31/U-Boot do PX30) — o mainline testado deu tela preta no antecessor, entao a imagem de cartao ainda nao pode ser gerada.",
+  "bootNotes": "SoC RK3326 (nao RK3566): sem NPU, Mali-G31, 1 GB de RAM. Medido no aparelho em 06/11/2026 pela console serial: painel 640x480 em card0-DSI-1, gamepad r36s_Gamepad (js0+event3), 981 MiB visiveis. Os dois drivers (rocknix-singleadc-joypad e o painel generic-dsi) sao GPL, estao vendorizados em kernel-modules/ e COMPILAM contra o nosso kernel 6.12. O DTS vendorizado tambem compila (patch 0001). Carregador: U-Boot mainline 2024.10 (odroid-go2) + rkbin PX30 — a imagem e' geravel, mas NAO bootou em hardware ainda; o antecessor teve tela preta sem print no serial com mainline.",
   "kernelCmdline": {
     "console": "ttyS2",
     "baud": 1500000
   },
   "docs": "README.md",
-  "dtsPaths": [
-    "dts/src/rk3326-gameconsole-r3xs.dtsi",
-    "dts/src/rk3326-device-group-r36.dtsi",
-    "dts/generated/panel-panel4.dtsi",
-    "dts/generated/rk3326-gameconsole-r36s-giochi.dts"
+  "kernelPatches": [
+    "patches/0001-giochi-system-r35s-dts-e-painel.patch"
   ]
 }

@@ -387,7 +387,7 @@ echo "Mesclando configuração comum + device..."
 #   Kconfig file or fragment '/work/device/powkiddy' for 'linux' does not exist
 #
 # que não cita espaço nem aparelho. Mesma armadilha dos overlays.
-DTS_PATHS="${DTS_PATHS:-$(node "$REPO_ROOT/scripts/device-info.mjs" "$DEVICE_ID" dtsPaths 2>/dev/null || true)}"
+DTS_PATHS="${DTS_PATHS:-$(node "$ROOT/scripts/device-info.mjs" "$DEVICE_ID" dtsPaths 2>/dev/null || true)}"
 KERNEL_FRAGMENT="$DEVICE_DIR/linux.fragment"
 KERNEL_FRAGMENT_ARGS=()
 if [[ -f "$KERNEL_FRAGMENT" ]]; then

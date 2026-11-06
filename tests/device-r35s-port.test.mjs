@@ -97,12 +97,36 @@ test("a correção do joypad_input_g está declarada, não escondida", () => {
 
 // ── encanamento de DTS fora da árvore ───────────────────────
 
-test("o device.json declara dtsPaths relativos e todos existem", () => {
-  assert.ok(Array.isArray(device.dtsPaths) && device.dtsPaths.length > 0);
-  for (const relative of device.dtsPaths) {
-    assert.ok(!relative.startsWith("/"), `caminho absoluto em dtsPaths: ${relative}`);
-    assert.ok(existsSync(`${DEVICE}/${relative}`), `dtsPaths aponta para arquivo inexistente: ${relative}`);
+test("o DTS chega ao build por PATCH, não por dtsPaths", () => {
+  // Medido: `BR2_LINUX_KERNEL_CUSTOM_DTS_PATH` copia para
+  // arch/arm64/boot/dts/ — a RAIZ (linux/linux.mk linha 504) — e o Makefile de
+  // lá usa `subdir-y += rockchip`. O DTS faz `#include "...r3xs.dtsi"`, que vive
+  // em rockchip/, então compilar deu:
+  //   arm64/boot/dts/arm64/boot/dts/rk3326-gameconsole-r36s-giochi.dtb — sem regra
+  //
+  // Por isso este aparelho usa patch. O campo `dtsPaths` continua no schema
+  // para quem NÃO precise de include de irmão; aqui ele não pode aparecer.
+  assert.equal(device.dtsPaths, undefined, "r35s usa patch, não dtsPaths");
+  assert.ok(Array.isArray(device.kernelPatches) && device.kernelPatches.length > 0);
+
+  for (const relative of device.kernelPatches) {
+    assert.ok(!relative.startsWith("/"), `caminho absoluto: ${relative}`);
+    assert.ok(existsSync(`${DEVICE}/${relative}`), `patch inexistente: ${relative}`);
   }
+});
+
+test("o patch do DTS põe os arquivos em rockchip/ e registra o dtb", () => {
+  const patch = readFileSync(`${DEVICE}/${device.kernelPatches[0]}`, "utf8");
+  // Tem de ir para rockchip/, que é onde o Makefile da raiz procura.
+  assert.match(patch, /^\+\+\+ b\/arch\/arm64\/boot\/dts\/rockchip\//m);
+  // E a linha do Makefile tem de existir UMA vez: duas seriam erro de reload.
+  const linhas = patch.split("\n").filter((line) => /^\+dtb-\$.*gameconsole-r36s-giochi\.dtb$/.test(line));
+  assert.equal(linhas.length, 1, `linha do Makefile aparece ${linhas.length} vez(es)`);
+  // O dtsi VENDOR não entra: quem fornece rk3326.dtsi/px30.dtsi é o kernel 6.12.
+  assert.ok(
+    !patch.includes("+++ b/arch/arm64/boot/dts/rockchip/rk3326.dtsi"),
+    "rk3326.dtsi do vendor não deve sobrescrever o do mainline",
+  );
 });
 
 test("o DTS do R35S chega ao build: o painel entra pelo include gerado", () => {
@@ -145,9 +169,47 @@ test("o gerador reproduz o dtsi versionado", () => {
 
 // ── o bloqueio que resta está declarado ─────────────────────
 
-test("o device.json diz que a imagem ainda depende do carregador de boot", () => {
-  // Sem isto, alguém tenta `build-device.sh r35s`, recebe erro de defconfig
-  // vazio e conclui que o problema é o DTS — que já funciona.
-  assert.match(device.bootNotes, /idbloader|U-Boot|carregador/i);
-  assert.equal(device.buildrootDefconfig, "", "defconfig vazio é intencional: falta o loader");
+test("o device.json diz que a imagem é gerável mas NÃO bootou", () => {
+  // Correção de uma afirmação errada: eu havia escrito que a imagem não podia
+  // ser gerada por falta de loader. Existem rkbin PX30 (DDR + BL31) e U-Boot
+  // odroid-go2. O que falta é a PROVA em hardware. O bootNotes tem de dizer as
+  // duas coisas, senão alguém lê "gerável" como "funciona".
+  assert.match(device.bootNotes, /NAO bootou|não bootou|nao bootou/i);
+  assert.match(device.bootNotes, /odroid-go2|U-Boot/i);
+  assert.equal(
+    device.buildrootDefconfig,
+    "giochi_r35s_defconfig",
+    "o defconfig existe; o bloqueio é a prova de boot, não a configuração",
+  );
+});
+
+test("o defconfig liga o que o hardware medido exige", () => {
+  const defconfig = readFileSync(`${DEVICE}/defconfig`, "utf8");
+  // SoC errado manda o build para o lugar errado, e o sintoma é não sair do Maskrom.
+  assert.match(defconfig, /^BR2_cortex_a35=y$/m, "RK3326 é Cortex-A35, não A55");
+  assert.ok(!/^BR2_cortex_a55=y$/m.test(defconfig), "A55 é RK3566 — aparelho trocado");
+  // Blobs do PX30, não do RK3566.
+  assert.match(defconfig, /^BR2_PACKAGE_ROCKCHIP_RKBIN_TPL_FILENAME="bin\/rk33\/px30_ddr_333MHz/m);
+  assert.match(defconfig, /^BR2_PACKAGE_ROCKCHIP_RKBIN_BL31_FILENAME="bin\/rk33\/px30_bl31/m);
+  assert.ok(!/rk35\//.test(defconfig), "caminho rk35/ é do RK3566");
+  // U-Boot do RK3326.
+  assert.match(defconfig, /^BR2_TARGET_UBOOT_BOARD_DEFCONFIG="odroid-go2"$/m);
+  // DTS pelo nome que o patch registra.
+  assert.match(defconfig, /^BR2_LINUX_KERNEL_INTREE_DTS_NAME="rockchip\/rk3326-gameconsole-r36s-giochi"$/m);
+});
+
+test("os dois drivers do aparelho são declarados como módulos", () => {
+  // Eles não têm símbolo no Kconfig do kernel (são out-of-tree, medido: zero
+  // `ROCKNIX` na config do vendor). Então o linux.fragment NÃO pode prometer
+  // algo que ele não entrega — quem os constrói é um pacote, e isso ainda não
+  // existe. O teste garante que ninguém "resolva" o problema inventando símbolo.
+  const fragment = readFileSync(`${DEVICE}/linux.fragment`, "utf8");
+  assert.ok(
+    !/^CONFIG_ROCKNIX_/m.test(fragment),
+    "não existe CONFIG_ROCKNIX_* no kernel — símbolo inventado seria descartado em silêncio",
+  );
+  // O que o fragmento PODE e DEVE garantir é o que o DTS referencia:
+  // `saradc` para o multiplexador e `JOYSTICK_ADC` para o nó adc-joystick.
+  assert.match(fragment, /^CONFIG_JOYSTICK_ADC=y$/m);
+  assert.match(fragment, /^CONFIG_ROCKCHIP_SARADC=y$/m);
 });

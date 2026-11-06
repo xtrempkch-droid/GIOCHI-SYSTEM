@@ -349,21 +349,64 @@ node scripts/panel-to-dtsi.mjs device/r35s/panels/r36s-panel4.txt \
   --base device/r35s/dts/src/rk3326-gameconsole-r36s.dts
 ```
 
-### O que ainda bloqueia a imagem
+### O carregador de boot: por que a imagem pode ser gerada
 
-**O carregador de boot.** RK3326 não é RK3566: precisa de DDR init, BL31 do PX30 e
-U-Boot — e o U-Boot mainline testado no antecessor deu **tela preta sem print no
-serial**. Não temos fonte confiável do loader do fabricante.
+**Correção de uma afirmação errada deste README.** Eu havia escrito que a imagem
+"não podia ser gerada" por falta de loader. Estava errado, e a verificação é
+trivial — eu não tinha feito:
 
-Por isso `buildrootDefconfig` está **vazio de propósito**. Rodar
-`build-device.sh r35s` hoje falha no defconfig, e isso é correto: melhor falhar
-ali do que gerar imagem que não boota.
+| Peça | Existe? | Onde |
+| --- | --- | --- |
+| DDR init do PX30 | **sim** | `rkbin: bin/rk33/px30_ddr_333MHz_v2.08.bin` |
+| BL31 do PX30 | **sim** | `rkbin: bin/rk33/px30_bl31_v1.33.elf` |
+| U-Boot para RK3326 | **sim** | `u-boot: configs/odroid-go2_defconfig` |
 
-Alternativa medida que dispensa o loader: o cartão que está no aparelho **já
-boota**. Um teste de kernel sem regravar o carregador é trocar `KERNEL` + `DTB` na
-partição FAT e apontar o `extlinux.conf` (que já tem `LINUX /KERNEL`,
-`FDT /r36s.dtb` e `FDTOVERLAYS`) para os nossos. Ver
-[`extracted/README.md`](extracted/README.md) para o layout.
+O `odroid-go2_defconfig` tem `CONFIG_ROCKCHIP_PX30=y`, `CONFIG_TPL_RAM=y` e
+`CONFIG_ROCKCHIP_SDRAM_COMMON=y` — a pilha TPL/SPL completa. E o mais conveniente:
+`CONFIG_DEBUG_UART_BASE=0xFF160000`, que é **exatamente a UART do R35S**. O
+console de debug do U-Boot aparece sem ajuste nenhum.
+
+Os offsets do `make-sd-image.sh` também servem: o BootROM do RK3326 e o do RK3566
+leem o idbloader no **setor 64** e o U-Boot em **16384**.
+
+**O que continua não provado:** que essa combinação boota. O antecessor testou
+U-Boot mainline nesta placa e obteve tela preta sem print no serial. Isso não quer
+dizer que o mainline não funciona — quer dizer que *aquela* configuração não
+funcionou, e o motivo nunca foi isolado.
+
+**Plano de boot, na ordem em que os sintomas separam as causas:**
+
+| O que acontece | Leitura |
+| --- | --- |
+| Serial mostra U-Boot | o loader funciona; qualquer problema adiante é kernel/rootfs |
+| Serial **mudo**, tela preta | o TPL/DDR não subiu — é o caso do antecessor |
+| Serial fala, mas para no kernel | DTB ou rootfs; aí o `earlycon` entra |
+
+Se o TPL não subir, o próximo passo é extrair os primeiros setores do cartão que
+**já boota** neste aparelho (`dd` dos primeiros ~16 MiB) e usar o loader do
+fabricante. Ver [`extracted/README.md`](extracted/README.md) para o layout.
+
+### Dois caminhos de DTS, e por que ficou o patch
+
+`BR2_LINUX_KERNEL_CUSTOM_DTS_PATH` parecia o certo: copia DTS sem manter patch.
+**Não serve para esta placa**, e a razão está no fonte do Buildroot
+(`linux/linux.mk`, linha 504): ele copia os arquivos para
+`arch/arm64/boot/dts/` — a **raiz** — e só gera `.dtb` para `.dts` listados ali.
+
+O problema: o Makefile da raiz usa `subdir-y += rockchip`, e o DTS do aparelho
+faz `#include "rk3326-gameconsole-r3xs.dtsi"`, que vive em `rockchip/`. Tentar
+compilar deu:
+
+```text
+arm64/boot/dts/arm64/boot/dts/rk3326-gameconsole-r36s-giochi.dtb  — sem regra
+```
+
+Então o caminho é o **patch** `patches/0001-giochi-system-r35s-dts-e-painel.patch`
+(988 linhas), que põe os arquivos em `rockchip/` e acrescenta uma linha no
+Makefile. Verificado do zero: `patch -p1` limpo e `.dtb` de 54 469 B gerado.
+
+O campo `dtsPaths` do `device.json` continua existindo e testado — só não é o
+caminho deste aparelho.
 
 ## Estado
 
@@ -390,10 +433,11 @@ partição FAT e apontar o `extlinux.conf` (que já tem `LINUX /KERNEL`,
 
 **Continua faltando:**
 
-- **O carregador de boot** — e é o único bloqueio real. RK3326 precisa de DDR
-  init, BL31 do PX30 e U-Boot; o mainline testado no antecessor deu tela preta
-  sem print no serial. Por isso `buildrootDefconfig` está vazio de propósito.
-- **`genimage`** e validação de build, que dependem do item acima.
+- **O boot em hardware** — a imagem é gerável (U-Boot mainline `odroid-go2` +
+  rkbin PX30), mas **não bootou ainda**. O antecessor teve tela preta com serial
+  mudo no mainline, e a causa nunca foi isolada.
+- **`genimage`** dentro do Buildroot, substituindo `make-sd-image.sh` como etapa
+  externa (pendência do projeto inteiro, não só desta placa).
 - **Os cinco painéis** — o `panel4` é a referência; uma unidade com `panel1`/
   `panel2`/`panel3` precisa de outro `.dtsi` gerado (é um comando).
 

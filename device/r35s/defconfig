@@ -1,0 +1,119 @@
+# ============================================================
+# R35S / R36S — defconfig BASE do Buildroot
+# ============================================================
+# Copiado para `buildroot/configs/<buildrootDefconfig>` pelo build-device.sh
+# antes de `make <defconfig>`. O `config/common.fragment`, o
+# `buildroot.fragment` do aparelho e o `linux.fragment` são mesclados depois.
+#
+# ## Diferença de SoC — leia antes de copiar daqui
+#
+# RK3326 (família PX30, Cortex-A35) NÃO é RK3566 (Cortex-A55). Três coisas mudam
+# e as três quebram o boot se trocadas:
+#
+#   CPU          cortex_a35        (não a55)
+#   TPL (DDR)    px30_ddr_333MHz   (não rk3566_ddr_1056MHz)
+#   BL31         px30_bl31         (não rk3568_bl31)
+#
+# O U-Boot é `odroid-go2`: é o alvo mainline de RK3326, e o `CONFIG_DEBUG_UART_BASE`
+# dele já é **0xFF160000**, que é exatamente a UART do R35S — o console de debug
+# aparece sem ajuste.
+#
+# ## Estado: a imagem AINDA NÃO BOOTOU
+#
+# O carregador é a peça não validada. O antecessor testou U-Boot mainline nesta
+# placa e obteve tela preta **sem print no serial**, e o único loader que ligou
+# foi o do fabricante. A imagem gerada daqui usa U-Boot mainline 2024.10 com os
+# blobs oficiais do rkbin para PX30 — é a combinação correta no papel, e o teste
+# no aparelho é o que decide.
+#
+# Se der tela preta mantendo o serial mudo, o próximo passo é o loader do vendor
+# (extrair os primeiros setores do cartão que boota). Se o serial falar, o
+# problema é display/painel, e aí o DTB e o `panel_description` entram na conta.
+
+BR2_aarch64=y
+BR2_cortex_a35=y
+BR2_TOOLCHAIN_BUILDROOT_CXX=y
+BR2_TARGET_OPTIMIZATION="-O3 -pipe"
+
+# ── rootfs ──────────────────────────────────────────────────
+# 1024M é o mesmo do X55. A raiz do ROCKNIX cabe em 1,24 GiB porque é squashfs
+# comprimido; ext4 precisa de mais folga, então o valor sobe no `EXT2_SIZE` se o
+# build estourar (o prepare-config já ajusta quando o fragmento pede).
+BR2_TARGET_ROOTFS_EXT2=y
+BR2_TARGET_ROOTFS_EXT2_4=y
+BR2_TARGET_ROOTFS_EXT2_SIZE="1024M"
+
+# ── kernel ──────────────────────────────────────────────────
+BR2_LINUX_KERNEL=y
+BR2_LINUX_KERNEL_CUSTOM_VERSION=y
+BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE="6.12"
+BR2_LINUX_KERNEL_USE_ARCH_DEFAULT_CONFIG=y
+BR2_LINUX_KERNEL_IMAGE=y
+BR2_LINUX_KERNEL_DTS_SUPPORT=y
+# O DTS vem pelo patch 0001 (device/r35s/patches/), que o coloca em
+# arch/arm64/boot/dts/rockchip/ e acrescenta a linha no Makefile. O nome aqui é
+# o do .dtb gerado; o Buildroot acha o .dts porque o patch já o colocou na
+# árvore (não use BR2_LINUX_KERNEL_CUSTOM_DTS_PATH: ele copia para
+# arch/arm64/boot/dts/ — a RAIZ — e o Makefile de lá não tem alvo para compilar).
+BR2_LINUX_KERNEL_INTREE_DTS_NAME="rockchip/rk3326-gameconsole-r36s-giochi"
+
+# ── U-Boot + rkbin: o carregador ────────────────────────────
+BR2_TARGET_UBOOT=y
+BR2_TARGET_UBOOT_BUILD_SYSTEM_KCONFIG=y
+BR2_TARGET_UBOOT_CUSTOM_VERSION=y
+BR2_TARGET_UBOOT_CUSTOM_VERSION_VALUE="2024.10"
+BR2_TARGET_UBOOT_BOARD_DEFCONFIG="odroid-go2"
+# SEM `BR2_TARGET_UBOOT_FORMAT_*` — de propósito, e isto foi medido.
+#
+# Este board usa **binman** (`CONFIG_BINMAN=y` no defconfig do U-Boot). O Makefile
+# do U-Boot só tem a regra de `u-boot.itb` quando `CONFIG_USE_SPL_FIT_GENERATOR`
+# ou `CONFIG_SPL_FIT_SOURCE` existem; com binman, quem monta a imagem é o próprio
+# binman no alvo padrão (`all: .binman_stamp`). Pedir `make u-boot.itb` então dá:
+#
+#   make[2]: *** Sem regra para processar o alvo 'u-boot.itb'. Pare.
+#
+# O Buildroot já instala `u-boot-rockchip.bin` sozinho via
+# UBOOT_INSTALL_UBOOT_ROCKCHIP_BIN (hook do rkbin). É o mesmo padrão do
+# `rock5b_defconfig` oficial, que também não seleciona formato nenhum.
+BR2_TARGET_UBOOT_NEEDS_PYTHON3=y
+BR2_TARGET_UBOOT_NEEDS_PYLIBFDT=y
+BR2_TARGET_UBOOT_NEEDS_OPENSSL=y
+BR2_TARGET_UBOOT_NEEDS_PYELFTOOLS=y
+BR2_TARGET_UBOOT_NEEDS_UTIL_LINUX=y
+BR2_TARGET_UBOOT_NEEDS_GNUTLS=y
+BR2_TARGET_UBOOT_NEEDS_ROCKCHIP_RKBIN=y
+# O BootROM do RK3326 lê do setor 64 — mesmo offset do RK3566. O
+# `u-boot-rockchip.bin` já vem com idbloader + u-boot.itb concatenados, que é o
+# layout que o BootROM espera a partir do setor 64.
+BR2_PACKAGE_ROCKCHIP_RKBIN=y
+BR2_PACKAGE_ROCKCHIP_RKBIN_TPL_FILENAME="bin/rk33/px30_ddr_333MHz_v2.08.bin"
+BR2_PACKAGE_ROCKCHIP_RKBIN_BL31_FILENAME="bin/rk33/px30_bl31_v1.33.elf"
+
+# ── pilha gráfica ───────────────────────────────────────────
+# Mesma do X55: Mali-G31 via panfrost. GLES 3.1, sem geometry shader — ver
+# docs/gpu-drivers.md.
+BR2_PACKAGE_MESA3D=y
+BR2_PACKAGE_MESA3D_GALLIUM_DRIVER_PANFROST=y
+BR2_PACKAGE_MESA3D_GALLIUM_DRIVER_SWRAST=y
+BR2_PACKAGE_MESA3D_OPENGL_ES=y
+BR2_PACKAGE_MESA3D_OPENGL_EGL=y
+BR2_PACKAGE_LIBDRM=y
+BR2_PACKAGE_SDL2=y
+BR2_PACKAGE_SDL2_OPENGLES=y
+BR2_PACKAGE_SDL2_KMSDRM=y
+BR2_PACKAGE_SDL2_IMAGE=y
+BR2_PACKAGE_SDL2_TTF=y
+# Harfbuzz NÃO vem de graça com SDL2_TTF: o .mk só passa --enable-harfbuzz
+# quando este símbolo existe por conta própria (AGENTS §11-A). Sem ele o texto
+# latino sai legível e o de script complexo sai com shaping errado — sem erro.
+BR2_PACKAGE_HARFBUZZ=y
+BR2_PACKAGE_DEJAVU=y
+BR2_PACKAGE_DEJAVU_SANS=y
+
+# ── diagnóstico ─────────────────────────────────────────────
+# Sem rádio onboard e com `dwc2` nascendo como host, o console serial é o ÚNICO
+# canal. `evtest` é o que confirma o mapeamento dos botões neste aparelho — o
+# `buttons.map` veio do DTB e nunca foi validado contra o plástico.
+BR2_PACKAGE_EVTEST=y
+BR2_PACKAGE_DOSFSTOOLS=y
+BR2_PACKAGE_E2FSPROGS=y

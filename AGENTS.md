@@ -265,7 +265,7 @@ Giochi system/
 │   │   ├── patches/0001-…-dts.patch   # DTS que HERDA o da X55
 │   │   ├── patches/0002-…-st7703.patch # painel no driver mainline
 │   │   └── rootfs-overlay/etc/giochi/boot-log  # liga o S96bootlog
-│   ├── r35s/                          # RK3326 — draft, com dts/*.dtb real
+│   ├── r35s/                          # RK3326 — extraído do aparelho; ver §13-A
 │   │   └── dts/rk3326-gameconsole-r36s.dtb
 │   ├── steamdeck/                     # x86_64 — draft
 │   ├── generic-x64/                   # x86_64 — draft, PC comum com UEFI
@@ -1620,7 +1620,7 @@ quatro que fecham e `false` no único que não fecha.
 | `powkiddy-x55` | `powkiddy x55/` | RK3566 | arm64 | draft | **boota com tela, áudio, Wi-Fi, BT e 16 botões + 4 eixos**; falta o launcher (do `Giochi app`) |
 | `powkiddy-x35s` | `powkiddy x35s/` | **RK3566** | arm64 | draft | DTS (compartilha com o X35H) e build |
 | `powkiddy-x35h` | `powkiddy x35h/` | **RK3566** | arm64 | draft | **boota com tela 640x480, `usb0` e SSH**; imagem de 04/11 já tem o `respawn`. Falta o launcher, o teste A/B de cartão e os eixos analógicos |
-| `r35s` | `r35s/` | RK3326 | arm64 | draft | pipeline RK3326 (BL31/DDR/U-Boot), joypad fora da árvore. **Console serial medido** (§13-A) |
+| `r35s` | `r35s/` | RK3326 | arm64 | draft | **imagem é gerável** (U-Boot `odroid-go2` + rkbin PX30); **não bootou em hardware**. DTS, drivers e fragmento **compilam no 6.12**. Console medido (§13-A) |
 | `steamdeck` | `steamdeck/` | x86_64 | x86_64 | draft | kernel, firmware, áudio, Wi-Fi, controle |
 | `generic-x64` | `generic-x64/` | x86_64 | x86_64 | draft | **nunca compilado**; `pc_x86_64_efi_defconfig` declarado para permitir dispatch com `allow_draft` |
 
@@ -1722,6 +1722,45 @@ O material tem valor mesmo com driver diferente: nós usamos mainline (`hx8394` 
 X55, `st7703` na X35H), e o caro de obter não é o driver, são as **sequências de
 inicialização** — 155 a 188 comandos DCS por painel, agora em texto portável.
 
+### O carregador: gerável, não provado
+
+Uma sessão antes eu escrevi que a imagem "não podia ser gerada" por falta de
+loader. **Estava errado e não tinha verificado.** Todos os componentes existem:
+
+| Peça | Onde |
+| --- | --- |
+| DDR init PX30 | `rkbin: bin/rk33/px30_ddr_333MHz_v2.08.bin` (commit pinado do 2024.02) |
+| BL31 PX30 | `rkbin: bin/rk33/px30_bl31_v1.33.elf` |
+| U-Boot RK3326 | `u-boot: configs/odroid-go2_defconfig` |
+
+`odroid-go2_defconfig` traz `CONFIG_ROCKCHIP_PX30=y`, `CONFIG_TPL_RAM=y` e
+`CONFIG_ROCKCHIP_SDRAM_COMMON=y` — pilha TPL/SPL completa — e, de graça,
+`CONFIG_DEBUG_UART_BASE=0xFF160000`, que é **a UART do R35S**. Os offsets do
+`make-sd-image.sh` também servem: BootROM do RK3326 e do RK3566 leem o idbloader
+no setor 64.
+
+O que continua **não provado** é que boote: o antecessor teve tela preta com
+serial mudo no mainline e nunca isolou a causa. A ordem de diagnóstico está no
+README do aparelho (serial fala ⇒ loader ok; serial mudo ⇒ TPL/DDR).
+
+### `CUSTOM_DTS_PATH` não serve para esta placa
+
+`BR2_LINUX_KERNEL_CUSTOM_DTS_PATH` copia os DTS para `arch/arm64/boot/dts/` — a
+**raiz** (`linux/linux.mk` linha 504) — e o Makefile de lá usa `subdir-y +=
+rockchip`. O DTS do R35S faz `#include "rk3326-gameconsole-r3xs.dtsi"`, que vive
+em `rockchip/`, então compilar deu:
+
+```text
+arm64/boot/dts/arm64/boot/dts/rk3326-gameconsole-r36s-giochi.dtb — sem regra
+```
+
+O caminho que funciona é **patch** (`patches/0001-giochi-system-r35s-dts-e-painel.patch`,
+988 linhas), que põe os arquivos em `rockchip/` e acrescenta uma linha no
+Makefile. Verificado do zero: `patch -p1` limpo, `.dtb` de 54 469 B.
+
+**O campo `dtsPaths` continua no schema** (validado e testado) porque serve para
+aparelho cujo DTS não precise de `#include` de irmão. Só não é o caminho deste.
+
 **Pendência sem resposta:** `uboot.hwid_adc` desta unidade reporta **`r33s`**,
 divergindo do `compatible` (`r35s`/`r36s`) e do `model` (R36S). Não se sabe se é
 a tabela do U-Boot ou reaproveitamento. Enquanto não estiver entendido, **não**
@@ -1821,9 +1860,10 @@ tem precedência histórica e a divergência precisa ser resolvida explicitament
   eixos; X35H: tela 640x480, `usb0` e SSH). Os dois continuam `draft` porque
   `ready` exige a interface, que é do `Giochi app`.
 - X35S e Steam Deck nunca bootaram; X35S nem tem defconfig.
-- **O R35S boota, mas com o firmware de fábrica (ROCKNIX 7.1.2), não com o
-  nosso** — não há defconfig nem pipeline RK3326. A serial foi medida (§13-A) e o
-  console está declarado; o que falta é o loader do PX30 e o joypad portado.
+- **O R35S boota com o firmware de fábrica (ROCKNIX 7.1.2), não com o nosso.** Já
+  tem defconfig, DTS e drivers que compilam no 6.12, e a imagem é gerável — mas
+  o **loader não está provado em hardware** (§13-A). X35S e Steam Deck nem
+  defconfig têm.
 - O build completo do `qemu-aarch64` passou no CI (run #15). O build local do X55
   passou em 04/11, mas **nunca no CI** — o dispatch do X55 ainda não foi reenviado.
 - `bash -n` prova sintaxe, não comportamento; o `sh` local não é busybox ash.

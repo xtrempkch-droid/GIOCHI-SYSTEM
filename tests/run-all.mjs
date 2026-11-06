@@ -34,3 +34,4 @@ import "./dsi-panel.test.mjs";
 import "./gles-probe-py.test.mjs";
 import "./gpu-drivers.test.mjs";
 import "./device-r35s-port.test.mjs";
+import "./build-device-vars.test.mjs";
