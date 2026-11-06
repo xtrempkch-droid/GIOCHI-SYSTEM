@@ -28,6 +28,7 @@ test("as três ferramentas existem e o Dockerfile oficial as copia", async () =>
     "serial-listen.py",
     "serial-watch.py",
     "serial-loopback.py",
+    "serial-push.py",
   ]) {
     assert.ok(le(nome).length > 500, `${nome} está vazio?`);
   }
@@ -41,8 +42,9 @@ test("as três ferramentas existem e o Dockerfile oficial as copia", async () =>
     "serial-listen.py",
     "serial-watch.py",
     "serial-loopback.py",
+    "serial-push.py",
   ]) {
-    assert.match(dockerfile, new RegExp(nome.replace(/\./g, "\\.")));
+    assert.match(dockerfile, new RegExp(nome.replace(/\./g, "\\.")), `${nome} fora do COPY`);
   }
 });
 

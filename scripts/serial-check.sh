@@ -43,7 +43,7 @@ if ((BUILD)) || ! docker image inspect "$IMG" >/dev/null 2>&1; then
   # exige o nome `Dockerfile` no contexto, e o deste repositório chama
   # `serial.Dockerfile` para não conflitar com o builder.
   TMP="$(mktemp -d)"
-  cp "$(dirname "${BASH_SOURCE[0]}")/../docker"/{serial-log.py,uboot-serial.py,serial-boot.py,serial-interrupt.py,ymodem-send.py,baud-scan.py,serial-listen.py,serial-watch.py,serial-loopback.py} "$TMP/"
+  cp "$(dirname "${BASH_SOURCE[0]}")/../docker"/{serial-log.py,uboot-serial.py,serial-boot.py,serial-interrupt.py,ymodem-send.py,baud-scan.py,serial-listen.py,serial-watch.py,serial-loopback.py,serial-push.py} "$TMP/"
   cp "$(dirname "${BASH_SOURCE[0]}")/../docker/serial.Dockerfile" "$TMP/Dockerfile"
   sed -i 's#serial-loopback.py##' "$TMP/Dockerfile"
   sed -i 's#serial-watch.py #serial-watch.py serial-loopback.py #' "$TMP/Dockerfile"
