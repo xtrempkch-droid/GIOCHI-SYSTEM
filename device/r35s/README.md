@@ -477,6 +477,68 @@ A ordem de leitura do sintoma:
 | **nada**, tela preta | TPL/DDR não subiu — é o que o antecessor viu no mainline |
 | U-Boot, para no kernel | DTB ou rootfs; `earlycon` entra aqui |
 
+## O boot: o caminho mainline trava, o legacy é o provável
+
+**Medido no aparelho em 06/11/2026.** Primeiro boot com a nossa imagem:
+
+```text
+NOTICE:  BL31: v2.3():v2.3-530-g0152b20d0
+NOTICE:  BL31: Built : 17:00:22, Feb  2 2023
+INFO:    ARM GICv2 driver initialized
+INFO:    BL31: Preparing for EL3 exit to normal world
+INFO:    Entry point address = 0x200000
+INFO:    SPSR = 0x3c9
+```
+
+…e silêncio. Nada a 1500000, nada a 115200, com Enter nas duas.
+
+Então **TPL, DDR init e BL31 funcionam** — o U-Boot mainline do RK3326 *carrega*
+nesta placa, ao contrário do que o registro do antecessor sugeria. Ele morre
+depois, ao saltar para `0x200000`.
+
+> As três sequências de BL31 na captura **não eram loop de reset**: eram um boot
+> e dois reinícios manuais. Vale registrar porque "loop" e "trava parado" pedem
+> investigações opostas — eu quase fui pelo lado errado.
+
+### Duas hipóteses testadas, uma descartada
+
+**Descartada: "os blobs errados".** Eu tinha usado `px30_bl31_v1.33.elf` e
+`px30_ddr_333MHz_v2.08.bin`; a ROCKNIX usa `rk3326_*`. Parecia a causa até eu
+comparar os arquivos:
+
+```text
+px30_bl31_v1.33.elf    b244747c591aea783d92fb3fbb1dc1f2
+rk3326_bl31_v1.33.elf  b244747c591aea783d92fb3fbb1dc1f2   ← byte-idêntico
+px30_ddr_333MHz.bin    5e6301cb27584c4e705678beca549b70
+rk3326_ddr_333MHz.bin  5e6301cb27584c4e705678beca549b70   ← byte-idêntico
+```
+
+A Rockchip publica o mesmo binário com dois nomes. **Não era isso.**
+
+**Provável: o caminho de boot.** O Buildroot produz o esquema mainline
+(`idbloader.img` = TPL+SPL, `u-boot.itb` = FIT com BL31). A ROCKNIX usa o
+**legacy** da Rockchip, com três peças separadas:
+
+```text
+idbloader.img   mkimage -T rksd -d <DDR>  +  cat <miniloader> >>
+uboot.img       loaderimage --pack --uboot u-boot-dtb.bin 0x00200000
+trust.img       trust_merger, BL31 em 0x00010000
+uboot.bin       os três nos setores 0 / 16320 / 24512
+```
+
+Os offsets **16320** e **24512** não são redondos: somados aos 64 setores do
+início do cartão dão 16384 e 24576, que é onde o BootROM do RK3326 procura.
+
+Receita reproduzida em
+[`scripts/make-rk3326-bootloader.sh`](../../scripts/make-rk3326-bootloader.sh),
+que confere as assinaturas (`LOADER` no 16320, `BL3X` no 24512) porque tela preta
+não diz qual peça faltou. O `make-sd-image.sh` passou a **preferir**
+`u-boot-legacy.bin` quando ele existe.
+
+**Ainda não testado:** que este caminho boote de fato. É o mesmo que a ROCKNIX
+usa nesta placa, mas o U-Boot é o nosso (2024.10) e não o deles (2025.10 com
+patches; o `rk3326-handheld_defconfig` deles **não existe no upstream**).
+
 ## Estado
 
 **Confirmado no aparelho (06/11/2026):**

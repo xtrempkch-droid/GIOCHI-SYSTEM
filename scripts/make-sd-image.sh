@@ -97,7 +97,16 @@ done
 # em 8355840 bytes = 16320 setores), feito para ser escrito no setor 64 — os
 # 64 setores de deslocamento põem o FIT exatamente no setor 16384. Medido nos
 # artefatos reais deste build.
-if [[ -f "$OUT_DIR/u-boot-rockchip.bin" ]]; then
+# Legacy da Rockchip tem PRECEDÊNCIA quando existe. Medido no R35S
+# (06/11/2026): o caminho mainline (u-boot-rockchip.bin = idbloader + u-boot.itb)
+# executa TPL, DDR e BL31 e **trava ao saltar para o U-Boot em 0x200000**, sem
+# nada no console. O caminho legacy (idbloader + uboot.img + trust.img) é o que a
+# ROCKNIX usa nesta placa e o que o BootROM espera.
+# Gerado por scripts/make-rk3326-bootloader.sh.
+if [[ -f "$OUT_DIR/u-boot-legacy.bin" ]]; then
+  FIRMWARE_MODE="combined"
+  FIRMWARE_FILE="$OUT_DIR/u-boot-legacy.bin"
+elif [[ -f "$OUT_DIR/u-boot-rockchip.bin" ]]; then
   FIRMWARE_MODE="combined"
   FIRMWARE_FILE="$OUT_DIR/u-boot-rockchip.bin"
 elif [[ -f "$OUT_DIR/idbloader.img" && -f "$OUT_DIR/u-boot.itb" ]]; then
@@ -256,7 +265,7 @@ case "$FIRMWARE_MODE" in
   combined)
     # Contém os dois pedaços já posicionados a partir do setor 64.
     dd if="$FIRMWARE_FILE" of="$IMAGE" bs=512 seek=64 conv=notrunc status=none
-    echo "  firmware: u-boot-rockchip.bin no setor 64 (idbloader + u-boot.itb)"
+    echo "  firmware: $(basename "$FIRMWARE_FILE") no setor 64"
     ;;
   split)
     dd if="$OUT_DIR/idbloader.img" of="$IMAGE" bs=512 seek=64 conv=notrunc status=none

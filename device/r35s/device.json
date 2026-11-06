@@ -11,6 +11,7 @@
     "rootfs-overlay"
   ],
   "artifacts": [
+    "u-boot-legacy.bin",
     "Image",
     "rootfs.ext4",
     "rk3326-gameconsole-r36s-giochi.dtb",
