@@ -1566,14 +1566,54 @@ pergunta que não é a que se fez.
 
 Resultado medido no X35H: o bloco saía `[SKIP]` justamente no item que importa.
 
-Decisão: não instalar binutils. O selftest usa `readelf` **quando existe** e cai
-para `grep -aq 'libharfbuzz\.so'` no binário. As duas provas não valem o mesmo, e
-o texto do `PASS` diz qual foi usada:
+Decisão: não instalar binutils. Melhor que `grep`: o **loader dinâmico**, que já
+está em toda imagem dinâmica, responde a mesma pergunta.
+
+```sh
+/lib/ld-linux-aarch64.so.1 --list /usr/lib/libSDL2_ttf-2.0.so.0
+```
+
+Isso imprime as dependências que o loader **resolve** — o mesmo conjunto que
+`readelf -d` mostra como `NEEDED`, mais `linux-vdso.so.1` e o próprio loader.
+Conferido no host contra `libpng16.so.16`: `--list` deu `libz`/`libm`/`libc`,
+idêntico ao `readelf -d`. Zero pacote novo.
+
+Três provas, e o texto do `PASS` diz qual foi usada:
 
 | Prova | O que garante |
 | --- | --- |
 | `readelf -d` → `NEEDED` | o ligador exigiu a biblioteca |
+| `ld.so --list` → resolve | o loader a resolve **agora**; pega também a que é pedida e não está instalada |
 | `grep -a` → soname no `.dynstr` | o nome está lá; na prática equivale a `NEEDED`, mas não distingue um `dlopen()` opcional (que o SDL2_ttf não faz) |
+
+#### A armadilha dentro da correção: `--list` não escreve nada quando falta dependência
+
+Forjando um ELF com `NEEDED` trocado para `libqqq.so` (CUIDADO: só em `/tmp`):
+
+```text
+$ ld.so --list /tmp/fake.so ; echo $?
+/tmp/fake.so: error while loading shared libraries: libqqq.so: cannot open...
+127
+```
+
+Exit **127** e a lista **nem é escrita**. Então `--list | grep -q libharfbuzz`
+devolve falso, a cascata cai no `grep -a` do binário — que **acha** o soname — e o
+bloco dava `PASS` exatamente no caso que importa: biblioteca pedida e ausente.
+
+Correção: capturar a saída **e o exit code**, e tratar `PEDE=1` com loader que
+falhou como `WARN`, nunca `PASS`.
+
+```sh
+LISTA="$("$LOADER" --list "$TTF_LIB" 2>&1)" && LOADER_OK=1
+```
+
+Três casos provados contra o loader real do host:
+
+| Caso | Resultado |
+| --- | --- |
+| `libpng16` + `libz` (existe) | `PASS resolvido pelo loader` |
+| `libpng16` + `libharfbuzz` (não usa) | `WARN SEM a dependência` |
+| ELF forjado + `libqqq` (pede, ausente) | `WARN pede e o loader FALHOU` |
 
 O que **não** se faz é transformar "não deu para medir" em `FAIL`: `FAIL` falso
 custa confiança no bloco inteiro (§12.34).

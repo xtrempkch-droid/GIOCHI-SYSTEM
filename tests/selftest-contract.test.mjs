@@ -94,7 +94,13 @@ test("a prova do harfbuzz não depende de readelf estar na imagem", async () => 
   assert.ok(inicio > 0, "o bloco do harfbuzz precisa existir");
   // Até o fim do bloco, não do arquivo: o comentário do harness é longo de
   // propósito (explica por que NÃO se usa binutils) e empurra o código adiante.
-  const bloco = texto.slice(inicio, inicio + 3000);
+  // Marcador de fim, não janela fixa — janela de 3000 chars quebrou quando o
+  // bloco cresceu, e o teste passou a acusar o que já estava certo.
+  const bloco = texto.slice(
+    inicio,
+    texto.indexOf("Fontes: o diretório existir não prova nada", inicio),
+  );
+  assert.ok(bloco.length > 0, "não achei o fim do bloco");
 
   // `readelf` vem só com BR2_PACKAGE_BINUTILS_TARGET, que instala a toolchain
   // inteira no aparelho. Sem ele o bloco saía [SKIP] justamente no item que
@@ -106,10 +112,42 @@ test("a prova do harfbuzz não depende de readelf estar na imagem", async () => 
   );
   assert.match(bloco, /readelf -d/);
 
-  // E o texto do PASS tem de dizer QUAL prova foi usada: as duas não valem o
+  // E o texto do PASS tem de dizer QUAL prova foi usada: as três não valem o
   // mesmo, e quem lê o relatório precisa saber a diferença.
   assert.match(bloco, /NEEDED/);
   assert.match(bloco, /soname/);
+  assert.match(bloco, /resolvido pelo loader/);
+});
+
+test("a prova do loader lê o EXIT CODE, não só a saída", async () => {
+  // Medido forjando um ELF com NEEDED apontando para `libqqq.so`:
+  //
+  //   ld.so --list fake.so  →  exit 127, e a lista NEM É ESCRITA
+  //   error while loading shared libraries: libqqq.so: cannot open...
+  //
+  // Com `--list | grep -q libharfbuzz` o resultado é falso, a cascata cai no
+  // `grep -a` do binário — que ACHA o soname — e o bloco dava PASS no caso
+  // exato que importa: biblioteca pedida e ausente. O exit code é a única
+  // coisa que separa "não usa harfbuzz" de "usa e não tem".
+  const texto = await read();
+  const bloco = texto.slice(
+    texto.indexOf("HarfBuzz ligado no SDL2_ttf"),
+    texto.indexOf("Fontes: o diretório existir não prova nada"),
+  );
+  assert.ok(bloco.length > 0, "não achei o bloco");
+  assert.match(
+    bloco,
+    /LISTA="\$\("\$LOADER" --list "\$TTF_LIB" 2>&1\)" && LOADER_OK=1/,
+    "tem de capturar a saída E o exit code",
+  );
+  // E o ramo em que o loader falha com o nome presente tem de ser WARN, nunca
+  // PASS — é o falso positivo que este teste existe para impedir.
+  const ramoFalha = bloco.slice(bloco.indexOf("elif [ \"$PEDE\" = 1 ]"));
+  assert.match(ramoFalha, /^\s*warn /m, "loader falhou + pede ⇒ warn");
+  assert.ok(
+    !/elif \[ "\$PEDE" = 1 \][^;]*;?\s*\n\s*pass /m.test(bloco),
+    "PEDE=1 nunca pode virar PASS",
+  );
 });
 
 test("o painel é reportado como linha própria, com proporção", async () => {

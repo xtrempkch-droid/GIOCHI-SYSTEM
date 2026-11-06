@@ -295,10 +295,22 @@ done
 # (ar, as, ld, objdump, strip…) só para um diagnóstico. Medido no X35H em
 # 04/11: o bloco saía sempre `[SKIP]`, justamente no item que importa.
 #
-# Então há dois caminhos, e eles provam coisas diferentes — por isso o texto
-# do PASS diz qual foi usado:
+# A saída não é instalar binutils nem se contentar com busca de string: o
+# LOADER DINÂMICO faz o mesmo trabalho e já está em toda imagem dinâmica.
+#
+#     /lib/ld-linux-aarch64.so.1 --list /usr/lib/libSDL2_ttf-2.0.so.0
+#
+# Isso imprime as dependências que o loader RESOLVE — o mesmo conjunto que
+# `readelf -d` mostra como NEEDED, mais `linux-vdso.so.1` e o próprio loader.
+# Medido no host contra `libpng16`: `--list` deu libz/libm/libc, idêntico ao
+# `readelf -d`. Nenhum pacote novo, nenhum binário a mais.
+#
+# Então há TRÊS caminhos, e eles provam coisas diferentes — por isso o texto do
+# PASS diz qual foi usado:
 #
 #   readelf -d     NEEDED  → prova que o ligador exigiu a libharfbuzz
+#   ld.so --list   resolve → prova que o loader a resolve AGORA; pega também
+#                            biblioteca NEEDED que não está instalada
 #   grep -a        soname → prova que o nome está no binário. Para `.dynstr`
 #                           isso é o mesmo que NEEDED na prática; o que ele não
 #                           distingue é um `dlopen()` opcional, que o
@@ -315,6 +327,14 @@ for dir in /usr/lib /lib; do
     [ -n "$TTF_LIB" ] && break
 done
 
+# O loader tem nome por arquitetura. Procuramos em vez de fixar para não
+# quebrar o selftest se ele mudar de lugar numa atualização de toolchain.
+LOADER=""
+for cand in /lib/ld-linux-aarch64.so.1 /lib/ld-linux.so.3 /lib/ld-linux-armhf.so.3 \
+            /lib/ld-linux-x86-64.so.2 /lib64/ld-linux-x86-64.so.2; do
+    [ -x "$cand" ] && { LOADER="$cand"; break; }
+done
+
 if [ -n "$TTF_LIB" ]; then
     if command -v readelf >/dev/null 2>&1; then
         if readelf -d "$TTF_LIB" 2>/dev/null | grep -q libharfbuzz; then
@@ -322,10 +342,38 @@ if [ -n "$TTF_LIB" ]; then
         else
             warn "SDL2_ttf SEM harfbuzz (NEEDED, readelf) — script complexo sai errado"
         fi
-    elif grep -aq 'libharfbuzz\.so' "$TTF_LIB" 2>/dev/null; then
-        pass "SDL2_ttf com harfbuzz (soname no binário) — shaping complexo ativo"
     else
-        warn "SDL2_ttf SEM harfbuzz — script complexo sai errado (sem readelf, prova por soname)"
+        # ARMADILHA MEDIDA (forjando um ELF com NEEDED para lib inexistente): o
+        # loader NÃO escreve a lista quando uma dependência falta — ele aborta
+        # com `error while loading shared libraries` e exit 127. Um
+        # `--list | grep -q libharfbuzz` simplesmente devolve falso, e a
+        # cascata cairia no `grep -a` do binário, que ACHA o soname e daria
+        # PASS — falso positivo no caso exato que importa (biblioteca pedida e
+        # ausente). Por isso o exit code é lido:
+        PEDE=0
+        grep -aq 'libharfbuzz\.so' "$TTF_LIB" 2>/dev/null && PEDE=1
+        LISTA=""
+        LOADER_OK=0
+        if [ -n "$LOADER" ]; then
+            LISTA="$("$LOADER" --list "$TTF_LIB" 2>&1)" && LOADER_OK=1
+        fi
+        if [ "$LOADER_OK" = 1 ]; then
+            if printf '%s\n' "$LISTA" | grep -q 'libharfbuzz.*not found'; then
+                warn "SDL2_ttf pede harfbuzz e o loader NÃO a resolve — instale libharfbuzz"
+            elif printf '%s\n' "$LISTA" | grep -q 'libharfbuzz'; then
+                pass "SDL2_ttf com harfbuzz (resolvido pelo loader) — shaping complexo ativo"
+            elif [ "$PEDE" = 1 ]; then
+                warn "SDL2_ttf menciona harfbuzz mas o loader não a lista — verifique libharfbuzz"
+            else
+                warn "SDL2_ttf SEM harfbuzz — script complexo sai errado (loader lista, sem harfbuzz)"
+            fi
+        elif [ "$PEDE" = 1 ]; then
+            warn "SDL2_ttf pede harfbuzz e o loader falhou ao resolver — dependência ausente"
+        elif [ -n "$LOADER" ]; then
+            warn "SDL2_ttf SEM harfbuzz — script complexo sai errado (loader falhou)"
+        else
+            warn "SDL2_ttf SEM harfbuzz — script complexo sai errado (sem readelf nem loader)"
+        fi
     fi
 else
     skip "libSDL2_ttf não encontrada — nada a provar sobre harfbuzz"
