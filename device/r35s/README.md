@@ -408,6 +408,66 @@ Makefile. Verificado do zero: `patch -p1` limpo e `.dtb` de 54 469 B gerado.
 O campo `dtsPaths` do `device.json` continua existindo e testado — só não é o
 caminho deste aparelho.
 
+## A imagem foi gerada — 06/11/2026, 07:43
+
+**Correção do que eu disse antes.** A imagem de cartão **existe**. O build completo
+passou e o `make-sd-image.sh` produziu:
+
+```text
+out/r35s/giochi-system-r35s-sd.img   2048 MiB
+sha256 96e1db23ab49c7decf602363e522192cd804747bbef77e8747b8bf91c8b2e69e
+```
+
+Estrutura verificada byte a byte:
+
+| Região | Offset | Conteúdo |
+| --- | --- | --- |
+| MBR | setor 0 | assinatura `55AA`, 2 partições |
+| firmware | setor **64** | `u-boot-rockchip.bin` (idbloader + u-boot.itb) |
+| `p1` | 64 MiB, 256 MiB | FAT (`FAT1`): `Image`, `dtbs/…giochi.dtb`, `extlinux/`, `boot.scr` |
+| `p2` | **320 MiB**, 1728 MiB | ext4 (`53ef`) com o rootfs de 1 GiB |
+
+```
+cmdline: root=PARTUUID=47494f43-02 rootwait rw rootfstype=ext4 console=ttyS2,1500000n8
+```
+
+Do build: `assert-config: OK — 20 símbolos`, `assert-kernel-config: OK — 68
+símbolos`.
+
+### Três erros que o próprio pipeline pegou
+
+**1. `artifacts` apontava para `sdcard.img`** — arquivo que este pipeline nunca
+gera. A coleta passava sem copiar `Image` nem `rootfs.ext4`, e o "build OK"
+entregava só o U-Boot. O `out/` tinha 1,2 MB quando deveria ter 1,1 GB.
+
+**2. `BR2_TARGET_UBOOT_FORMAT_ITB=y`** faz o Buildroot rodar `make u-boot.itb`, e
+este board usa **binman**: essa regra só existe sem binman. Erro:
+`Sem regra para processar o alvo 'u-boot.itb'`. O `rock5b_defconfig` oficial não
+seleciona formato nenhum — o hook do rkbin instala `u-boot-rockchip.bin` sozinho.
+
+**3. `CONFIG_SND_SOC_ROCKCHIP_I2S=y` ficou `=m`.** O `assert-kernel-config`
+pegou: o filho depende de `SND_SOC_ROCKCHIP`, que eu não tinha pedido e o kernel
+deixou como módulo. Sem o pai explícito, o card `rk817_int` não apareceria no boot
+— e o build ficaria verde.
+
+Curiosidade medida: **no kernel do vendor (7.1.2) esse símbolo pai não existe**;
+o menu foi achatado. No 6.12 ele é obrigatório. É a mesma classe do
+`ROCKCHIP_CPUINFO`, mas na direção oposta.
+
+### O que ainda não está provado
+
+**Que boote.** A imagem está correta na estrutura, e os offsets são os do BootROM
+do RK3326 (setor 64, igual ao RK3566). O que falta é ligar o aparelho com este
+cartão e olhar o serial.
+
+A ordem de leitura do sintoma:
+
+| Serial mostra | Leitura |
+| --- | --- |
+| U-Boot (`U-Boot 2024.10`) | loader funciona; problema adiante é kernel/rootfs |
+| **nada**, tela preta | TPL/DDR não subiu — é o que o antecessor viu no mainline |
+| U-Boot, para no kernel | DTB ou rootfs; `earlycon` entra aqui |
+
 ## Estado
 
 **Confirmado no aparelho (06/11/2026):**
@@ -433,8 +493,8 @@ caminho deste aparelho.
 
 **Continua faltando:**
 
-- **O boot em hardware** — a imagem é gerável (U-Boot mainline `odroid-go2` +
-  rkbin PX30), mas **não bootou ainda**. O antecessor teve tela preta com serial
+- **Ligar o aparelho com este cartão.** A imagem existe e a estrutura está
+  verificada; o boot **não foi testado**. O antecessor teve tela preta com serial
   mudo no mainline, e a causa nunca foi isolada.
 - **`genimage`** dentro do Buildroot, substituindo `make-sd-image.sh` como etapa
   externa (pendência do projeto inteiro, não só desta placa).

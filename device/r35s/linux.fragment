@@ -75,6 +75,15 @@ CONFIG_ROCKCHIP_SARADC=y
 CONFIG_SOUND=y
 CONFIG_SND=y
 CONFIG_SND_SOC=y
+# O I2S é FILHO de SND_SOC_ROCKCHIP (`depends on HAVE_CLK && SND_SOC_ROCKCHIP`).
+# Pedir só o filho não basta: o pai ficou `=m` e o filho não pôde passar de `m`.
+# Medido — o `assert-kernel-config` pegou:
+#
+#   CONFIG_SND_SOC_ROCKCHIP_I2S: pedido =y, ficou =m
+#
+# Sem o pai explícito a imagem sairia com o driver de áudio como módulo,
+# dependente de autoload, e o card `rk817_int` não apareceria no boot.
+CONFIG_SND_SOC_ROCKCHIP=y
 CONFIG_SND_SOC_ROCKCHIP_I2S=y
 CONFIG_SND_SOC_RK817=y
 CONFIG_SND_SOC_SIMPLE_AMPLIFIER=m

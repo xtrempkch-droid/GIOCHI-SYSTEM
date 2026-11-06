@@ -59,6 +59,13 @@ test("os símbolos do fragmento existem na config do vendor", () => {
     // é coberto com UNTESTED ligado. O vendor não precisa porque não empacota
     // driver de dongle.
     "RTL8XXXU_UNTESTED",
+    // DIFERENÇA DE VERSÃO DO KERNEL, medida: no vendor (7.1.2) o menu pai
+    // `SND_SOC_ROCKCHIP` não existe mais — só os filhos. No 6.12 ele existe e é
+    // obrigatório: `SND_SOC_ROCKCHIP_I2S` depende dele, e sem pedir o pai o
+    // filho fica travado em `=m`. O `assert-kernel-config` pegou exatamente
+    // isso no primeiro build:
+    //   CONFIG_SND_SOC_ROCKCHIP_I2S: pedido =y, ficou =m
+    "SND_SOC_ROCKCHIP",
   ]);
   const unexpected = missing.filter((symbol) => !allowed.has(symbol));
   assert.deepEqual(unexpected, [], `símbolos inventados: ${unexpected.join(", ")}`);
@@ -183,6 +190,24 @@ test("o device.json diz que a imagem é gerável mas NÃO bootou", () => {
   );
 });
 
+test("os artefatos declarados existem no build, não são glob inventado", () => {
+  // O `artifacts` do device.json diz o que o CI publica. Estava `["sdcard.img"]`,
+  // um arquivo que este pipeline NUNCA gera — então a coleta passava sem copiar
+  // o kernel nem o rootfs, e o "build OK" entregava só o U-Boot.
+  assert.ok(Array.isArray(device.artifacts) && device.artifacts.length > 0);
+  assert.ok(
+    !device.artifacts.includes("sdcard.img"),
+    "sdcard.img quem faz é make-sd-image.sh, não o build",
+  );
+  for (const exigido of ["Image", "rootfs.ext4"]) {
+    assert.ok(device.artifacts.includes(exigido), `falta ${exigido} em artifacts`);
+  }
+  // O DTB tem de ser o DESTE aparelho, não o do mainline.
+  const dtb = device.artifacts.find((item) => item.endsWith(".dtb"));
+  assert.ok(dtb, "nenhum .dtb declarado");
+  assert.match(dtb, /giochi/, `o DTB tem de ser o do painel próprio: ${dtb}`);
+});
+
 test("o defconfig liga o que o hardware medido exige", () => {
   const defconfig = readFileSync(`${DEVICE}/defconfig`, "utf8");
   // SoC errado manda o build para o lugar errado, e o sintoma é não sair do Maskrom.
@@ -194,6 +219,12 @@ test("o defconfig liga o que o hardware medido exige", () => {
   assert.ok(!/rk35\//.test(defconfig), "caminho rk35/ é do RK3566");
   // U-Boot do RK3326.
   assert.match(defconfig, /^BR2_TARGET_UBOOT_BOARD_DEFCONFIG="odroid-go2"$/m);
+  // SEM formato de U-Boot: este board usa binman, e a regra de `u-boot.itb` só
+  // existe sem ele. Pedir FORMAT_ITB dá "Sem regra para processar o alvo".
+  assert.ok(
+    !/^BR2_TARGET_UBOOT_FORMAT_ITB=y$/m.test(defconfig),
+    "com binman o alvo u-boot.itb não existe; o hook do rkbin instala u-boot-rockchip.bin",
+  );
   // DTS pelo nome que o patch registra.
   assert.match(defconfig, /^BR2_LINUX_KERNEL_INTREE_DTS_NAME="rockchip\/rk3326-gameconsole-r36s-giochi"$/m);
 });

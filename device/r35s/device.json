@@ -11,7 +11,12 @@
     "rootfs-overlay"
   ],
   "artifacts": [
-    "sdcard.img"
+    "Image",
+    "rootfs.ext4",
+    "rk3326-gameconsole-r36s-giochi.dtb",
+    "u-boot-rockchip.bin",
+    "idbloader.img",
+    "u-boot.itb"
   ],
   "runner": "ubuntu-24.04",
   "timeoutMinutes": 300,
