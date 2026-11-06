@@ -708,6 +708,7 @@ GIOCHI_BUILD_INFO_LINHAS="$(printf '%s\n' \
   "arch=$DEVICE_ARCH" \
   "buildroot=$BUILDROOT_VERSION" \
   "version=${GIOCHI_SYSTEM_VERSION:-local}" \
+  "commit=${GITHUB_SHA:-$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo local)}" \
   "built_at_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)")"
 export GIOCHI_BUILD_INFO_LINHAS
 

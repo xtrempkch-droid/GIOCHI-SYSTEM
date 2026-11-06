@@ -70,6 +70,43 @@ Duas consequências decidem a implementação, e nenhuma é trivial:
    desenvolvimento, inaceitável para usuário final — é mais um motivo para o
    aviso antes de qualquer gravação.
 
+### O método tradicional: `dd` e nada mais
+
+```bash
+sudo bash scripts/flash-dd.sh out/<device>/giochi-system-<device>-sd.img /dev/sdX
+pkexec bash scripts/flash-dd.sh <imagem> /dev/sdX --yes     # senha em diálogo
+```
+
+Existe porque o `flash-sd.sh` faz **mais** que gravar, e quando uma dessas coisas
+extras falha o diagnóstico fica mais difícil que o problema: o `dd` grava, a
+releitura diverge, e não dá para saber se o cartão está ruim ou se a conferência
+está errada.
+
+Este script é o mínimo: `dd bs=4M conv=fsync` e `sync`. **Sem** verificação de
+SHA256, **sem** crescer partição, **sem** leitura de volta.
+
+O valor dele é justamente esse: se o cartão não bootar com o método tradicional,
+o problema **não é a gravação**. Isso responde metade das perguntas antes de
+qualquer investigação.
+
+Três guardas ficaram, e nenhuma é sobre o conteúdo — são sobre não apagar o
+computador de quem está trabalhando, que não tem desfazer:
+
+| Guarda | Por quê |
+| --- | --- |
+| o destino é dispositivo de bloco inteiro | `dd` numa partição grava no meio do disco |
+| `removable == 1` | recusa disco interno |
+| não é o disco de `/` nem de `/boot` | o sistema pode estar em USB, e aí "removível" não protege |
+
+E recusa destino com partição montada — o `dd` escreve mesmo assim, mas o kernel
+mantém o cache do sistema de arquivos antigo e a próxima leitura devolve lixo.
+
+Sem `--yes`, pede o caminho do destino digitado.
+
+**Custo medido (06/11/2026, cartão de 29,7 GiB, imagem de 2 GiB):** 61 s, 35 MB/s.
+A gravação é rápida; o que demora num cartão grande é gravar zeros, e é por isso
+que o `--grow` existe em vez de gerar imagem maior.
+
 ### Crescer a última partição até o fim do cartão (`--grow`)
 
 ```bash

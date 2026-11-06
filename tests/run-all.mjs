@@ -42,3 +42,4 @@ import "./chave-da-loja.test.mjs";
 import "./godot.test.mjs";
 import "./rtc-clock.test.mjs";
 import "./flash-grow.test.mjs";
+import "./flash-dd.test.mjs";
