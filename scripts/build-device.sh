@@ -387,11 +387,34 @@ echo "Mesclando configuração comum + device..."
 #   Kconfig file or fragment '/work/device/powkiddy' for 'linux' does not exist
 #
 # que não cita espaço nem aparelho. Mesma armadilha dos overlays.
+DTS_PATHS="${DTS_PATHS:-$(node "$REPO_ROOT/scripts/device-info.mjs" "$DEVICE_ID" dtsPaths 2>/dev/null || true)}"
 KERNEL_FRAGMENT="$DEVICE_DIR/linux.fragment"
 KERNEL_FRAGMENT_ARGS=()
 if [[ -f "$KERNEL_FRAGMENT" ]]; then
   cp -a "$KERNEL_FRAGMENT" "$WORK_DIR/linux.fragment"
   KERNEL_FRAGMENT_ARGS=(--kernel-fragment "$WORK_DIR/linux.fragment")
+fi
+
+# DTS/DTSI fora da árvore (device.json → dtsPaths). Também passam por staging:
+# `BR2_LINUX_KERNEL_CUSTOM_DTS_PATH` é lista separada por espaço, e um aparelho
+# em pasta com espaço viraria dois caminhos. O Buildroot COPIA os arquivos para
+# dentro do kernel e compila o `.dts` de lá, então os `#include` de um dtsi
+# irmão funcionam porque todos vão para o mesmo diretório.
+DTS_ARGS=()
+if [[ -n "${DTS_PATHS:-}" ]]; then
+  while IFS= read -r dts_rel; do
+    [[ -z "$dts_rel" ]] && continue
+    dts_src="$DEVICE_DIR/$dts_rel"
+    if [[ ! -f "$dts_src" ]]; then
+      echo "ERRO: DTS declarado em device.json não existe: $dts_rel" >&2
+      exit 1
+    fi
+    dts_stage="$WORK_DIR/dts/$(basename "$dts_src")"
+    mkdir -p "$WORK_DIR/dts"
+    cp -a "$dts_src" "$dts_stage"
+    DTS_ARGS+=(--dts-path "$dts_stage")
+    echo "  dts:       $(basename "$dts_src")"
+  done <<< "$DTS_PATHS"
 fi
 
 # Fragmentos por área (device.json → buildrootFragments). Entram DEPOIS de
@@ -496,6 +519,7 @@ node "$ROOT/scripts/prepare-config.mjs" \
   ${EXTRA_FRAGMENT_ARGS[@]+"${EXTRA_FRAGMENT_ARGS[@]}"} \
   --ccache-dir "$CCACHE_ARG" \
   "${KERNEL_FRAGMENT_ARGS[@]+"${KERNEL_FRAGMENT_ARGS[@]}"}" \
+  "${DTS_ARGS[@]+"${DTS_ARGS[@]}"}" \
   "${BUSYBOX_FRAGMENT_ARGS[@]+"${BUSYBOX_FRAGMENT_ARGS[@]}"}" \
   "${POST_BUILD_ARGS[@]+"${POST_BUILD_ARGS[@]}"}" \
   "${KERNEL_PATCH_ARGS[@]+"${KERNEL_PATCH_ARGS[@]}"}" \

@@ -1,0 +1,125 @@
+# R35S / R36S — fragmento de KERNEL
+#
+# Aplicado ao `.config` do kernel via `BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES`.
+# NÃO é fragmento de Buildroot: símbolo `CONFIG_*` aqui não vira `BR2_*`.
+#
+# ## Proveniência — isto não é cópia de receita
+#
+# Cada símbolo abaixo foi conferido contra a config do kernel que **realmente
+# roda** nesta placa. Ela foi extraída do aparelho em 06/11/2026 pela console
+# serial (`/proc/config.gz`, 41 849 bytes, md5 `93bf213f1cbaed4f5867236cdfb4c13c`)
+# e está guardada em `extracted/kernel-config.gz`.
+#
+# O kernel do ROCKNIX é vendor `7.1.2`; o nosso é mainline **6.12**. Símbolo que
+# o 6.12 não conhece é descartado em silêncio pelo `olddefconfig` — para isso
+# existe `scripts/assert-kernel-config.mjs`, que roda depois e falha o build
+# citando o nome. É a rede que impede este arquivo de virar ficção.
+#
+# ## A armadilha do DSI (a mesma que já custou um build na X55)
+#
+# O PHY MIPI-DSI tem de ser `=y`, nunca `=m`. Como módulo ele carrega DEPOIS do
+# controlador, o painel recebe -517 (EPROBE_DEFER) e desiste. Sintoma: nenhum
+# `/dev/dri/card0`, tela preta, e nada no log ligando a causa ao efeito.
+
+# ── display: o bloco mais frágil ────────────────────────────
+CONFIG_DRM=y
+CONFIG_DRM_ROCKCHIP=y
+CONFIG_ROCKCHIP_DW_MIPI_DSI=y
+CONFIG_DRM_DW_MIPI_DSI=y
+CONFIG_PHY_ROCKCHIP_INNO_DSIDPHY=y
+CONFIG_DRM_PANEL=y
+CONFIG_DRM_PANEL_SIMPLE=y
+CONFIG_DRM_MIPI_DSI=y
+CONFIG_ROCKCHIP_IOMMU=y
+# Backlight por PWM. O painel declarado no DTS usa `backlight = <&backlight>`
+# com `pwm-backlight`, e há um `power-supply = <&vcc_bl>` que precisa de
+# `pwm-regulator` no caminho.
+CONFIG_BACKLIGHT_CLASS_DEVICE=y
+CONFIG_BACKLIGHT_PWM=y
+CONFIG_PWM=y
+CONFIG_PWM_ROCKCHIP=y
+
+# GPU. `=m` como no vendor: o driver pode ser carregado depois, e assim o
+# `mali_kbase` proprietário também pode, se algum dia a loja oferecer.
+CONFIG_DRM_PANFROST=m
+
+# ── armazenamento ───────────────────────────────────────────
+# O cartão desta placa é SDHCI do DesignWare. Sem `MMC_DW_ROCKCHIP` não há rootfs.
+CONFIG_MMC=y
+CONFIG_MMC_DW=y
+CONFIG_MMC_DW_ROCKCHIP=y
+CONFIG_MMC_BLOCK=y
+CONFIG_MMC_SDHCI=y
+CONFIG_EXT4_FS=y
+CONFIG_VFAT_FS=y
+CONFIG_TMPFS=y
+CONFIG_SQUASHFS=y
+
+# ── entrada ─────────────────────────────────────────────────
+# `JOYSTICK_ADC` é o que faz o nó `adc-joystick` do DTS funcionar. Sem ele o nó
+# existe e não gera evento — o pior tipo de falha (AGENTS §12.15).
+CONFIG_INPUT=y
+CONFIG_INPUT_EVDEV=y
+CONFIG_INPUT_JOYSTICK=y
+CONFIG_JOYSTICK_ADC=y
+CONFIG_KEYBOARD_GPIO=y
+# ADC do SoC: o driver do joypad lê o multiplexador por `saradc`.
+CONFIG_IIO=y
+CONFIG_ROCKCHIP_SARADC=y
+
+# ── áudio ───────────────────────────────────────────────────
+# Medido no aparelho: card `rk817_int`, codec no PMIC RK817.
+# `SIMPLE_AMPLIFIER` fica `=m` como no vendor; se o card depender dele em
+# `aux-devs`, ele precisa carregar junto — o mesmo problema que deu
+# "--- no soundcards ---" na X55.
+CONFIG_SOUND=y
+CONFIG_SND=y
+CONFIG_SND_SOC=y
+CONFIG_SND_SOC_ROCKCHIP_I2S=y
+CONFIG_SND_SOC_RK817=y
+CONFIG_SND_SOC_SIMPLE_AMPLIFIER=m
+CONFIG_MFD_RK8XX=y
+CONFIG_MFD_RK8XX_I2C=y
+
+# ── energia e relógio ───────────────────────────────────────
+CONFIG_REGULATOR=y
+CONFIG_REGULATOR_RK808=y
+CONFIG_RTC_CLASS=y
+CONFIG_RTC_DRV_RK808=y
+# A pilha de frequência do PX30 no mainline é `cpufreq-dt`, não
+# `rockchip-cpufreq` — o símbolo do antecessor foi removido no 6.12 (§12.9).
+#
+# MEDIDO ao montar este fragmento: `CONFIG_ROCKCHIP_CPUINFO=y` existe no
+# kernel do vendor (7.1.2) e NÃO existe no 6.12 — mesmo destino do
+# `ARM_ROCKCHIP_CPUFREQ`. Conferir cada símbolo contra o Kconfig da árvore
+# (64 símbolos: 63 presentes, 1 ausente) custou segundos e evita um
+# `assert-kernel-config` vermelho depois de 40 min de build.
+CONFIG_CPU_FREQ=y
+CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL=y
+CONFIG_PM_DEVFREQ=y
+
+# ── USB: é o único canal de shell (não há rádio nesta placa) ─
+CONFIG_USB=y
+CONFIG_USB_SUPPORT=y
+CONFIG_USB_GADGET=y
+CONFIG_USB_CONFIGFS=y
+CONFIG_USB_CONFIGFS_RNDIS=y
+CONFIG_USB_CONFIGFS_F_FS=y
+CONFIG_USB_DWC2=y
+CONFIG_USB_DWC2_DUAL_ROLE=y
+CONFIG_USB_EHCI_HCD=y
+CONFIG_USB_OHCI_HCD=y
+CONFIG_USB_EHCI_HCD_PLATFORM=y
+CONFIG_USB_OHCI_HCD_PLATFORM=y
+
+# ── rádio USB (dongle do usuário) ───────────────────────────
+# A placa não tem rádio onboard, mas a imagem é gravada uma vez e o dongle
+# chega depois (AGENTS §12.31). Tudo `=m`: carrega por modalias, custo zero
+# se ninguém plugar. `RTL8XXXU_UNTESTED` é o que cobre o 8188FU, o dongle
+# barato de hoje.
+CONFIG_RTL8XXXU=m
+CONFIG_RTL8XXXU_UNTESTED=y
+CONFIG_RTL8192CU=m
+CONFIG_MT7601U=m
+CONFIG_MAC80211=m
+CONFIG_CFG80211=m

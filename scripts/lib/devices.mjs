@@ -315,6 +315,24 @@ export async function validateDevice(device) {
     errors.push(error.message);
   }
 
+  // dtsPaths: DTS/DTSI fora da árvore do kernel. Caminhos RELATIVOS à pasta do
+  // aparelho, porque o build faz staging deles (§12.6: lista separada por
+  // espaço) e usa o caminho preparado, não o do repositório.
+  if (device.dtsPaths !== undefined) {
+    const { isArray } = Array;
+    if (!isArray(device.dtsPaths) || device.dtsPaths.length === 0) {
+      errors.push("dtsPaths deve ser array não vazio quando presente.");
+    } else {
+      for (const [index, item] of device.dtsPaths.entries()) {
+        if (typeof item !== "string" || item.length === 0) {
+          errors.push(`dtsPaths[${index}] deve ser caminho relativo não vazio.`);
+        } else if (path.isAbsolute(item)) {
+          errors.push(`dtsPaths[${index}] deve ser relativo à pasta do aparelho: ${item}`);
+        }
+      }
+    }
+  }
+
   // kernelCmdline: opcional no schema, OBRIGATÓRIO para gerar imagem de cartão
   // (make-sd-image.sh falha sem ele). Aqui a validação é de forma — o build de
   // rascunho legitimamente ainda não sabe a UART do aparelho.

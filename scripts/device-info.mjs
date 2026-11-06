@@ -90,6 +90,11 @@ switch (field) {
       console.log(path.join(device.directory, patchPath));
     }
     break;
+  case "dtsPaths":
+    for (const dtsPath of device.dtsPaths ?? []) {
+      console.log(dtsPath);
+    }
+    break;
   case "buildrootFragments":
     for (const extra of device.buildrootFragments ?? []) {
       console.log(path.join(device.directory, extra));

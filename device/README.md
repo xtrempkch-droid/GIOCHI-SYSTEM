@@ -40,9 +40,18 @@ Declare os arquivos no `device.json`:
 {
   "buildrootFragments": ["buildroot.panel.fragment", "buildroot.input.fragment"],
   "kernelPatches": ["patches/kernel"],
+  "dtsPaths": ["dts/painel.dtsi", "dts/aparelho.dts"],
   "firmwareFiles": ["firmware"]
 }
 ```
+
+**`dtsPaths`** são DTS/DTSI que não existem na árvore do kernel (caminhos
+**relativos** à pasta do aparelho). O build copia cada um para um staging sem
+espaços e emite `BR2_LINUX_KERNEL_CUSTOM_DTS_PATH`, porque é **lista separada por
+espaço** — a mesma armadilha dos fragmentos e dos overlays (§12.6 do AGENTS.md).
+Todos os arquivos vão para o mesmo diretório dentro do kernel, então `#include`
+entre eles funciona. Exemplo completo em `r35s/`, que acrescenta um aparelho
+inteiro sem manter patch de 20 kB.
 
 O build aplica `common` → `buildroot.fragment` → fragmentos por área, nessa ordem. Ver [docs/architecture.md](../docs/architecture.md#camada-de-drivers-e-painel-por-dispositivo).
 

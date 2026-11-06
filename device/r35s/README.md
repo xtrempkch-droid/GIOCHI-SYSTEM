@@ -286,6 +286,85 @@ Mem:            981    287    254       10         521        694
 981 MiB visíveis de 1 GB — o resto do firmware reserva para o Mali/ramo do
 TrustZone. `lsblk` **não existe** nessa imagem; `/proc/partitions` e `df` sim.
 
+## Port para o nosso kernel 6.12 — o que já compila
+
+Extraído do aparelho e montado em 06/11/2026. **Não é estimativa: cada item abaixo
+foi compilado contra a árvore 6.12 deste repositório.**
+
+| Peça | Resultado | Evidência |
+| --- | --- | --- |
+| DTS do R36S (`dts/src/`) | **compila** contra o 6.12 | `rk3326-gameconsole-r36s.dtb`, 49 983 B |
+| DTS com painel próprio | **compila**, 160 strings no `panel_description` | `rk3326-gameconsole-r36s-giochi.dtb`, 54 469 B |
+| `rocknix-singleadc-joypad` | **compila** (`DEVICE=RK3326`) | `rocknix-singleadc-joypad.ko`, 136 904 B |
+| `rocknix-joypad` | **compila** | `rocknix-joypad.ko`, 92 856 B |
+| `panel-generic-dsi` | **compila** | `panel-generic-dsi.ko`, 106 144 B |
+
+O que isso resolve: o README dizia "os botões exigem driver fora da árvore" como
+se fosse bloqueio. Não é — o fonte é **GPL**, está vendorizado em
+[`kernel-modules/`](kernel-modules/) e **compila no 6.12 sem uma linha de
+adaptação**. Não houve quebra de API de PWM nem de `drm_panel`.
+
+### Dois detalhes que quase passaram
+
+**1. O `Makefile` do joypad esconde o módulo errado.** Ele faz:
+
+```make
+ifeq ($(DEVICE),$(filter $(DEVICE), S922X RK3588))
+  obj-m := rocknix-joypad.o
+```
+
+Com `DEVICE` **vazio**, `$(filter ,...)` também é vazio, e `empty == empty` é
+**verdadeiro** — então a receita da ROCKNIX, que chama `make` sem `DEVICE`,
+compila só o `rocknix-joypad.o` e nunca toca no `singleadc`. Passa verde. Por isso
+o build nosso passa `DEVICE=RK3326` explicitamente.
+
+**2. `joypad_input_g` nunca é definido.** O `singleadc` declara `extern` e só
+atribui; nenhum dos dois arquivos define. Compilando os dois módulos como a
+receita pede, o `modpost` falha:
+
+```text
+ERROR: modpost: "joypad_input_g" [rocknix-singleadc-joypad.ko] undefined!
+```
+
+A correção é de uma linha e está no próprio fonte vendorizado, com o motivo
+escrito ao lado: o símbolo é só escrito e nunca lido, então defini-lo não muda
+comportamento.
+
+### O painel: do overlay para o DTS
+
+O ROCKNIX aplica o painel por `.dtbo` em `FDTOVERLAYS` no extlinux. Nós **não
+precisamos de overlay**: o nó `panel@0` já existe no DTS base, então o gerador
+[`scripts/panel-to-dtsi.mjs`](../../scripts/panel-to-dtsi.mjs) escreve a
+propriedade direto num `.dtsi` incluído pelo DTS. Uma peça móvel menos no boot.
+
+O formato importa: o driver lê com `of_property_read_string_index`, ou seja,
+**lista de strings** — 160 elementos (1 `G` + 3 `M` + 155 `I` + `#END`). Uma
+string única com quebras de linha dentro seria **um** elemento, e o driver leria
+lixo.
+
+```bash
+node scripts/panel-to-dtsi.mjs device/r35s/panels/r36s-panel4.txt \
+  --out device/r35s/dts/generated/panel-panel4.dtsi \
+  --wrapper device/r35s/dts/generated/rk3326-gameconsole-r36s-giochi.dts \
+  --base device/r35s/dts/src/rk3326-gameconsole-r36s.dts
+```
+
+### O que ainda bloqueia a imagem
+
+**O carregador de boot.** RK3326 não é RK3566: precisa de DDR init, BL31 do PX30 e
+U-Boot — e o U-Boot mainline testado no antecessor deu **tela preta sem print no
+serial**. Não temos fonte confiável do loader do fabricante.
+
+Por isso `buildrootDefconfig` está **vazio de propósito**. Rodar
+`build-device.sh r35s` hoje falha no defconfig, e isso é correto: melhor falhar
+ali do que gerar imagem que não boota.
+
+Alternativa medida que dispensa o loader: o cartão que está no aparelho **já
+boota**. Um teste de kernel sem regravar o carregador é trocar `KERNEL` + `DTB` na
+partição FAT e apontar o `extlinux.conf` (que já tem `LINUX /KERNEL`,
+`FDT /r36s.dtb` e `FDTOVERLAYS`) para os nossos. Ver
+[`extracted/README.md`](extracted/README.md) para o layout.
+
 ## Estado
 
 **Confirmado no aparelho (06/11/2026):**
@@ -300,17 +379,23 @@ TrustZone. `lsblk` **não existe** nessa imagem; `/proc/partitions` e `df` sim.
   (`/lib/modules/7.1.2/rocknix-joypad/`). É a peça que parecia impossível e agora
   tem procedência.
 
+**Feito depois, no mesmo dia (ver "Port para o nosso kernel 6.12"):**
+
+- ~~Trazer o joypad para a árvore~~ — **feito**: GPL vendorizado, **compila no
+  6.12**.
+- ~~Driver do painel~~ — **feito**: `panel-generic-dsi` vendorizado, compila.
+- ~~Overlay de painel~~ — **não é mais overlay**: o `panel_description` do
+  `panel4` vai num `.dtsi` gerado, incluído pelo DTS.
+- ~~DTS~~ — **compila** contra o 6.12.
+
 **Continua faltando:**
 
-- **defconfig** — nenhum. O loader desta placa é o do fabricante
-  (`px30_bl31`, DDR `px30_ddr_333MHz`, U-Boot `odroid-go2`); o mainline testado
-  deu tela preta. Nada disso foi reproduzido por nós.
-- **Trazer o joypad para a árvore** — o fonte é GPL e existe, mas ainda não foi
-  compilado contra o nosso kernel 6.12. Sem ele, **nenhum botão funciona**.
-- **Overlay de painel** — a loteria de lote continua, mas agora com os cinco
-  descritos em texto e comparáveis ([`panels/`](panels/README.md)). O `panel4` é
-  a referência; a próxima unidade pode não aceitar.
-- **genimage** e validação de build.
+- **O carregador de boot** — e é o único bloqueio real. RK3326 precisa de DDR
+  init, BL31 do PX30 e U-Boot; o mainline testado no antecessor deu tela preta
+  sem print no serial. Por isso `buildrootDefconfig` está vazio de propósito.
+- **`genimage`** e validação de build, que dependem do item acima.
+- **Os cinco painéis** — o `panel4` é a referência; uma unidade com `panel1`/
+  `panel2`/`panel3` precisa de outro `.dtsi` gerado (é um comando).
 
 **Riscos medidos, ainda não resolvidos:**
 

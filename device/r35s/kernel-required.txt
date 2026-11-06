@@ -1,0 +1,46 @@
+# R35S — símbolos que o kernel PRECISA ter, venha de onde vier
+#
+# O `linux.fragment` é um DELTA: ele pede o que o defconfig da arquitetura não
+# liga. Símbolo que o defconfig arm64 já traz (`CONFIG_MMC_DW_ROCKCHIP`,
+# `CONFIG_EXT4_FS`, `CONFIG_SERIAL_8250_DW`…) NÃO está lá, e se sumir ninguém
+# percebe até o aparelho não bootar.
+#
+# Este arquivo é a outra metade do gate: `assert-kernel-config --required` falha
+# o build se algum destes desaparecer ou cair para `=m` sem justificativa.
+#
+# Formato: um `CONFIG_*` por linha. `#` comenta.
+
+# Sem isto o cartão não é lido e não há rootfs.
+CONFIG_MMC_DW_ROCKCHIP=y
+
+# Sem isto não há sistema de arquivos no cartão.
+CONFIG_EXT4_FS=y
+CONFIG_VFAT_FS=y
+CONFIG_TMPFS=y
+
+# Console serial: é o ÚNICO canal de diagnóstico desta placa (sem rádio onboard,
+# e o `dwc2` nasce como host). Medido: ttyS2 a 1500000 em 0xff160000.
+CONFIG_SERIAL_8250=y
+CONFIG_SERIAL_8250_DW=y
+CONFIG_SERIAL_8250_CONSOLE=y
+
+# DRM/DSI: o painel é DSI e o PHY tem de ser `=y` (como módulo dá EPROBE_DEFER e
+# tela preta, sem mensagem ligando a causa).
+CONFIG_DRM=y
+CONFIG_DRM_ROCKCHIP=y
+CONFIG_DRM_DW_MIPI_DSI=y
+CONFIG_PHY_ROCKCHIP_INNO_DSIDPHY=y
+
+# Entrada: 16 botões via multiplexador de ADC + 2 eixos do stick esquerdo.
+CONFIG_INPUT_EVDEV=y
+CONFIG_JOYSTICK_ADC=y
+CONFIG_ROCKCHIP_SARADC=y
+
+# USB: canal de shell (RNDIS) e a única porta para dongle de rádio.
+CONFIG_USB_GADGET=y
+CONFIG_USB_CONFIGFS=y
+CONFIG_USB_DWC2=y
+
+# Áudio: card `rk817_int`, codec no PMIC. Medido no aparelho.
+CONFIG_SND_SOC_RK817=y
+CONFIG_MFD_RK8XX=y

@@ -16,10 +16,16 @@
   "runner": "ubuntu-24.04",
   "timeoutMinutes": 300,
   "status": "draft",
-  "bootNotes": "SoC RK3326 (não RK3566): sem NPU, Mali-G31, 1 GB de RAM. É o mesmo SoC da família rk3326-generic, então o fragmento de kernel tende a ser compartilhado. DTS do padrão ROCKNIX. Build nunca executado.",
+  "bootNotes": "SoC RK3326 (nao RK3566): sem NPU, Mali-G31, 1 GB de RAM. Medido no aparelho em 06/11/2026 pela console serial: painel 640x480 em card0-DSI-1, gamepad r36s_Gamepad (js0+event3), 981 MiB visiveis. Os dois drivers (rocknix-singleadc-joypad e o painel generic-dsi) sao GPL, estao vendorizados em kernel-modules/ e COMPILAM contra o nosso kernel 6.12. O DTS vendorizado tambem compila contra o 6.12. BLOQUEIO: o carregador de boot (idbloader/BL31/U-Boot do PX30) — o mainline testado deu tela preta no antecessor, entao a imagem de cartao ainda nao pode ser gerada.",
   "kernelCmdline": {
     "console": "ttyS2",
     "baud": 1500000
   },
-  "docs": "README.md"
+  "docs": "README.md",
+  "dtsPaths": [
+    "dts/src/rk3326-gameconsole-r3xs.dtsi",
+    "dts/src/rk3326-device-group-r36.dtsi",
+    "dts/generated/panel-panel4.dtsi",
+    "dts/generated/rk3326-gameconsole-r36s-giochi.dts"
+  ]
 }

@@ -9,6 +9,7 @@ function parseArgs(argv) {
   kernelFragments: [],
   busyboxFragments: [],
   kernelPatches: [],
+  dtsPaths: [],
   postBuildScripts: [],
 };
   for (let index = 0; index < argv.length; index += 1) {
@@ -25,6 +26,8 @@ function parseArgs(argv) {
       args.postBuildScripts.push(argv[++index]);
     } else if (item === "--kernel-patch") {
       args.kernelPatches.push(argv[++index]);
+    } else if (item === "--dts-path") {
+      args.dtsPaths.push(argv[++index]);
     } else if (item.startsWith("--")) {
       args[item.slice(2)] = argv[++index];
     } else {
@@ -239,6 +242,24 @@ for (const kernelPatch of args.kernelPatches) {
 }
 if (kernelPatches.length > 0) {
   lines = setKey(lines, "BR2_LINUX_KERNEL_PATCH", quote(kernelPatches.join(" ")));
+}
+
+// DTS fora da árvore. `BR2_LINUX_KERNEL_CUSTOM_DTS_PATH` copia os arquivos para
+// dentro do kernel e compila os `.dts` de lá. É a forma de acrescentar um
+// aparelho sem manter um patch com 20 kB de dtsi.
+//
+// Mesma regra de espaço dos outros: é lista separada por espaço (§12.6).
+const dtsPaths = [];
+for (const dtsPath of args.dtsPaths) {
+  if (!dtsPath) continue;
+  if (!existsSync(dtsPath)) {
+    throw new Error(`DTS/DTSI não encontrado: ${dtsPath}`);
+  }
+  rejectSpaces("DTS/DTSI", dtsPath);
+  dtsPaths.push(path.resolve(dtsPath));
+}
+if (dtsPaths.length > 0) {
+  lines = setKey(lines, "BR2_LINUX_KERNEL_CUSTOM_DTS_PATH", quote(dtsPaths.join(" ")));
 }
 
 // Overrides de pacote: arquivo .mk incluído pelo Buildroot depois das receitas.
