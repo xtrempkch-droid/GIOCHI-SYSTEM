@@ -3678,6 +3678,12 @@ assert-kernel-config 72 símbolos (2 allow-drop: JOYSTICK_ROCKNIX, ARM_ROCKCHIP_
 sha256 img           ba8f4afd1783f11ce4160d3f61bae273c7211ff2716ed5cc00916339b53d1ef6
 ```
 
+O `built_at` acima é o de `out/<device>/build-info.txt`, gravado no fim do
+build. O `/etc/giochi/build-info.txt` **dentro da imagem** leva o instante do
+`post-build.sh` (aqui `17:49:22Z`, ~1 h antes, porque o `make` continuou depois
+dele). Os dois têm o mesmo `commit=`, e é o commit que identifica a imagem. O
+ano desse arquivo é o piso do RTC (§12.48) — 2026 nos dois.
+
 Conferido **lendo o cartão**, não o `out/`:
 
 | Parte | Medida | Igual a |
