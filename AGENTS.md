@@ -2598,6 +2598,56 @@ bash real com `set -euo pipefail`, contra um aparelho **com** fragmento e outro
 teste falhar (4/5), e era isso que faltava. `bash -n` passa nos dois casos, então
 sintaxe nunca ia pegar.
 
+### 12.54 As bibliotecas de SDL2 do HOST servem o launcher x86_64 — e envenenam o aarch64
+
+Esta máquina tem o stack de desenvolvimento SDL2/EGL instalado por apt
+(`libsdl2-dev`, `libsdl2-image-dev`, `libsdl2-mixer-dev`, `libsdl2-ttf-dev`,
+`libdrm-dev`, `libgbm-dev`, `libegl1-mesa-dev`, `libgles2-mesa-dev`,
+`libudev-dev`, `libasound2-dev`). Medido: **146 MB em 111 pacotes** — os 13
+pedidos mais ~100 dependências automáticas (X11 dev, glib, ICU, harfbuzz,
+freetype, wayland, pulse).
+
+**Para que servem, e é legítimo:** o launcher compilado **nativamente em x86_64**,
+que é como a equipe do app roda `--tamanho 1280x720` no PC para medir letterbox
+sem hardware. O `compilar-launcher.sh` deles monta um prefixo próprio
+(`~/.cache/giochi-sdl2/root/`) com symlinks para `/usr/lib/x86_64-linux-gnu/`.
+Sem isso o `cargo` morre em `rust-lld: unable to find library -lSDL2`.
+
+**Impacto no build do Buildroot: nenhum.** Cross-compile usa o toolchain, o
+`host/` e o sysroot que o próprio Buildroot constrói; biblioteca de
+desenvolvimento do host não é consultada em momento algum. E não há risco de
+vazamento por acidente, porque o `pkg-config` do Buildroot é embrulhado com
+`PKG_CONFIG_LIBDIR`/`PKG_CONFIG_SYSROOT_DIR`. Medido no host, sem embrulho:
+
+```text
+$ pkg-config --cflags --libs sdl2
+-I/usr/include/SDL2 -D_REENTRANT -lSDL2        ← x86_64, sem sysroot
+```
+
+É exatamente o que **não** pode entrar num build de target.
+
+**O risco real, e é silencioso:** usar esse `pkg-config` para compilar o launcher
+**para aarch64**. O configure acha o `.pc`, o link passa, e o binário sai ligado
+em `libSDL2-2.0.so.0` de **x86_64** — ou o link "funciona" no PC e o aparelho
+recusa com `wrong ELF class` / biblioteca ausente. Nenhuma etapa avisa, porque
+cada uma, isolada, está correta.
+
+Regra: compilar para o aparelho é **sempre** com o staging do Buildroot —
+
+```bash
+PKG_CONFIG_SYSROOT_DIR=$WORK/build/staging \
+PKG_CONFIG_LIBDIR=$WORK/build/staging/usr/lib/pkgconfig:$WORK/build/staging/usr/share/pkgconfig
+```
+
+ou, melhor, com o SDK (`BR2_PACKAGE_HOST_ENVIRONMENT_SETUP=y` + `make sdk`), que
+gera um `environment-setup-*` com tudo já apontado.
+
+**Corolário de método:** o mesmo comando `apt install` que resolve o build nativo
+não tem efeito nenhum sobre o build do aparelho, e as duas coisas convivem na
+mesma máquina sem se cruzar — desde que ninguém use o `pkg-config` errado. Vale
+para qualquer dependência futura do mesmo tipo: enquanto o caminho do
+cross-compile for explícito, o host pode ter o que quiser.
+
 ## 13. Aparelhos
 
 | ID | Pasta | SoC | Arch | Status | Falta |
