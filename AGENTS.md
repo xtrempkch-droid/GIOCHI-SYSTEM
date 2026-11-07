@@ -2835,6 +2835,29 @@ dispositivo aberto: 48000 Hz, 2 canal(is), 1024 amostras/buffer
 `state: RUNNING` com `owner_pid` do próprio processo é a prova que importa: não
 é "abriu o dispositivo", é "havia dados indo para o DAC naquele instante".
 
+**Registrador do RK817: `0x00` é volume MÁXIMO, não zero.** Ao investigar
+silêncio no R35S, `DDAC_VOLL`/`DDAC_VOLR` (0x31/0x32) liam `0x00`. O reflexo é
+concluir "volume zerado". Errado: o kcontrol é
+
+```c
+SOC_DOUBLE_R_RANGE_TLV("Master Playback Volume", RK817_CODEC_DDAC_VOLL,
+    RK817_CODEC_DDAC_VOLR, 0, 0x00, 0xff, 1, rk817_vol_tlv)
+                                           ^ xinvert = 1
+```
+
+com `xinvert=1` o valor é gravado invertido: usuário 255 (máximo) → registrador
+`0xff + 0x00 - 255 = 0x00`. Ou seja `0x00` é **0 dB**, e `0xff` seria mudo. O
+mixer mostrava `255/255`, coerente. Ler o registrador sem ler o `xinvert` leva à
+conclusão oposta à verdade.
+
+`DDAC_MUTE_MIXCTL` (0x38) lido como `0xb0`: bit 0 = 0 = `DACMT_DISABLE`, também
+correto. E `ACLASSD_CFG1` (0x40) = `0xa9`, bit 7 = 1 = class-D ligado.
+
+Ou seja: com PCM `RUNNING`, `Speaker: On` no DAPM, mux `SPK`, volume máximo,
+DAC desmutado e class-D ligado, **a cadeia de software está correta até o
+registrador** — e mesmo assim não sai som. Nesse ponto a investigação é física
+(falante, conector de fone com chave mecânica travada), não de configuração.
+
 Armadilha de verificação que custou um susto: `debugfs` **não** está no pacote
 `e2fsprogs` do Alpine — é `e2fsprogs-extra`. Com o primeiro, o comando vira
 "not found", o `grep -q Inode` falha e **todo arquivo aparece AUSENTE**: o cartão
