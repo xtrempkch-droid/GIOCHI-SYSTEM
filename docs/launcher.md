@@ -326,13 +326,32 @@ tela; `tests/engine-deps.test.mjs` prende a invariante.
 
 ### A receita de cross-compile que funciona
 
-O `cross` **não** é o caminho para o nosso alvo, e a engine documenta por quê: o
-SDL2 que ele produz vem com backends de desktop (`libsndio`, `libwayland-egl`,
-`libjack`, `libpulse`, `libpipewire`) — nenhum existe numa imagem Buildroot, e o
-binário morre em `error while loading shared libraries: libsndio.so.7`.
+**Está automatizada:** `bash scripts/engine-build.sh powkiddy-x35h [--instalar]`.
 
-O caminho que serve é o **sysroot do próprio Buildroot**, que é a mesma fonte que
-gerou a imagem:
+Resultado medido, compilando a engine de verdade contra o sysroot do X35H:
+
+```text
+ELF 64-bit LSB pie executable, ARM aarch64
+INTERP /lib/ld-linux-aarch64.so.1
+NEEDED:
+  libSDL2_image-2.0.so.0
+  libSDL2_mixer-2.0.so.0
+  libSDL2-2.0.so.0
+  libgcc_s.so.1
+  libc.so.6
+glibc exigida: GLIBC_2.34  (aparelho tem 2.38)
+```
+
+Cinco dependências, todas na imagem. Compare com o que o `cross` produz —
+`libsndio.so.7`, `libwayland-egl.so.1`, `libjack.so.0`, `libpipewire-0.3.so.0` —
+nenhuma existente num rootfs Buildroot.
+
+O `cross` **não** é o caminho para o nosso alvo: o SDL2 que ele vincula vem do
+`libsdl2-dev` AMD64 do container, e o binário morre no aparelho em
+`error while loading shared libraries: libsndio.so.7`. O caminho que serve é o
+**sysroot do próprio Buildroot**, que é a mesma fonte que gerou a imagem.
+
+O script faz exatamente isto:
 
 ```bash
 W=~/.cache/giochi-system/work/<device>/build

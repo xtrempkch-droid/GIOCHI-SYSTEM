@@ -121,3 +121,62 @@ test("o AGENTS não repete mais que amixer não existe no Buildroot", async () =
   );
   assert.match(texto, /config BR2_PACKAGE_ALSA_UTILS_AMIXER/, "a evidência do Config.in saiu");
 });
+
+// ── o script de cross-compile ───────────────────────────────────────────────
+//
+// A engine tem `Cross.toml` e ele funciona — mas o SDL2 que produz vem do
+// `libsdl2-dev` AMD64 do container e o artefato sai pedindo `libsndio.so.7`,
+// `libwayland-egl.so.1`, `libjack.so.0`, `libpipewire-0.3.so.0`. Nenhuma existe
+// numa imagem Buildroot. Estes testes prendem o contrato do caminho que serve.
+
+const ENGINE_SH = path.join(ROOT, "scripts", "engine-build.sh");
+
+test("o script da engine usa o linker do Buildroot, não o do sistema", async () => {
+  // O gcc do Buildroot carrega o próprio sysroot (glibc igual à do aparelho) e
+  // injeta `--dynamic-linker` e os `crt*.o` sozinho. O `aarch64-linux-gnu-gcc`
+  // do Ubuntu traz sysroot glibc 2.35 contra aparelho 2.38, e é a raiz das
+  // quatro gambiarras que a doc da engine manda fazer à mão.
+  const texto = await readFile(ENGINE_SH, "utf8");
+  assert.match(texto, /buildroot-linux-gnu-gcc/);
+  assert.doesNotMatch(
+    texto,
+    /LINKER=.*aarch64-linux-gnu-gcc["'\s]/,
+    "não use o gcc aarch64 do sistema — sysroot glibc 2.35",
+  );
+});
+
+test("o script usa PKG_CONFIG_LIBDIR, que SUBSTITUI a busca padrão", async () => {
+  // `PKG_CONFIG_PATH` ACRESCENTA; o `.pc` do Ubuntu continua respondendo. Foi
+  // assim que `-I/usr/include/SDL2` entrou no cross-compile do sdl2_mixer e o
+  // gcc do Buildroot abortou com "unsafe header/library path".
+  const texto = await readFile(ENGINE_SH, "utf8");
+  assert.match(texto, /PKG_CONFIG_LIBDIR=/, "sem LIBDIR o .pc do host vence");
+  assert.doesNotMatch(
+    texto,
+    /^\s*export PKG_CONFIG_PATH=/m,
+    "PKG_CONFIG_PATH acrescenta e deixa o host vencer — use LIBDIR",
+  );
+});
+
+test("o script desliga o SDL2 bundled e usa o do sysroot", async () => {
+  // `bundled` compila um SDL2 próprio, com backends de desktop. `sdl2-system`
+  // troca por `use-pkgconfig`, que é o que aponta para o sysroot.
+  const texto = await readFile(ENGINE_SH, "utf8");
+  assert.match(texto, /--no-default-features/);
+  assert.match(texto, /--features sdl2-system/);
+});
+
+test("o script recusa binário que peça backend de desktop", async () => {
+  // Sem esta guarda, um PKG_CONFIG_LIBDIR mal posto produz binário que `file`
+  // diz ser válido e que morre no aparelho sem mensagem útil.
+  const texto = await readFile(ENGINE_SH, "utf8");
+  assert.match(texto, /lib\(sndio\|wayland\|jack\|pulse\|pipewire\)/);
+});
+
+test("o script confere PT_INTERP antes de instalar", async () => {
+  // O sintoma mais enganoso: `file` diz "ELF aarch64 válido" e o binário dá
+  // segfault imediato porque o kernel não sabe quem carregar.
+  const texto = await readFile(ENGINE_SH, "utf8");
+  assert.match(texto, /ld-linux-aarch64\.so\.1/);
+  assert.match(texto, /readelf -l/);
+});

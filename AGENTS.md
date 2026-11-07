@@ -2685,6 +2685,48 @@ mesma máquina sem se cruzar — desde que ninguém use o `pkg-config` errado. V
 para qualquer dependência futura do mesmo tipo: enquanto o caminho do
 cross-compile for explícito, o host pode ter o que quiser.
 
+### 12.55 O `sdl2-config` do sistema vence o do Buildroot — e o gcc pega, não o build
+
+Consequência direta do §12.54, e apareceu no dia seguinte: ao ligar
+`BR2_PACKAGE_SDL2_MIXER` (que a GIOCHI-ENGINE exige), o `sdl2_mixer` 2.6.3 não
+compilou.
+
+```text
+aarch64-buildroot-linux-gnu-gcc: ERROR: unsafe header/library path used in
+cross-compilation: '-I/usr/include/SDL2'
+make[2]: *** [Makefile:187: build/music_cmd.lo] Error 1
+```
+
+A causa em três camadas, e nenhuma delas está no pacote:
+
+1. `BR_PATH = "$(HOST_DIR)/bin:$(HOST_DIR)/sbin:$(PATH)"` (`Makefile:468`) — o
+   PATH do sistema entra na conta do configure.
+2. O `sdl2-config` do Buildroot é instalado em
+   **`$(STAGING_DIR)/usr/bin/sdl2-config`**, que **não** está nesse PATH.
+3. O `configure` do SDL2_mixer procura com
+   `AC_PATH_TOOL(SDL2_CONFIG, sdl2-config)` e acha `/usr/bin/sdl2-config` do
+   Ubuntu, que responde `-I/usr/include/SDL2`.
+
+Note que `sdl2_image` e `sdl2_ttf` **não** quebraram: eles usam pkg-config, e o
+pkg-config do Buildroot é embrulhado com `PKG_CONFIG_LIBDIR`/`SYSROOT_DIR`. O
+`sdl2_mixer` é o único da família que ainda usa `sdl2-config`. Sem o
+`libsdl2-dev` do host instalado o problema não existiria — o que o torna
+dependente de máquina, e portanto do tipo que só quebra na máquina de alguém.
+
+**Quem salvou o build foi a trava do próprio gcc do Buildroot** (`unsafe
+header/library path`). Sem ela, o mixer linkaria contra o SDL2 de x86_64 e o
+binário sairia "válido" e inútil no aparelho — §12.54 na forma consumada.
+
+Correção em `config/package-overrides.mk`:
+
+```make
+override SDL2_MIXER_CONF_ENV += SDL2_CONFIG=$(STAGING_DIR)/usr/bin/sdl2-config
+```
+
+`AC_PATH_TOOL` respeita a variável já definida no ambiente. `override ... +=` e
+não `=` porque, se uma versão futura do Buildroot passar a definir
+`SDL2_MIXER_CONF_ENV`, o acréscimo soma em vez de ser apagado (§12.7).
+
 ## 13. Aparelhos
 
 | ID | Pasta | SoC | Arch | Status | Falta |

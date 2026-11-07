@@ -184,3 +184,33 @@ override PSPLASH_IMAGE = $(GIOCHI_SPLASH_PNG)
 
 # Conferir com:
 #   make -p -n | grep '^PSPLASH_IMAGE'
+
+# ── sdl2_mixer: o sdl2-config do SISTEMA vaza para o cross-compile ──────────
+# Só aparece em máquina que tem `libsdl2-dev` instalado — e esta tem, porque o
+# launcher x86_64 precisa dele (§12.54). Medido ao ligar `SDL2_MIXER`:
+#
+#   aarch64-buildroot-linux-gnu-gcc: ERROR: unsafe header/library path used in
+#   cross-compilation: '-I/usr/include/SDL2'
+#
+# A causa, em três camadas:
+#
+#   1. `BR_PATH = "$(HOST_DIR)/bin:$(HOST_DIR)/sbin:$(PATH)"` (Makefile:468) —
+#      o PATH do sistema entra na conta.
+#   2. O `sdl2-config` do Buildroot é instalado em
+#      `$(STAGING_DIR)/usr/bin/sdl2-config`, que NÃO está no PATH acima.
+#   3. O `configure` do SDL2_mixer 2.6.3 procura com
+#      `AC_PATH_TOOL(SDL2_CONFIG, sdl2-config)`, acha `/usr/bin/sdl2-config` do
+#      Ubuntu e recebe `-I/usr/include/SDL2`.
+#
+# Quem salvou o build foi a trava do próprio gcc do Buildroot
+# (`unsafe header/library path`): sem ela, o mixer linkaria contra o SDL2 de
+# x86_64 e o binário sairia "válido" e inútil no aparelho.
+#
+# `AC_PATH_TOOL` respeita a variável de ambiente já definida, então apontar para
+# o do staging resolve. `override ... +=` e não `=` porque, se uma versão futura
+# do Buildroot passar a definir `SDL2_MIXER_CONF_ENV`, o acréscimo soma em vez de
+# ser apagado (a armadilha do strace, §12.7).
+#
+# Conferir com:
+#   make -p -n | grep '^SDL2_MIXER_CONF_ENV'
+override SDL2_MIXER_CONF_ENV += SDL2_CONFIG=$(STAGING_DIR)/usr/bin/sdl2-config
