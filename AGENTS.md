@@ -442,6 +442,8 @@ bash scripts/build-in-container.sh powkiddy-x55 # build sem dependências no hos
 bash scripts/build-in-container.sh --sd-image powkiddy-x55   # imagem de cartão
 bash scripts/flash-sd.sh --list                 # discos removíveis
 bash scripts/gles-probe.sh powkiddy-x35h --run   # GLES/EGL reais, sem pacote novo
+bash scripts/audio-alerta.sh --alar             # tom pela via SDL2 -> ALSA
+bash scripts/engine-build.sh r35s --instalar    # compila a GIOCHI-ENGINE
 python3 scripts/gles-probe.py                    # idem sem compilar (usa o python3 da imagem)
 docker run --rm --privileged -v /dev:/dev -v ./docker:/work/push:ro ... \
   /work/push/serial-push.py /dev/ttyUSB0 1500000 <arquivo> '<comando>'  # enviar por serial
@@ -2817,6 +2819,21 @@ p2: SDL2 com 14 menções a ALSA (era 0)
     libSDL2_mixer, libSDL2_ttf, libSDL2_image, libasound — OK
 p1: extlinux.conf com fdt correto e SEM `menu title` (§12.38)
 ```
+
+**Prova de áudio pela via SDL2, não só ALSA.** `speaker-test` fala ALSA direto e
+toca normalmente num aparelho onde o SDL2 foi compilado com `--disable-alsa` —
+foi exatamente o defeito acima. O que precisa de prova é a camada do meio.
+`scripts/audio-alerta.sh` (+ `scripts/sdl-audio-probe.c`) usa o mesmo caminho do
+jogo e imprime o driver escolhido. Medido no R35S com a imagem corrigida:
+
+```text
+driver de audio SDL2: alsa
+dispositivo aberto: 48000 Hz, 2 canal(is), 1024 amostras/buffer
+/proc/asound/card0/pcm0p/sub0/status:  state RUNNING, owner_pid <o probe>
+```
+
+`state: RUNNING` com `owner_pid` do próprio processo é a prova que importa: não
+é "abriu o dispositivo", é "havia dados indo para o DAC naquele instante".
 
 Armadilha de verificação que custou um susto: `debugfs` **não** está no pacote
 `e2fsprogs` do Alpine — é `e2fsprogs-extra`. Com o primeiro, o comando vira
