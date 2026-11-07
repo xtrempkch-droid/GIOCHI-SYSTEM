@@ -3275,6 +3275,29 @@ sem medir o build completo.
 
 ### Pendências que não são de build
 
+0. **GIOCHI-ENGINE: aguardando decisão de virar item obrigatório.** O dono do
+   projeto decidirá com a equipe do app. O que já está medido, para a decisão não
+   ser tomada no escuro:
+
+   | Verificação | Resultado |
+   | --- | --- |
+   | compila contra o sysroot do Buildroot | OK, `scripts/engine-build.sh` |
+   | dependências do binário | `libSDL2_image`, `libSDL2_mixer`, `libSDL2`, `libgcc_s`, `libc` — as 5 na imagem |
+   | vídeo | `driver de vídeo SDL2 ativo: KMSDRM`, `master = y` |
+   | prova de desenho | `framebuffer[N] allocated by = hello_rect, refcount = 2`, 640x480 XR24 |
+   | prova visual | **fundo azul com quadrado se movendo**, confirmado pelo dono do aparelho |
+   | input | `gamepad conectado: r36s_Gamepad` |
+   | áudio | `WARN = 0`, `/dev/snd/pcmC0D0p` aberto |
+   | erros no log | 0 |
+
+   **O que falta decidir, e é decisão de produto, não técnica:** a engine é
+   *biblioteca + exemplo* (`giochi-demo`), não aplicativo. Empacotar o
+   `giochi-demo` no rootfs prova a stack, mas quem o usuário abre é o **launcher**,
+   que é do `Giochi app` e entra por overlay. As duas perguntas concretas:
+   (a) a imagem passa a levar o `giochi-demo` como smoke test de GPU/áudio, ou
+   (b) a engine fica só como dependência de *build* do launcher, e nada dela vai
+   no rootfs.
+
 1. **As três perguntas ao time do app foram respondidas** (04/11, no canal):
    - **Godot 4 = Compatibility (GLES3).** Vulkan não se declara. Não é economia
      de espaço, é contrato: `graphics_api_min: vulkan` no `forge.json` é sempre

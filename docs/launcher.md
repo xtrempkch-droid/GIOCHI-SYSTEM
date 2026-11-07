@@ -371,6 +371,12 @@ framebuffer[46]:
 
 `/sys/kernel/debug/dri/0/clients` lista `master: y` durante a execução.
 
+**Confirmado a olho, pelo dono do aparelho:** o exemplo `hello_rect` ficou na
+tela como **fundo azul com um quadrado se movendo** — que é exatamente o que ele
+desenha (`clear(28,72,150)` + retângulo vermelho em órbita). Sem essa confirmação
+visual, o debugfs provava alocação e refcount, mas não provava que os pixels
+certos chegavam ao painel.
+
 **Armadilha medida no caminho:** ler `/dev/fb0` para provar que desenhou **não
 funciona** com KMSDRM ativo. O pixel do centro ficou idêntico antes e durante —
 22 18 16 nos dois. O `/dev/fb0` é o buffer do fbdev; com o DRM master tomado, o
