@@ -2807,6 +2807,24 @@ meus na mesma checagem, os dois pegos por teste, não por leitura.
 Verificado no aparelho depois de reconstruir o `sdl2` do R35S com ALSA: a engine
 abre `/dev/dri/card0` **e** `/dev/snd/pcmC0D0p`, e não emite mais o aviso.
 
+**Imagem corrigida e gravada em 07/11/2026** (`out/r35s/giochi-system-r35s-sd.img`,
+2 GiB, SHA256 `88906105…`), depois de rebuild do `r35s` com os quatro símbolos
+novos. Verificado **lendo o cartão de volta**, não o `dd`:
+
+```text
+p2: SDL2 com 14 menções a ALSA (era 0)
+    amixer, aplay, arecord, speaker-test, alsamixer, alsactl — todos OK
+    libSDL2_mixer, libSDL2_ttf, libSDL2_image, libasound — OK
+p1: extlinux.conf com fdt correto e SEM `menu title` (§12.38)
+```
+
+Armadilha de verificação que custou um susto: `debugfs` **não** está no pacote
+`e2fsprogs` do Alpine — é `e2fsprogs-extra`. Com o primeiro, o comando vira
+"not found", o `grep -q Inode` falha e **todo arquivo aparece AUSENTE**: o cartão
+parecia vazio com o rootfs correto gravado. O que desmentiu foi o magic `53 ef`
+lido direto no offset 320 MiB. A lição é a mesma do §12.30: ferramenta ausente
+não é dado ausente — quando tudo dá "não tem", o suspeito é o instrumento.
+
 ## 13. Aparelhos
 
 | ID | Pasta | SoC | Arch | Status | Falta |
