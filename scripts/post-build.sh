@@ -244,9 +244,11 @@ INIT_BIN="$TARGET_DIR/usr/bin/giochi-init"
 ENTRADA='::respawn:/usr/bin/giochi-init'
 
 if grep -qxF "$ENTRADA" "$INITTAB" 2>/dev/null; then
+    # NÃO use `exit 0` aqui (§12.49): este arquivo tem outros blocos DEPOIS, e
+    # sair cedo os transforma em código morto — que só não aparece no primeiro
+    # build. Foi assim que o gate do SDL2/ALSA ficou inerte na primeira versão.
     echo "post-build: inittab já chama giochi-init"
-    exit 0
-fi
+else
 
 [ -x "$INIT_BIN" ] || {
     echo "post-build: giochi-init não está executável — não vou pôr linha que falha" >&2
@@ -263,3 +265,73 @@ else
 fi
 
 echo "post-build: inittab agora respawna giochi-init"
+
+fi  # fim do bloco do inittab — não use `exit 0` lá dentro (§12.49)
+
+# ============================================================
+# Gate: SDL2 tem de ter suporte a ALSA quando alsa-lib está na imagem
+# ============================================================
+# Medido em 07/11/2026 no R35S, rodando a GIOCHI-ENGINE no aparelho:
+#
+#   [WARN] áudio indisponível, seguindo sem som: não foi possível abrir o
+#          dispositivo de áudio: dsp: No such audio device
+#
+# O SDL2 tinha caído no backend OSS (`dsp`), que não existe em kernel moderno
+# sem emulação. Investigando: `strings libSDL2 | grep -c alsa` dava **0** no
+# aparelho e **71** no build do X35H. Causa:
+#
+#   sdl2.mk:160   ifeq ($(BR2_PACKAGE_ALSA_LIB),y)
+#                 SDL2_CONF_OPTS += --enable-alsa
+#
+# O `--enable-alsa` é decidido **no configure do sdl2**. No build do R35S o sdl2
+# foi configurado às 06:20 e o `.config` com `BR2_PACKAGE_ALSA_LIB=y` é das
+# 19:33 — treze horas depois. Buildroot não reconfigura pacote já construído
+# quando uma dependência aparece (§12.29), então o `config.log` diz
+# `--disable-alsa` e o `.config` diz que ALSA está ligado. Os dois estão
+# "certos" e a imagem sai muda.
+#
+# Sintoma que isso produz: nenhum. Build verde, imagem boota, a UI funciona, e
+# só o áudio falta — e "sem áudio" parece problema de driver de placa, não de
+# flag de configure de uma biblioteca de terceiro.
+#
+# A checagem é sobre a CONSEQUÊNCIA: se alsa-lib está na imagem e o SDL2 não a
+# menciona, o SDL2 foi configurado sem ela. Não importa o que o `.config` diz.
+alerta_sdl2_alsa() {
+    libasound=$(find "$TARGET_DIR/usr/lib" "$TARGET_DIR/lib" -maxdepth 1 -name 'libasound.so*' 2>/dev/null | head -1)
+    sdl2=$(find "$TARGET_DIR/usr/lib" -maxdepth 1 -name 'libSDL2-2.0.so.0.*' 2>/dev/null | head -1)
+    [ -n "$libasound" ] && [ -n "$sdl2" ] || return 0
+
+    # `grep -a` porque é binário; `-c` porque só o número importa.
+    #
+    # ARMADILHA: `grep -c` imprime `0` **e** sai com status 1 quando não casa.
+    # Com `|| echo 0` o valor vira "0\n0", o `[ -eq ]` falha em silêncio e o
+    # gate passa exatamente no caso que ele existe para pegar. Medido: o caso
+    # "SDL2 sem ALSA" passou como OK na primeira versão desta checagem.
+    n=$(grep -ac "alsa" "$sdl2" 2>/dev/null) || n=0
+    case "$n" in ''|*[!0-9]*) n=0 ;; esac
+    if [ "$n" -eq 0 ]; then
+        echo "post-build: ERRO — o SDL2 desta imagem foi compilado SEM ALSA" >&2
+        echo "            alsa-lib está em $libasound, mas $sdl2" >&2
+        echo "            não referencia ALSA nenhuma vez (esperado > 0)." >&2
+        echo >&2
+        echo "            Efeito: o SDL2 cai no backend OSS ('dsp: No such audio" >&2
+        echo "            device') e TODO app SDL fica mudo — inclusive a engine." >&2
+        echo >&2
+        echo "            Causa: o sdl2 foi configurado ANTES de BR2_PACKAGE_ALSA_LIB" >&2
+        echo "            existir no .config, e o Buildroot não reconfigura pacote" >&2
+        echo "            já construído quando uma dependência aparece (§12.29)." >&2
+        echo >&2
+        echo "            Correção: limpe o pacote e rebuild." >&2
+        # `${BUILD_DIR:-}`: o Buildroot chama o post-build com TARGET_DIR e
+        # BINARIES_DIR apenas. `BUILD_DIR` NÃO vem no ambiente, e com `set -u`
+        # a linha `rm -rf $BUILD_DIR/...` aborta o script com "unbound
+        # variable" — antes de imprimir a própria instrução. O operador lê uma
+        # mensagem cortada e o build falha pelo motivo errado (§12.53).
+        echo "              rm -rf ${BUILD_DIR:-<build>}/build/sdl2-*" >&2
+        return 1
+    fi
+    echo "post-build: SDL2 com suporte a ALSA ($n referências)"
+    return 0
+}
+
+alerta_sdl2_alsa || exit 1

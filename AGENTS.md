@@ -2727,6 +2727,86 @@ override SDL2_MIXER_CONF_ENV += SDL2_CONFIG=$(STAGING_DIR)/usr/bin/sdl2-config
 não `=` porque, se uma versão futura do Buildroot passar a definir
 `SDL2_MIXER_CONF_ENV`, o acréscimo soma em vez de ser apagado (§12.7).
 
+### 12.56 SDL2 sem ALSA: o `.config` está certo, o `config.log` diz o contrário
+
+Descoberto em 07/11/2026 **rodando a GIOCHI-ENGINE no R35S**, não no build. O
+aparelho boota, a UI funciona, os botões respondem — e a engine avisou:
+
+```text
+[WARN] áudio indisponível, seguindo sem som: não foi possível abrir o
+       dispositivo de áudio: dsp: No such audio device
+```
+
+`dsp` é o backend **OSS**, que não existe em kernel moderno sem emulação.
+Medido:
+
+| Onde | `strings libSDL2-2.0.so.0.2800.5 \| grep -c alsa` |
+| --- | --- |
+| imagem do X35H (`out/`) | **14** |
+| imagem do R35S (`out/`) | **0** |
+| build do X35H (`work/`) | 71 |
+
+Causa, e é o §12.29 na forma mais silenciosa:
+
+```make
+# package/sdl2/sdl2.mk:160
+ifeq ($(BR2_PACKAGE_ALSA_LIB),y)
+SDL2_DEPENDENCIES += alsa-lib
+SDL2_CONF_OPTS += --enable-alsa
+```
+
+Isso é decidido **no configure do `sdl2`**. No build do R35S:
+
+```text
+sdl2/.stamp_configured   2026-11-06 06:20
+build/.config            2026-11-06 19:33   ← ALSA_LIB entrou 13 h depois
+config.log:              --disable-alsa
+```
+
+Os dois arquivos estão internamente coerentes: o `.config` diz que ALSA está
+ligado, o `config.log` diz que o sdl2 foi compilado sem. **Buildroot não
+reconfigura pacote construído quando uma dependência aparece** (§12.29), e
+nada no build aponta a discrepância — `assert-config` passa, porque o símbolo
+foi acrescentado de propósito.
+
+O sintoma não parece config: build verde, imagem boota, UI desenha, e "sem
+áudio" parece driver de placa. Só aparece quando **um app SDL tenta tocar som**
+— e antes da engine não havia nenhum que tentasse.
+
+**Gate** em `scripts/post-build.sh`: se `libasound` está em `target/` e o
+`libSDL2` não menciona `alsa` uma única vez, o build **falha** com causa e
+correção escritas. A checagem é sobre a consequência (a biblioteca referencia
+ALSA?), não sobre o que o `.config` declara.
+
+```text
+post-build: ERRO — o SDL2 desta imagem foi compilado SEM ALSA
+            Efeito: o SDL2 cai no backend OSS ('dsp: No such audio device')
+                    e TODO app SDL fica mudo — inclusive a engine.
+            Causa: o sdl2 foi configurado ANTES de BR2_PACKAGE_ALSA_LIB existir
+            Correção:
+              rm -rf <build>/build/sdl2-*
+```
+
+`tests/sdl2-alsa.test.mjs` roda o post-build de verdade em três cenários
+(com ALSA, sem ALSA com alsa-lib presente, sem alsa-lib nenhuma) e num quarto
+que executa **duas vezes** — porque a primeira versão do gate ficou depois de um
+`exit 0` do bloco do inittab e só rodava no primeiro build (§12.49). Dois bugs
+meus na mesma checagem, os dois pegos por teste, não por leitura.
+
+**Duas armadilhas dentro da correção:**
+
+1. `grep -c` imprime `0` **e** sai com status 1 quando não casa. Com
+   `n=$(grep -c ... || echo 0)` o valor vira `"0\n0"`, o `[ -eq ]` falha em
+   silêncio e o gate **passa exatamente no caso que existe para pegar**.
+2. `$BUILD_DIR` **não** está no ambiente do post-build (o Buildroot passa só
+   `TARGET_DIR` e `BINARIES_DIR`). Com `set -u`, a linha que imprime a correção
+   abortava o script com "unbound variable" — o operador via a mensagem cortada
+   e o build falhava pelo motivo errado (§12.53). Correção:
+   `${BUILD_DIR:-<build>}`.
+
+Verificado no aparelho depois de reconstruir o `sdl2` do R35S com ALSA: a engine
+abre `/dev/dri/card0` **e** `/dev/snd/pcmC0D0p`, e não emite mais o aviso.
+
 ## 13. Aparelhos
 
 | ID | Pasta | SoC | Arch | Status | Falta |

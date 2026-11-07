@@ -346,6 +346,28 @@ Cinco dependências, todas na imagem. Compare com o que o `cross` produz —
 `libsndio.so.7`, `libwayland-egl.so.1`, `libjack.so.0`, `libpipewire-0.3.so.0` —
 nenhuma existente num rootfs Buildroot.
 
+### Verificado no aparelho (R35S, 07/11/2026)
+
+Executado por SSH no R35S — **não é estimativa**:
+
+```text
+[INFO] driver de vídeo SDL2 ativo: KMSDRM
+[INFO] gamepad conectado: r36s_Gamepad
+(sem aviso de áudio)
+
+fds do processo:  /dev/dri/card0   (KMSDRM)
+                  /dev/snd/pcmC0D0p  (ALSA, reprodução)
+```
+
+Vídeo, input e áudio — os três. O `dummy not available` também foi medido: a
+imagem não traz o driver `dummy`, então a falha silenciosa do §11-A (cair no
+`dummy` e a tela ficar preta) é **impossível por construção** aqui.
+
+Uma ressalva de método: rodar com `SDL_KMSDRM_REQUIRE_DRM_MASTER=0` permite
+testar **sem tirar a tela** de quem está usando o aparelho. O launcher do app
+estava rodando e segurando o DRM master; sem essa variável, o SDL2 recusa e a
+única saída seria matar a interface.
+
 O `cross` **não** é o caminho para o nosso alvo: o SDL2 que ele vincula vem do
 `libsdl2-dev` AMD64 do container, e o binário morre no aparelho em
 `error while loading shared libraries: libsndio.so.7`. O caminho que serve é o
