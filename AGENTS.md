@@ -3660,3 +3660,54 @@ escrito** antes do passo seguinte. O que faltou foi o commit — por isso esta
 seção existe. Se a próxima sessão começar com `git status` mostrando só
 `device/r35s/README.md` modificado, está tudo consistente com o que está aqui.
 
+
+## 21. X55 reconstruído e o cartão de 116 GiB gravado (07/11/2026)
+
+A `.img` do X55 em `out/` era de **04/11** (`commit=151b416`), 30 commits atrás.
+Entre ela e `60e326f` entraram SDL2 image/ttf/mixer, ALSA utils, `giochi-usb`,
+`giochi-usbnet` com mass storage, `giochi-godot`, `S01splash`, `S50hwclock`,
+`S51mixer`, as duas chaves da loja e o `--grow`. Por isso o build foi **do zero**:
+as mudanças acrescentam dependência de pacote, e `KEEP_WORK=1` não reconfigura
+pacote já compilado (§12.29).
+
+```text
+commit     60e326f35ac34a7bb86abb0931a69643495da8bb   (= origin/main)
+built_at   2026-11-07T18:47:04Z
+assert-config        25 símbolos de 2 fragmentos
+assert-kernel-config 72 símbolos (2 allow-drop: JOYSTICK_ROCKNIX, ARM_ROCKCHIP_CPUFREQ)
+sha256 img           ba8f4afd1783f11ce4160d3f61bae273c7211ff2716ed5cc00916339b53d1ef6
+```
+
+Conferido **lendo o cartão**, não o `out/`:
+
+| Parte | Medida | Igual a |
+| --- | --- | --- |
+| firmware no setor 64 (18348 setores) | `a84f2fa6…` | `out/…/u-boot-rockchip.bin` |
+| FAT: `Image` | md5 `d1e6b234…` | `out/…/Image` |
+| FAT: `rk3566-powkiddy-x55.dtb` | md5 `4edab3eb…` | `out/…/rk3566-powkiddy-x55.dtb` |
+| `/etc/inittab` linha 30 | `::respawn:/usr/bin/giochi-init` | — |
+| scripts `S??*` e `giochi-init` | todos `0755` | §12.50 |
+| inodes usados | 3603 nos dois | `out/…/rootfs.ext4` |
+| `e2fsck -n` no p2 | `clean` | — |
+
+`extlinux.conf` no cartão: `timeout 30`, **sem** `menu title` (§12.38), `fdt`
+próprio, cmdline `console=ttyS2,1500000n8 … fbcon=rotate:3` com
+`root=PARTUUID=47494f43-02`.
+
+**`--grow` exercitado em cartão real pela primeira vez.** Cartão Multi-Reader de
+**116,1 GiB** em `/dev/sdd`, gravado com `flash-sd.sh --expect-gib 116 --grow` a
+43,6 MB/s: o SHA256 dos 2 GiB foi conferido **antes** de crescer, e o `p2` passou
+de 1,7 GiB para **115,8 GiB** (`30356480` blocos, `e2fsck -n` limpo). A diferença
+de blocos usados entre a imagem (53 500) e o cartão (526 517) é a tabela de
+inodes criada pelo `resize2fs` — 926 grupos × 512 blocos ≈ 473 mil — e não
+conteúdo perdido: os 3603 inodes usados e as 242 entradas de `/usr/bin` batem.
+
+**Sem `sudo` no host:** a gravação foi por container privilegiado com `/dev` e
+`/sys` do host (`docker run --privileged --user 0:0 -v /dev:/dev`), que é o
+caminho que o próprio `flash-sd.sh` documenta. `lsblk` falha dentro do container
+(erro de libc, já previsto no script) — a conferência de partições foi por
+`sfdisk -d` e `blockdev --getsize64`.
+
+**O que esta rodada NÃO prova:** nada foi medido no aparelho. O cartão está
+gravado, conferido e desmontado; falta colocá-lo no X55 e ler a serial a
+1500000. A imagem anterior ficou em `out/_anterior-x55-20261104/` para rollback.
