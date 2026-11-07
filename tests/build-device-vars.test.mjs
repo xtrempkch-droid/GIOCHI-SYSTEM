@@ -17,9 +17,32 @@ import { test } from "node:test";
 
 const SCRIPT = readFileSync(new URL("../scripts/build-device.sh", import.meta.url), "utf8");
 
-/** Remove comentários para não acusar variável citada em prosa. */
+/**
+ * Remove comentários para não acusar variável citada em prosa — e o conteúdo de
+ * heredoc CITADO (\`<<'EOF'\`), que o shell não expande.
+ *
+ * Sem isto o teste acusa falso positivo: um heredoc citado é TEXTO LITERAL, e
+ * `$STAGING_DIR` dentro dele não é expansão do script. É o caso do bloco que o
+ * build-device.sh anexa ao `environment-setup` do SDK, onde `$STAGING_DIR` é
+ * uma variável do arquivo GERADO, não deste script.
+ */
 function code(text) {
-  return text
+  const semHeredoc = [];
+  let marcador = null;
+  for (const line of text.split("\n")) {
+    if (marcador) {
+      if (line.trim() === marcador) marcador = null;
+      semHeredoc.push("");     // dentro do heredoc: não é código deste script
+      continue;
+    }
+    // `<<'EOF'` ou `<<"EOF"` → não expande. `<<EOF` (sem aspas) expande, e aí
+    // o conteúdo TEM de ser analisado.
+    const abre = line.match(/<<-?\s*(['"])([A-Za-z_][A-Za-z0-9_]*)\1/);
+    if (abre) marcador = abre[2];
+    semHeredoc.push(line);
+  }
+  return semHeredoc
+    .join("\n")
     .split("\n")
     .map((line) => {
       // `#` só inicia comentário quando não está entre aspas.

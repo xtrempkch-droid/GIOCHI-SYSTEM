@@ -49,3 +49,4 @@ import "./engine-deps.test.mjs";
 import "./sdl2-alsa.test.mjs";
 import "./sdl2-image-decoders.test.mjs";
 import "./dev-free-console.test.mjs";
+import "./sdk-sysroot.test.mjs";

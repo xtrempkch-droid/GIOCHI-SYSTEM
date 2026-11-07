@@ -1128,5 +1128,37 @@ echo
 # deste gate.
 printf '%s' "$CURRENT_PACKAGES" >"$PACKAGE_STATE_FILE" 2>/dev/null || true
 
+# ---------------------------------------------------------------
+# Endurece o `environment-setup` do SDK com o sysroot explícito.
+#
+# `BR2_PACKAGE_HOST_ENVIRONMENT_SETUP=y` gera `host/environment-setup`, que
+# exporta CC/AR/LD/STAGING_DIR e um `PKG_CONFIG` apontando para o pkg-config do
+# Buildroot. Medido: esse pkg-config JÁ resolve pelo sysroot do device sem
+# nenhuma variável — `pkg-config --libs sdl2` devolve `-lSDL2` e o `-L` certo.
+#
+# Isso funciona, mas é frágil: depende de o `pkg-config` ser o do Buildroot. Se
+# alguém trocar o PATH, o `pkg-config` do sistema responde com os `.pc` de
+# x86_64 — exatamente o vazamento dos §12.54 e §12.55, que já custou dois
+# builds neste projeto. Exportar as duas variáveis torna a dependência
+# explícita em vez de implícita, e o SDK passa a funcionar mesmo com o
+# pkg-config do host na frente.
+# ---------------------------------------------------------------
+if [ -f "$BUILD_DIR/host/environment-setup" ]; then
+  if ! grep -q "PKG_CONFIG_SYSROOT_DIR" "$BUILD_DIR/host/environment-setup" 2>/dev/null; then
+    cat >>"$BUILD_DIR/host/environment-setup" <<'SDKEOF'
+
+# --- Giochi System: sysroot explícito para o pkg-config ----------------
+# Sem estas duas linhas o SDK depende de o `pkg-config` do PATH ser o do
+# Buildroot. Trocado o PATH, o do sistema responde com .pc de x86_64 e o
+# cross-compile liga nas bibliotecas erradas — sem erro até o aparelho.
+# `PKG_CONFIG_LIBDIR` (não `PATH`) SUBSTITUI a busca padrão, que é o que
+# impede o .pc do host de vencer.
+export "PKG_CONFIG_SYSROOT_DIR=$STAGING_DIR"
+export "PKG_CONFIG_LIBDIR=$STAGING_DIR/usr/lib/pkgconfig:$STAGING_DIR/usr/share/pkgconfig"
+SDKEOF
+    echo "  SDK:     environment-setup com sysroot explícito" >&2
+  fi
+fi
+
 echo "OK: imagem(ns) em $OUT_DIR"
 ls -lh "$OUT_DIR"
