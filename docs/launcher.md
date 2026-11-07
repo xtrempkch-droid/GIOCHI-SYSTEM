@@ -346,6 +346,38 @@ Cinco dependências, todas na imagem. Compare com o que o `cross` produz —
 `libsndio.so.7`, `libwayland-egl.so.1`, `libjack.so.0`, `libpipewire-0.3.so.0` —
 nenhuma existente num rootfs Buildroot.
 
+### Engine verificada no R35S com a imagem nova (07/11/2026)
+
+Imagem de cartão recém-gravada, sem o launcher do app (é a nossa imagem pura).
+DRM livre. Rodado por SSH:
+
+```text
+driver de vídeo SDL2 ativo: KMSDRM
+gamepad conectado: r36s_Gamepad
+WARN = 0                        ← o áudio NÃO reclamou mais (§12.56 corrigido)
+fds: /dev/dri/card0  /dev/dri/renderD128  /dev/input/event2  /dev/snd/pcmC0D0p
+```
+
+E a prova de que **desenha**, não só abre: o debugfs do DRM mostra o framebuffer
+que a engine alocou, com `refcount=2` (cliente + CRTC, ativo):
+
+```text
+framebuffer[46]:
+	allocated by = hello_rect
+	refcount = 2
+	format = XR24 little-endian
+	size = 640x480   pitch = 2560
+```
+
+`/sys/kernel/debug/dri/0/clients` lista `master: y` durante a execução.
+
+**Armadilha medida no caminho:** ler `/dev/fb0` para provar que desenhou **não
+funciona** com KMSDRM ativo. O pixel do centro ficou idêntico antes e durante —
+22 18 16 nos dois. O `/dev/fb0` é o buffer do fbdev; com o DRM master tomado, o
+conteúdo não é atualizado ali. É o §12.35 (a ferramenta responde a pergunta
+errada) na forma de framebuffer. A prova válida é o `framebuffer[N]` do debugfs
+com `allocated by` e `refcount`.
+
 ### Verificado no aparelho (R35S, 07/11/2026)
 
 Executado por SSH no R35S — **não é estimativa**:
