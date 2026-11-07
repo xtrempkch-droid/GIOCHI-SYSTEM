@@ -98,6 +98,11 @@ BR2_PACKAGE_SDL2=y
 BR2_PACKAGE_SDL2_OPENGLES=y
 BR2_PACKAGE_SDL2_KMSDRM=y
 BR2_PACKAGE_SDL2_IMAGE=y
+# SDL2_mixer: a GIOCHI-ENGINE declara `features = ["image", "mixer", "ttf"]` no
+# `Cargo.toml`. Sem o mixer, o `PKG_CONFIG_PATH` do sysroot responde tudo menos
+# `SDL2_mixer.pc`, e o `sdl2-sys` falha no build. Medido: o sysroot do Buildroot
+# tinha sdl2.pc, SDL2_image.pc e SDL2_ttf.pc, e NÃO tinha SDL2_mixer.pc.
+BR2_PACKAGE_SDL2_MIXER=y
 
 # ── texto do launcher: fonte e rasterizador ──────────────────
 # O launcher desenha texto. Sem estes três, ele não abre uma fonte e a tela
@@ -136,6 +141,13 @@ BR2_PACKAGE_DEJAVU_SANS=y
 # ── áudio ────────────────────────────────────────────────────
 BR2_PACKAGE_ALSA_LIB=y
 BR2_PACKAGE_ALSA_UTILS=y
+# Subopções EXPLÍCITAS no 2024.02: só `alsactl` e `alsamixer` têm `default y`.
+# Sem estas linhas `amixer`, `aplay` e `arecord` não existem na imagem, e o
+# sintoma é "áudio não funciona" sem nada no log. Corrige o §12.16 do AGENTS,
+# que afirmava que `amixer` não existia no Buildroot — existe, é desligado.
+BR2_PACKAGE_ALSA_UTILS_AMIXER=y
+BR2_PACKAGE_ALSA_UTILS_APLAY=y
+BR2_PACKAGE_ALSA_UTILS_SPEAKER_TEST=y
 BR2_PACKAGE_MPG123=y
 BR2_PACKAGE_FLAC=y
 BR2_PACKAGE_LIBVORBIS=y

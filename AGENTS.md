@@ -883,16 +883,50 @@ Regra: prefira a falha explícita (`Direct firmware load ... failed with error
 -2`, sem `hci0`) a um nó que existe pela metade. O `giochi-selftest` segue a
 mesma linha — conta dispositivos e bits em vez de conferir nomes.
 
-### 12.16 `amixer` não existe no Buildroot, `alsactl` sim
+### 12.16 `amixer` existe no Buildroot — mas como subopção DESLIGADA
 
-`BR2_PACKAGE_ALSA_UTILS` no 2024.02 traz `alsactl` e `alsamixer`, **não**
-`amixer`. Um teste que dependa de `amixer` cai em SKIP silencioso — e SKIP não é
-aprovação. Para ler valor de controle de mixer sem `amixer`:
+**Esta seção estava errada por onze revisões.** O que estava escrito: "o
+`BR2_PACKAGE_ALSA_UTILS` não traz `amixer`". O fato, lido no `Config.in` do
+2024.02:
 
-```sh
-alsactl -f /tmp/state.conf store
-# bloco: name 'Playback Mux' / value HP
+```text
+package/alsa-utils/Config.in
+  config BR2_PACKAGE_ALSA_UTILS_ALSACTL
+      default y
+  config BR2_PACKAGE_ALSA_UTILS_ALSAMIXER
+      default y
+  config BR2_PACKAGE_ALSA_UTILS_AMIXER      ← existe; SEM default
+  config BR2_PACKAGE_ALSA_UTILS_APLAY       ← existe; SEM default
+  config BR2_PACKAGE_ALSA_UTILS_SPEAKER_TEST ← existe; SEM default
 ```
+
+Ou seja: só `alsactl` e `alsamixer` entram sozinhos. Todo o resto —
+`amixer`, `aplay`, `arecord`, `speaker-test` — é subopção explícita. "Não
+existe" e "não vem ligado" dão o **mesmo** sintoma numa imagem, e por isso a
+confusão sobreviveu tanto tempo: o `command -v amixer` falha nos dois casos.
+
+Medido no rootfs do R35S antes da correção:
+
+```text
+/usr/bin:  alsamixer
+/usr/sbin: alsactl
+(faltando: amixer, aplay, arecord, speaker-test)
+```
+
+Consequência que dói: sem `aplay` nem `speaker-test`, **não há como provar que o
+alto-falante toca** numa imagem recém-gravada. E sem `amixer` o script não lê
+controle de mixer em uma linha — `alsactl -f /tmp/s.state store` funciona, mas
+devolve o estado inteiro em formato de arquivo, não um valor.
+
+Correção: os três estão ligados nos defconfigs dos dois aparelhos com tela.
+`speaker-test` de propósito — é o único teste de áudio que não precisa de arquivo
+de mídia, e a imagem não tem mídia.
+
+**Regra que fica:** antes de escrever "o Buildroot não tem X", ler o
+`package/<x>/Config.in` e procurar `BR2_PACKAGE_<X>_<SUFIXO>`. A maioria dos
+pacotes de ferramentas é um menu com subopções, e o default costuma ser mínimo.
+A diferença entre "não empacotado" e "empacotado e desligado" muda a correção: a
+primeira exige receita nova, a segunda é uma linha.
 
 ### 12.17 linux-firmware do Buildroot omite arquivos do RTL8821CS
 
@@ -2522,9 +2556,12 @@ e depois de `/etc/init.d/S51mixer start`, `[PASS] Playback Mux = SPK (casa com o
 DTS: Speaker -> SPKO)`. `tests/onboard-drivers.test.mjs` prende o par: o valor do
 `asound.state` tem de casar com o roteamento do DTSI no repositório.
 
-**Por que `alsactl restore` e não `amixer`:** `amixer` não existe no Buildroot
-2024.02 (§12.16). E `alsactl` não é contorno — é o mecanismo que o ALSA prevê
-para estado de placa.
+**Por que `alsactl restore` e não `amixer`:** na época da correção `amixer` não
+estava na imagem. A razão real é que ele é subopção desligada por padrão
+(§12.16), não ausência do Buildroot — e foi corrigido: `amixer`, `aplay` e
+`speaker-test` agora estão nos defconfigs. `alsactl` continua sendo o mecanismo
+certo para **aplicar estado de placa**: é o que o ALSA prevê para isso, e o
+formato é um arquivo versionado no repositório, não uma sequência de comandos.
 
 #### A ferramenta que não descia
 

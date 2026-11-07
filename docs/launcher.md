@@ -293,6 +293,78 @@ Se o `giochi-selftest` disser `inittab NÃO chama giochi-init` com o launcher
 presente, o `post-build` não rodou — e aí o launcher nunca subiria sem uma pista
 do motivo.
 
+## GIOCHI-ENGINE: o que a imagem tem de entregar
+
+A engine própria (`GIOCHI-ENGINE`) declara no `Cargo.toml`:
+
+```toml
+sdl2 = { version = "0.38", default-features = false,
+         features = ["image", "mixer", "ttf"] }
+```
+
+Quatro módulos SDL e ALSA. **Três deles a imagem já tinha; o mixer faltava.**
+Medido no sysroot do Buildroot:
+
+```text
+sdl2         OK        sdl2.pc
+SDL2_image   OK        SDL2_image.pc
+SDL2_ttf     OK        SDL2_ttf.pc
+SDL2_mixer   AUSENTE   ← bloqueava o build
+```
+
+O erro que isso produz **não cita a imagem**:
+
+```text
+Perhaps you should add the directory containing `SDL2_mixer.pc'
+Package 'SDL2_mixer' not found
+The system library `SDL2_mixer` required by crate `sdl2-sys` was not found.
+```
+
+Quem lê isso procura no `PKG_CONFIG_PATH`, no crate `sdl2-sys`, no Rust — e o
+arquivo que falta é uma linha de `defconfig`. Corrigido nos três aparelhos com
+tela; `tests/engine-deps.test.mjs` prende a invariante.
+
+### A receita de cross-compile que funciona
+
+O `cross` **não** é o caminho para o nosso alvo, e a engine documenta por quê: o
+SDL2 que ele produz vem com backends de desktop (`libsndio`, `libwayland-egl`,
+`libjack`, `libpulse`, `libpipewire`) — nenhum existe numa imagem Buildroot, e o
+binário morre em `error while loading shared libraries: libsndio.so.7`.
+
+O caminho que serve é o **sysroot do próprio Buildroot**, que é a mesma fonte que
+gerou a imagem:
+
+```bash
+W=~/.cache/giochi-system/work/<device>/build
+R=$W/host/aarch64-buildroot-linux-gnu/sysroot
+
+PKG_CONFIG_ALLOW_CROSS=1 \
+PKG_CONFIG_SYSROOT_DIR="$R" \
+PKG_CONFIG_LIBDIR="$R/usr/lib/pkgconfig:$R/usr/share/pkgconfig" \
+CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER="$W/host/bin/aarch64-buildroot-linux-gnu-gcc" \
+cargo build --release --target aarch64-unknown-linux-gnu \
+      --no-default-features --features sdl2-system
+```
+
+Isso substitui **quatro** gambiarras que a documentação da engine descreve como
+necessárias ao montar sysroot copiando do aparelho:
+
+| O que eles copiam à mão | Por que não é preciso aqui |
+| --- | --- |
+| `libgcc_s.so.1` | o sysroot do Buildroot já tem |
+| `Scrt1.o`/`crti.o`/`crtn.o` | idem — o `rust-lld` não é driver cc, mas o gcc do Buildroot é: ele injeta |
+| `--dynamic-linker /lib/ld-linux-aarch64.so.1` | o gcc do toolchain já passa o `--dynamic-linker` correto |
+| `libc.so.6`/`libm.so.6` do aparelho (glibc 2.38) | o sysroot é glibc **2.38**, a mesma do aparelho |
+
+A raiz do problema deles é usar o `aarch64-linux-gnu-gcc` **do Ubuntu** (sysroot
+glibc 2.35) contra um aparelho com glibc 2.38. Trocar o linker para o do
+Buildroot resolve os quatro de uma vez, porque o gcc do Buildroot carrega o
+próprio sysroot por padrão.
+
+Verificado nesta árvore: um binário Rust cruzado pelo gcc do Buildroot sai com
+`INTERP /lib/ld-linux-aarch64.so.1` e exige no máximo `GLIBC_2.34` — mais baixo
+que os 2.38 disponíveis, portanto compatível.
+
 ## Ver também
 
 - [`sistema-base.md`](sistema-base.md) — SSH por cabo USB, sistema base.

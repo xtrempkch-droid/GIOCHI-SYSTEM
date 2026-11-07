@@ -121,6 +121,10 @@ BR2_PACKAGE_SDL2=y
 BR2_PACKAGE_SDL2_OPENGLES=y
 BR2_PACKAGE_SDL2_KMSDRM=y
 BR2_PACKAGE_SDL2_IMAGE=y
+# A GIOCHI-ENGINE declara `features = ["image", "mixer", "ttf"]`. Sem o mixer o
+# `.pc` não existe no sysroot e o `sdl2-sys` falha citando pkg-config, não a
+# imagem. `tests/engine-deps.test.mjs` prende a invariante nos três aparelhos.
+BR2_PACKAGE_SDL2_MIXER=y
 BR2_PACKAGE_SDL2_TTF=y
 # Harfbuzz NÃO vem de graça com SDL2_TTF: o .mk só passa --enable-harfbuzz
 # quando este símbolo existe por conta própria (AGENTS §11-A). Sem ele o texto

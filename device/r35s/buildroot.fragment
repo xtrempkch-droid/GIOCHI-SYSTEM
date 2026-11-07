@@ -13,12 +13,18 @@
 # escolhe o driver de áudio "dummy" ou aborta, e o `giochi-selftest` acusa
 # "libasound ausente — o launcher não inicia ou quebra em runtime".
 #
-# `ALSA_UTILS` traz `alsactl` e `alsamixer`. É a única forma de ler e gravar
-# estado de mixer no aparelho: o Buildroot 2024.02 desta série NÃO tem `amixer`
-# (§12.16), e sem `alsactl` não há como provar que o roteamento (`Playback Mux`)
-# ficou onde devia — foi assim que o X55 fechou o último FAIL dele.
+# `ALSA_UTILS` traz `alsactl` e `alsamixer` por padrão. `amixer`, `aplay` e
+# `speaker-test` são subopções EXPLÍCITAS no 2024.02 e precisam ser ligadas —
+# sem elas não há como provar que o alto-falante toca numa imagem recém-gravada,
+# onde não existe mídia para tocar (`speaker-test` gera o tom sozinho).
+#
+# Isto corrige o §12.16 do AGENTS, que afirmava que `amixer` não existia no
+# Buildroot. Existe: é `BR2_PACKAGE_ALSA_UTILS_AMIXER`, sem `default y`.
 BR2_PACKAGE_ALSA_LIB=y
 BR2_PACKAGE_ALSA_UTILS=y
+BR2_PACKAGE_ALSA_UTILS_AMIXER=y
+BR2_PACKAGE_ALSA_UTILS_APLAY=y
+BR2_PACKAGE_ALSA_UTILS_SPEAKER_TEST=y
 
 # ── firmware dos dongles Wi-Fi USB ──────────────────────────
 #
