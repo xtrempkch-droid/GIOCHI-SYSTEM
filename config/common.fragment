@@ -8,6 +8,25 @@
 # A senha de root, o hostname, o issue e os overlays são
 # definidos por scripts/prepare-config.mjs durante o build.
 
+# ── SDK: headers e sysroot para build cruzado ───────────────
+# Pedido da equipe da engine (07/11/2026, P1). O `/usr/include` da imagem é
+# VAZIO — medido: zero entradas. Não há stdio.h, stdlib.h nem os headers das
+# satélites do SDL2. Consequência: não se compila nada no aparelho, e um build
+# cruzado que use o sysroot dele fica incompleto.
+#
+# A correção certa NÃO é copiar `include/` e `lib/` para o rootfs (isso
+# multiplica o tamanho da imagem e continua sem os headers de libc). É exportar
+# um SDK de verdade: o Buildroot gera um tarball auto-contido com sysroot,
+# toolchain e `environment-setup-*`, e `make sdk` o produz.
+#
+#   BR2_PACKAGE_HOST_ENVIRONMENT_SETUP=y   → `environment-setup-<arch>`
+#   make sdk                                → tarball em images/
+#
+# A vantagem que resolve o P1 inteiro: o SDK já traz `PKG_CONFIG_SYSROOT_DIR` e
+# `PKG_CONFIG_LIBDIR` apontados para o sysroot certo. É exatamente o que faltava
+# quando os `.pc` do host vazaram para o cross-compile (§12.54, §12.55).
+BR2_PACKAGE_HOST_ENVIRONMENT_SETUP=y
+
 # Pacotes básicos de operação e diagnóstico.
 #
 # BR2_PACKAGE_BUSYBOX_SHOW_OTHERS libera os pacotes que o BusyBox já fornece

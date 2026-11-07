@@ -115,3 +115,13 @@ CONFIG_ASH=y
 CONFIG_ASH_JOB_CONTROL=y
 CONFIG_ASH_ALIAS=y
 CONFIG_ASH_EXPAND_PRMT=y
+
+# ── diagnóstico ─────────────────────────────────────────────
+# `timeout` faltava, e custou tempo: sem ele um teste que trava prende o
+# console para sempre, porque não há segunda sessão para matar o processo.
+# Pedido da equipe da engine (relatório de 07/11/2026, P2).
+#
+# O applet do busybox resolve por ~1 KB. `BR2_PACKAGE_COREUTILS` traria o
+# `timeout` e mais 100 utilitários que a imagem não usa — o mesmo raciocínio do
+# `tc` (§12.7): preferir o applet quando ele cobre o caso.
+CONFIG_TIMEOUT=y

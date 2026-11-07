@@ -180,3 +180,24 @@ test("o script confere PT_INTERP antes de instalar", async () => {
   assert.match(texto, /ld-linux-aarch64\.so\.1/);
   assert.match(texto, /readelf -l/);
 });
+
+test("quem tem SDL2_IMAGE tem libpng — senão PNG não decodifica", async () => {
+  // `BR2_PACKAGE_SDL2_IMAGE=y` não implica decodificador PNG: o `.mk` do
+  // Buildroot só passa `--enable-png` quando `BR2_PACKAGE_LIBPNG` existe por
+  // conta própria. Sem ele a biblioteca é construída com `IMG_isPNG` presente e
+  // respondendo "PNG images are not supported" — um erro que parece do app.
+  //
+  // Medido no R35S em 07/11/2026: `giochi-demo` carregava `assets/player.png`
+  // no X55 e falhava aqui; o `c_smoke` da engine ia de 2 para 7 falhas, todas
+  // do mesmo motivo. X55 e X35H já declaravam `libpng`; o R35S não.
+  const aparelhos = await defconfigsComSdl2();
+  assert.ok(aparelhos.length > 0, "nenhum defconfig com SDL2 — teste inútil");
+  for (const { pasta, texto } of aparelhos) {
+    if (!/^BR2_PACKAGE_SDL2_IMAGE=y$/m.test(texto)) continue;
+    assert.match(
+      texto,
+      /^BR2_PACKAGE_LIBPNG=y$/m,
+      `${pasta}: falta BR2_PACKAGE_LIBPNG — a SDL2_image fica sem PNG`,
+    );
+  }
+});

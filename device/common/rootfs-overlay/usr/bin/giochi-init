@@ -82,6 +82,22 @@ RESTART_WINDOW=60
 # de adivinhar. Ver §12.45 em AGENTS.md.
 PARADA_FILE="${GIOCHI_PARADA_FILE:-/run/giochi/launcher-parado}"
 
+# ## Console livre para desenvolvimento
+#
+# `touch /run/giochi/dev-free-console` faz o giochi-init NÃO iniciar o launcher
+# enquanto o arquivo existir. `rm` devolve o comportamento normal.
+#
+# Por que existe, medido: para testar um binário que precisa do DRM master (a
+# engine, o `hello_rect`), era preciso `chmod -x` no launcher e lembrar de
+# reverter — e esquecer deixa o aparelho sem interface para sempre, sem nada no
+# console dizendo por quê. Pior: o launcher morto 5 vezes em 60 s faz o
+# supervisor DESISTIR, e aí a tela fica preta e o `sleep 3600` não conta nada.
+# Relatado pela equipe da engine em 07/11/2026 (P4) como o item de maior valor.
+#
+# A flag é verificada ANTES de cada tentativa, então também funciona quando o
+# launcher já está rodando: ele sai, o giochi-init vê a flag e não reinicia.
+DEV_FREE_FILE="${GIOCHI_DEV_FREE_FILE:-/run/giochi/dev-free-console}"
+
 # Saída deliberada: 0 (o launcher pediu para sair) ou morte por sinal
 # "administrativo". 128+sinal é o que o shell devolve para filho morto por sinal.
 saida_deliberada() {
@@ -250,8 +266,23 @@ main() {
 
     restarts=0
     window_start=0
+    dev_aviso=0
 
     while :; do
+        # Flag de desenvolvimento: launcher não sobe enquanto o arquivo existir.
+        # Verificada a cada volta, então `touch` no meio de uma sessão também
+        # funciona — o launcher sai na próxima queda deliberada e não volta.
+        if [ -f "$DEV_FREE_FILE" ]; then
+            if [ "$dev_aviso" != "1" ]; then
+                log "console livre para desenvolvimento ($DEV_FREE_FILE) — launcher NÃO será iniciado"
+                log "remova o arquivo para voltar ao normal"
+                dev_aviso=1
+            fi
+            sleep 5
+            continue
+        fi
+        dev_aviso=0
+
         # Cobre tanto o primeiro boot sem launcher quanto o caso de ele
         # desaparecer depois (imagem trocada, app removido).
         [ -x "$LAUNCHER" ] || wait_for_launcher

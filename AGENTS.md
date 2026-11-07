@@ -2729,6 +2729,170 @@ override SDL2_MIXER_CONF_ENV += SDL2_CONFIG=$(STAGING_DIR)/usr/bin/sdl2-config
 não `=` porque, se uma versão futura do Buildroot passar a definir
 `SDL2_MIXER_CONF_ENV`, o acréscimo soma em vez de ser apagado (§12.7).
 
+### 12.58 O relatório da equipe da engine: o que confere e o que não confere
+
+Recebido em 07/11/2026 (`GIOCHI-ENGINE-3D`). Itens verificados um a um no
+aparelho, e **três dos oito já estavam resolvidos** — o relatório mediu uma
+imagem mais antiga que a do cartão.
+
+| Item do relatório | Medido agora | Veredito |
+| --- | --- | --- |
+| P0 `SDL2_image` sem PNG/JPEG | corrigido no defconfig + gate (§12.57) | **real, corrigido** |
+| P1 sysroot sem headers de libc | `/usr/include` com **0** entradas | **real, e pior** |
+| P1 headers das satélites | idem — nem SDL2 está lá | **real** |
+| P2 `fuser`/`lsof`/`strace`/`readelf` | **todos presentes** | **desatualizado** |
+| P2 `timeout` | ausente | **real, corrigido** |
+| P2 `python3` | ausente | real, **não** corrigido (decisão de licença) |
+| P3 bateria não carrega | `rk817-charger online = 0` | **hardware** |
+| P4 supervisor hostil | desistência já grava marcador | real; corrigido o resto |
+
+#### P3 — `online = 0` fecha a questão
+
+```text
+rk817-charger:  online = 0
+rk817-battery:  status = Discharging, capacity = 0
+```
+
+`online = 0` significa que o driver **não vê energia** chegando pelo PMIC. Como
+o cabo USB é a própria porta de dados (o gadget RNDIS), a porta não fornece
+carga — é hardware. O relatório chegou à mesma conclusão pela hipótese certa:
+"se existe `rk817-charger` com `online=0`, é a porta".
+
+Consequência prática que vale registrar: **qualquer sessão longa de
+desenvolvimento neste aparelho é uma aposta** enquanto a bateria não for
+resolvida. Hub USB com alimentação resolve sem tocar no software.
+
+#### P2 — três ferramentas que o relatório pede já estavam lá
+
+`fuser`, `lsof`, `strace` e `readelf` respondem no aparelho. A mensagem "sem
+`fuser` precisei varrer `/proc/*/fd/*`" não se aplica a esta imagem — quem
+escreveu mediu uma anterior.
+
+`timeout` realmente faltava, e o custo de corrigir era **1 KB**: o applet do
+busybox existe (`CONFIG_TIMEOUT`) e só estava desligado. `BR2_PACKAGE_COREUTILS`
+traria o applet e mais ~100 utilitários sem uso — mesmo raciocínio do `tc`
+(§12.7).
+
+`python3` fica de fora por decisão anterior registrada: `pygame` é LGPL-2.1 e a
+regra de licença recusa LGPL na imagem assinada. O interpretador sozinho é
+permissivo, mas incluí-lo abriria a porta para o que motivou a recusa. Um smoke
+test em Python pode rodar no host contra o aparelho por SSH.
+
+#### P1 — copiar `include/` não é a correção, o SDK é
+
+O relatório propõe exportar um SDK em vez de copiar `lib/` e `include/`, e está
+certo: copiar para o rootfs aumentaria a imagem e **continuaria sem os headers
+de libc**. `BR2_PACKAGE_HOST_ENVIRONMENT_SETUP=y` + `make sdk` gera um tarball
+auto-contido com sysroot, toolchain e `environment-setup-*` — e, o que resolve o
+problema de origem, com `PKG_CONFIG_SYSROOT_DIR` e `PKG_CONFIG_LIBDIR` já
+apontados para o sysroot certo. É exatamente o que faltava nos §12.54 e §12.55.
+
+### 12.57-A `IMG_Init` combinado derruba TODOS os formatos quando um falta
+
+Relatado pela equipe da engine (`GIOCHI-ENGINE-3D`) em 07/11/2026, e é a
+consequência que torna o §12.57 pior do que "PNG não abre":
+
+```c
+IMG_Init(IMG_INIT_PNG | IMG_INIT_JPG)
+```
+
+**falha inteira** se qualquer flag pedida faltar. O retorno é `0`, e um app que
+confia nele conclui que o subsistema de imagem está morto — mesmo com BMP, TGA,
+PNM e QOI funcionando perfeitamente. **Um formato ausente derruba todos**, e o
+sintoma não distingue "falta PNG" de "imagem não funciona".
+
+A correção deles foi defensiva e certa: abrir com `InitFlag::empty()` e sondar
+cada formato separadamente (`ADR-034`). Mas é **contorno de imagem quebrada**.
+Se ficar depois de a imagem ser corrigida, vira dívida permanente — código
+carregando complexidade para um defeito que não existe mais, sem ninguém saber
+quando remover.
+
+`scripts/img-init-probe.c` existe para dizer, com número, quando o contorno pode
+sair. Três medições:
+
+1. `IMG_Init(PNG|JPG|WEBP)` combinado — o que devolve de fato;
+2. um formato por vez — o que cada um entrega;
+3. **decodifica de verdade?** um PNG 1x1 sintético por `IMG_Load_RW`.
+
+O item 3 é o que separa "flag aceita" de "decodifica". Uma biblioteca pode
+aceitar `IMG_INIT_PNG` e falhar ao abrir o arquivo — e aí o contorno continua
+necessário por um motivo diferente do original.
+
+### 12.57 `SDL2_image` sem PNG — e o gate que eu escrevi errado sobre isso
+
+Terceiro caso da mesma família dos §12.16 e §12.56. Todos têm a mesma forma:
+
+```make
+# package/<consumidor>/<consumidor>.mk
+ifeq ($(BR2_PACKAGE_<LIB>),y)
+<CONSUMIDOR>_CONF_OPTS += --enable-<recurso>
+```
+
+O símbolo do **recurso** não existe: existe o pacote da **biblioteca**, e o
+consumidor pergunta por ele no configure. Repetiu em `alsa-utils`
+(`amixer`/`aplay`), `sdl2` (ALSA) e agora `sdl2_image`:
+
+```make
+# package/sdl2_image/sdl2_image.mk
+ifeq ($(BR2_PACKAGE_LIBPNG),y)  -> --enable-png
+ifeq ($(BR2_PACKAGE_JPEG),y)   -> --enable-jpg
+ifeq ($(BR2_PACKAGE_WEBP),y)   -> --enable-webp
+```
+
+Medido no R35S em 07/11/2026: `libpng` **não** estava no defconfig, então
+`--disable-png`, então `LOAD_PNG` ausente do `DEFS`. Sintoma:
+
+```text
+IMG_isPNG existe e responde "PNG images are not supported"
+```
+
+O erro aparece no **app**, não no build, e parece bug de quem chamou. Foi assim
+que chegou: "o sistema não decodifica PNG".
+
+#### O gate que eu escrevi errado
+
+Escrevi um gate que exigia o `libSDL2_image` referenciar `libpng`. O build
+seguinte **falhou** acusando PNG, JPEG e WebP ausentes — com o `config.log`
+dizendo `--enable-png --enable-jpg --enable-webp`.
+
+A causa: **a partir do SDL2_image 2.8, PNG e JPEG são decodificados pelo
+`stb_image` EMBUTIDO** (`-DUSE_STBIMAGE=1`). A biblioteca nunca lista libpng ou
+libjpeg como `NEEDED`, mesmo com o suporte ligado. Medido nos dois binários:
+
+| .so | `stbi_` | `libpng` | `IMG_isPNG` |
+| --- | --- | --- | --- |
+| com `--enable-png` | **1** | 0 | 2 |
+| com `--disable-png` | **0** | 0 | 1 |
+
+O marcador é `stbi_`, não `libpng`. E `libpng` continua necessário no defconfig —
+mas como **chave** que liga o `--enable-png`, não como biblioteca vinculada.
+
+É a mesma lição do `debugfs` ausente e do §12.30: **o gate perguntou pela
+implementação de um formato, e a implementação mudou de biblioteca.** Perguntar
+pela consequência ("o decodificador foi compilado dentro?") sobrevive a isso;
+perguntar por "está ligado na lib que eu esperava?" não.
+
+#### WebP: quarta armadilha, e é subopção de novo
+
+`BR2_PACKAGE_WEBP=y` **não basta**. O configure do SDL2_image procura
+`libwebpdemux`, não `libwebp`:
+
+```text
+Package 'libwebpdemux', required by 'virtual:world', not found
+```
+
+E `--enable-webp` é **aceito sem efeito**: `LOAD_WEBP` nunca entra no `DEFS`, e o
+WebP fica fora sem nenhum aviso. Precisa de `BR2_PACKAGE_WEBP_DEMUX=y`.
+
+TIFF ficou **fora de propósito**: puxa `libdeflate` + `xz` e jogo não usa.
+
+#### Regra que fecha a família
+
+Ao revisar um `defconfig`, para cada pacote consumidor, ler o `.mk` dele e
+procurar `ifeq ($(BR2_PACKAGE_`. Cada linha dessas é um recurso que **não** vem
+com o consumidor e **não** falha o build se faltar — só o runtime. Três dos
+quatro casos deste projeto vieram daí.
+
 ### 12.56 SDL2 sem ALSA: o `.config` está certo, o `config.log` diz o contrário
 
 Descoberto em 07/11/2026 **rodando a GIOCHI-ENGINE no R35S**, não no build. O

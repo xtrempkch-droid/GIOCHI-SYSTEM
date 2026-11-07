@@ -121,6 +121,35 @@ BR2_PACKAGE_SDL2=y
 BR2_PACKAGE_SDL2_OPENGLES=y
 BR2_PACKAGE_SDL2_KMSDRM=y
 BR2_PACKAGE_SDL2_IMAGE=y
+# SDL2_image NAO traz decodificador nenhum sozinho: o `.mk` do Buildroot liga
+# cada formato so quando o pacote da biblioteca existe por conta propria
+# (package/sdl2_image/sdl2_image.mk):
+#
+#   ifeq ($(BR2_PACKAGE_LIBPNG),y)  -> --enable-png
+#   ifeq ($(BR2_PACKAGE_JPEG),y)   -> --enable-jpg
+#   ifeq ($(BR2_PACKAGE_WEBP),y)   -> --enable-webp
+#
+# Sem elas a biblioteca compila com `IMG_isPNG` PRESENTE e respondendo
+# "PNG images are not supported" — o erro aparece no app, nao no build, e
+# parece bug de quem chamou. Medido no R35S em 07/11/2026: `giochi-demo`
+# carregava `assets/player.png` no X55 e falhava aqui; `c_smoke` ia de 2 para
+# 7 falhas, todas do mesmo motivo.
+#
+# TIFF fica fora de proposito: puxa libdeflate + xz e jogo nao usa.
+BR2_PACKAGE_LIBPNG=y
+BR2_PACKAGE_JPEG=y
+BR2_PACKAGE_WEBP=y
+# O SDL2_image procura `libwebpdemux` no pkg-config, nao `libwebp`.
+# Sem o DEMUX o configure diz "Package 'libwebpdemux' ... not found" e o
+# --enable-webp e aceito sem efeito: LOAD_WEBP nunca entra no DEFS e o
+# WebP fica fora sem nenhum aviso. Mesma familia do amixer e do sdl2_mixer.
+BR2_PACKAGE_WEBP_DEMUX=y
+# A `SDL2_image` do Buildroot só liga o decodificador PNG quando `libpng` está
+# na imagem — sem ela o `IMG_isPNG` existe e responde "PNG images are not
+# supported", o que parece bug do app. Medido no R35S em 07/11/2026: o mesmo
+# `giochi-demo` carrega `assets/player.png` no X55 e falha aqui com
+# "Unsupported image format"; o `c_smoke` da engine passa de 2 para 7 falhas,
+# todas do mesmo motivo. X55 e X35H já tinham `libpng`; o R35S não.
 # A GIOCHI-ENGINE declara `features = ["image", "mixer", "ttf"]`. Sem o mixer o
 # `.pc` não existe no sysroot e o `sdl2-sys` falha citando pkg-config, não a
 # imagem. `tests/engine-deps.test.mjs` prende a invariante nos três aparelhos.

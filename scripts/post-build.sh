@@ -335,3 +335,130 @@ alerta_sdl2_alsa() {
 }
 
 alerta_sdl2_alsa || exit 1
+
+# ============================================================
+# Gate: SDL2_image com os decodificadores que a imagem declara ter
+# ============================================================
+# Mesma familia do gate acima, e mesmo mecanismo do Buildroot:
+#
+#   package/sdl2_image/sdl2_image.mk
+#   ifeq ($(BR2_PACKAGE_LIBPNG),y)  -> --enable-png
+#   ifeq ($(BR2_PACKAGE_JPEG),y)   -> --enable-jpg
+#   ifeq ($(BR2_PACKAGE_WEBP),y)   -> --enable-webp
+#
+# Duas formas de a imagem sair sem decodificador, e a segunda e a traicoeira:
+#
+#   1. o pacote da biblioteca nao esta no defconfig (facil de ver);
+#   2. o pacote ESTA, mas o `sdl2_image` foi construido antes dele entrar no
+#      `.config` — Buildroot nao reconfigura pacote existente quando uma
+#      dependencia aparece (§12.29). Foi o que aconteceu no R35S: `libpng`
+#      declarado no defconfig, `--disable-png` no `config.log`.
+#
+# O sintoma e do pior tipo: `IMG_isPNG` EXISTE e responde "PNG images are not
+# supported". O erro aparece no app, nao no build, e parece bug de quem chamou.
+# Medido em 07/11/2026: `giochi-demo` carregava `assets/player.png` no X55 e
+# falhava no R35S; o `c_smoke` da engine ia de 2 para 7 falhas, todas do mesmo
+# motivo.
+#
+# A checagem e sobre a CONSEQUENCIA, e a primeira versao dela estava ERRADA.
+#
+# Escrevi "se libpng esta na imagem e o libSDL2_image nao a referencia, foi
+# configurado sem PNG" e o build falhou no R35S com PNG(libpng) JPEG(libjpeg)
+# WebP(libwebp) — os tres "faltando" — enquanto o `config.log` dizia
+# `--enable-png --enable-jpg --enable-webp`.
+#
+# Motivo: a partir do SDL2_image 2.8, PNG e JPEG sao decodificados pelo
+# **stb_image EMBUTIDO** na biblioteca (`-DUSE_STBIMAGE=1`), nao por libpng ou
+# libjpeg. A biblioteca NUNCA lista essas libs como NEEDED mesmo com o suporte
+# ligado. Medido:
+#
+#   .so com --enable-png:  stbi_ = 1   libpng = 0   IMG_isPNG = 2
+#   .so sem (--disable-png): stbi_ = 0   libpng = 0   IMG_isPNG = 1
+#
+# Entao o marcador correto e `stbi_`, nao `libpng`. E ha uma terceira
+# armadilha: `stbi_` aparece so em SIMBOLOS, que o `strip` do `target-finalize`
+# remove. Por isso a medicao e feita no sysroot do host, que nao e stripado. E o libpng continua sendo
+# necessario no defconfig, mas como CHAVE: o `.mk` do Buildroot so passa
+# `--enable-png` quando `BR2_PACKAGE_LIBPNG=y`. Sem libpng no defconfig o
+# `--disable-png` desliga o LOAD_PNG de verdade.
+#
+# Licao de metodo, a mesma do `debugfs` ausente: o gate perguntou pela
+# implementacao de um formato, e a implementacao mudou de biblioteca. Perguntar
+# pela CONSEQUENCIA e o que funciona — aqui, "o decodificador foi compilado
+# dentro?" — e nao "esta ligado na lib que eu esperava?".
+alerta_sdl2_image() {
+    # O `.so` do TARGET passou por `strip`, e `stbi_` e um SIMBOLO — o strip
+    # remove. Medido: sysroot (nao stripado) tem 44 ocorrencias de `stbi_`;
+    # o mesmo arquivo em target/ tem ZERO, e a primeira versao deste gate
+    # reprovava um build correto por causa disso. O sysroot do host e o
+    # artefato nao stripado do mesmo pacote, entao e nele que se mede.
+    sdlimg=""
+    sysroot_lib=$(find "$TARGET_DIR/.." -maxdepth 6 -type d \
+                        -path '*/host/*/sysroot/usr/lib' 2>/dev/null | head -1)
+    if [ -n "$sysroot_lib" ]; then
+        sdlimg=$(find "$sysroot_lib" -maxdepth 1 -name 'libSDL2_image-2.0.so.0.*' 2>/dev/null | head -1)
+    fi
+
+    if [ -z "$sdlimg" ]; then
+        # Sem o sysroot nao da para medir: o target esta stripado e o marcador
+        # sumiu. "Nao deu para medir" NAO e falha (§12.30) — avisa e segue.
+        tem_target=$(find "$TARGET_DIR/usr/lib" -maxdepth 1 \
+                          -name 'libSDL2_image-2.0.so.0.*' 2>/dev/null | head -1)
+        [ -n "$tem_target" ] && warn_img="sim"
+        if [ -n "${warn_img:-}" ]; then
+            echo "post-build: AVISO — SDL2_image presente, mas sem sysroot para"
+            echo "            conferir os decodificadores (o alvo e stripado e o"
+            echo "            marcador some). Nao reprovo sem poder medir."
+        fi
+        return 0
+    fi
+
+    # PNG e JPEG vem do stb_image embutido (2.8+). O marcador e `stbi_`.
+    stb=$(grep -ac "stbi_" "$sdlimg" 2>/dev/null) || stb=0
+    case "$stb" in ''|*[!0-9]*) stb=0 ;; esac
+
+    # WebP e o unico que ainda precisa de lib externa, e via libwebpDEMUX.
+    webp_ref=$(grep -aci "webp" "$sdlimg" 2>/dev/null) || webp_ref=0
+    case "$webp_ref" in ''|*[!0-9]*) webp_ref=0 ;; esac
+    tem_webp=$(find "$TARGET_DIR/usr/lib" "$TARGET_DIR/lib" -maxdepth 1 \
+                    -name 'libwebp*.so*' 2>/dev/null | head -1)
+
+    faltando=""
+    if [ "$stb" -eq 0 ]; then
+        # sem stb, PNG e JPEG dependem de lib externa — e a Buildroot nao liga
+        for par in "libpng:PNG" "libjpeg:JPEG"; do
+            lib="${par%%:*}"
+            nome="${par##*:}"
+            tem=$(find "$TARGET_DIR/usr/lib" "$TARGET_DIR/lib" -maxdepth 1 \
+                       -name "${lib}*.so*" 2>/dev/null | head -1)
+            [ -n "$tem" ] || continue
+            grep -aqi "$lib" "$sdlimg" 2>/dev/null || faltando="$faltando $nome($lib)"
+        done
+    fi
+    # WebP tem de estar referenciado quando a lib esta na imagem
+    if [ -n "$tem_webp" ] && [ "$webp_ref" -eq 0 ]; then
+        faltando="$faltando WebP(libwebp)"
+    fi
+
+    if [ -n "$faltando" ]; then
+        echo "post-build: ERRO — SDL2_image SEM decodificador(es) que a imagem tem:" >&2
+        echo "           $faltando" >&2
+        echo >&2
+        echo "            Efeito: 'IMG_isPNG' existe e responde 'PNG images are not" >&2
+        echo "            supported'. O erro aparece no app, nao no build, e parece" >&2
+        echo "            bug de quem chamou." >&2
+        echo >&2
+        echo "            Causa: o sdl2_image foi configurado ANTES de o pacote da" >&2
+        echo "            biblioteca entrar no .config (§12.29). Confira:" >&2
+        echo "              grep -oE '\\-\\-(enable|disable)-(png|jpg|webp)' \\" >&2
+        echo "                ${BUILD_DIR:-<build>}/build/sdl2_image-*/config.log" >&2
+        echo >&2
+        echo "            Correção: limpe o pacote e rebuild." >&2
+        echo "              rm -rf ${BUILD_DIR:-<build>}/build/sdl2_image-*" >&2
+        return 1
+    fi
+    echo "post-build: SDL2_image com os decodificadores presentes na imagem"
+    return 0
+}
+
+alerta_sdl2_image || exit 1
