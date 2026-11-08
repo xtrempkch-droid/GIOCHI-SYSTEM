@@ -60,63 +60,68 @@ def main() -> int:
     stdin_aberto = True
 
     while True:
-        rlist = [s]
-        if stdin_aberto:
-            rlist.append(fin)
-        wlist = []
-        if para_socket:
-            wlist.append(s)
-        if para_stdout:
-            wlist.append(fout)
+        rlist = [s] + ([fin] if stdin_aberto else [])
+        wlist = ([s] if para_socket else []) + ([fout] if para_stdout else [])
 
+        # Sem timeout, de propósito. A primeira versão usava 60 s e **derrubava
+        # a sessão** depois de um minuto sem tráfego — medido com um servidor
+        # local: o proxy saía com `return 0` e o SSH morria no meio de qualquer
+        # comando silencioso (`sleep`, um build, um benchmark que só imprime no
+        # fim). Sessão ociosa é o caso normal, não erro.
         try:
-            r, w, _ = select.select(rlist, wlist, [], 60)
+            r, w, _ = select.select(rlist, wlist, [])
         except InterruptedError:
             continue
-        if not r and not w:
-            return 0
 
         if fin in r:
             try:
                 dados = os.read(fin, 65536)
+            except (BlockingIOError, InterruptedError):
+                dados = None
             except OSError:
                 dados = b""
-            if dados:
-                para_socket += dados
-            else:
+            if dados == b"":
                 stdin_aberto = False
                 try:
                     s.shutdown(socket.SHUT_WR)
                 except OSError:
                     pass
+            elif dados:
+                para_socket += dados
 
         if s in r:
             try:
                 dados = s.recv(65536)
-            except OSError as e:
-                if e.errno not in (errno.EAGAIN, errno.EWOULDBLOCK):
-                    dados = b""
-                else:
-                    dados = b"\0"  # nada a fazer neste ciclo
+            except (BlockingIOError, InterruptedError):
+                dados = None
+            except OSError:
+                dados = b""
             if dados == b"":
-                # Fim do fluxo: espera o stdout esvaziar e sai.
+                # Fim do fluxo: esvazia o stdout e sai.
                 while para_stdout:
-                    _, w, _ = select.select([], [fout], [], 5)
-                    if fout in w:
-                        n = os.write(fout, para_stdout)
-                        para_stdout = para_stdout[n:]
-                    else:
+                    _, w2, _ = select.select([], [fout], [], 5)
+                    if fout not in w2:
                         break
+                    n = os.write(fout, para_stdout)
+                    para_stdout = para_stdout[n:]
                 return 0
-            if dados != b"\0":
+            elif dados:
+                # `elif dados` e não uma sentinela: a versão anterior usava
+                # `dados = b"\0"` para "nada neste ciclo" e comparava com ele.
+                # Como o SSH é BINÁRIO, um 0x00 legítimo que chegasse sozinho no
+                # `recv` era descartado — medido no teste de relay, 2 de 4 bytes
+                # perdidos. Byte descartado no meio de um pacote desincroniza o
+                # protocolo, e o sintoma é "ssh às vezes trava/trava".
                 para_stdout += dados
 
         if s in w and para_socket:
             try:
                 n = s.send(para_socket)
                 para_socket = para_socket[n:]
-            except OSError:
+            except (BlockingIOError, InterruptedError):
                 pass
+            except OSError:
+                return 0
 
         if fout in w and para_stdout:
             try:
