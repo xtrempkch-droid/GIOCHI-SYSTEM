@@ -2,6 +2,7 @@
 # ============================================================
 # Giochi System — imagem de cartão SD a partir dos artefatos do build
 # ============================================================
+# giochi-system:help:begin
 # Uso (precisa de root: usa loop device, mkfs e mount):
 #   sudo bash scripts/make-sd-image.sh powkiddy-x55 [--size-mib N]
 #   bash scripts/build-in-container.sh --sd-image powkiddy-x55
@@ -19,6 +20,7 @@
 # Por que os offsets: o BootROM do RK3566 lê o idbloader do setor 64 e o U-Boot
 # do setor 16384. Gravar só as partições — o que o build entrega hoje — gera um
 # cartão que o aparelho nem tenta ler.
+# giochi-system:help:end
 # ============================================================
 
 set -euo pipefail
@@ -30,7 +32,9 @@ BOOT_PART_MIB=256
 BOOT_PART_START_MIB=64
 
 usage() {
-  sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  awk '/^# giochi-system:help:begin$/ { dentro = 1; next }
+       /^# giochi-system:help:end$/   { exit }
+       dentro                         { sub(/^# ?/, ""); print }' "${BASH_SOURCE[0]}"
 }
 
 while (($#)); do

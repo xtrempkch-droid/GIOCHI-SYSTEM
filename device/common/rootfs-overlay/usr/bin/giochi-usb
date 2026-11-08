@@ -2,11 +2,13 @@
 # ============================================================
 # giochi-usb — troca o papel da porta USB entre device e host
 # ============================================================
+# giochi-system:help:begin
 # Uso:
 #   giochi-usb                # mostra o papel atual e o que está plugado
 #   giochi-usb --host         # vira HOST: aceita dongle Wi-Fi, teclado, pendrive
 #   giochi-usb --device       # volta a DEVICE: shell por USB (usb0) e mass storage
 #   giochi-usb --status       # só consulta
+# giochi-system:help:end
 #
 # ## Por que isto existe
 #
@@ -190,7 +192,9 @@ case "${1:-}" in
     --device) virar_device ;;
     --status | "") mostrar_status ;;
     -h | --help)
-        sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+        awk '/^# giochi-system:help:begin$/ { dentro = 1; next }
+             /^# giochi-system:help:end$/   { exit }
+             dentro                         { sub(/^# ?/, ""); print }' "$0"
         ;;
     *)
         echo "opção desconhecida: $1" >&2

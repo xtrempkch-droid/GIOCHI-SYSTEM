@@ -737,11 +737,32 @@ make -C "$BR2_DIR" O="$BUILD_DIR" olddefconfig >"$WORK_DIR/olddefconfig.log" 2>&
 # Os fragmentos por ÁREA (buildrootFragments) entram aqui também: se ficassem de
 # fora, um símbolo pedido só neles poderia ser descartado sem ninguém notar —
 # que é precisamente o buraco que este gate existe para fechar (§12.1).
+#
+# E o DEFCONFIG do aparelho entra também. Ele era o único arquivo de
+# configuração desta árvore sem gate, e o buraco é medido: `BR2_PACKAGE_KMOD_TOOLS`
+# tem `depends on BR2_PACKAGE_BUSYBOX_SHOW_OTHERS`, dependência que só o
+# `config/common.fragment` satisfaz. O `make <defconfig>` roda ANTES dos
+# fragmentos, então o kconfig descarta o símbolo na leitura do defconfig (ele nem
+# aparece no `.config`), e o `olddefconfig` posterior o traz com o DEFAULT `n`.
+# O `=y` escrito no defconfig nunca é lido de novo — medido em 08/11/2026 no
+# replay do pipeline da X55.
+#
+# Só o defconfig DO APARELHO: `device/<pasta>/defconfig`. Quando o aparelho usa um
+# defconfig do próprio Buildroot (o `qemu-aarch64`), o arquivo é do Buildroot e
+# contém símbolos que ele mesmo ajusta — afirmar sobre ele daria falso positivo
+# no único aparelho habilitado.
+#
+# O arquivo usado é o INSTALADO em `$BR2_DIR/configs/`, onde os placeholders de
+# U-Boot já foram substituídos pelos caminhos do staging: o valor bate com o do
+# `.config` e não há divergência artificial.
+ASSERT_FRAGMENTS=(--fragment "$ROOT/config/common.fragment" --fragment "$FRAGMENT")
+ASSERT_FRAGMENTS+=(${EXTRA_FRAGMENT_ARGS[@]+"${EXTRA_FRAGMENT_ARGS[@]}"})
+if [[ -f "$DEVICE_DEFCONFIG" ]]; then
+  ASSERT_FRAGMENTS+=(--fragment "$BR2_DIR/configs/$DEFCONFIG")
+fi
 if ! node "$ROOT/scripts/assert-config.mjs" \
   --config "$BUILD_DIR/.config" \
-  --fragment "$ROOT/config/common.fragment" \
-  --fragment "$FRAGMENT" \
-  ${EXTRA_FRAGMENT_ARGS[@]+"${EXTRA_FRAGMENT_ARGS[@]}"}; then
+  "${ASSERT_FRAGMENTS[@]}"; then
   echo "ERRO: símbolos pedidos não sobreviveram ao olddefconfig (ver acima)." >&2
   echo "O log do olddefconfig está em $WORK_DIR/olddefconfig.log." >&2
   exit 1
@@ -1131,6 +1152,38 @@ if [[ -f "$KERNEL_FRAGMENT" || -f "$KERNEL_REQUIRED" ]]; then
   else
     echo "AVISO: .config do kernel não encontrado em $BUILD_DIR/build/linux-*." >&2
     echo "O fragmento do kernel não pôde ser verificado." >&2
+  fi
+fi
+
+# BUSYBOX é o terceiro Kconfig desta árvore, com o seu próprio `olddefconfig` — e
+# era o único SEM gate. Medido em 08/11/2026 no `.config` do busybox 1.36.1 do
+# build do R35S: quatro símbolos do fragmento comum não faziam o que diziam.
+#
+#   CONFIG_FEATURE_TAR_GZIP / _TAR_XZ  -> não existem desde o 1.31 (são
+#                                         SEAMLESS_GZ/XZ); `tar xzf` não funcionava
+#   CONFIG_FEATURE_PS_WIDE            -> `depends on ... && !DESKTOP`, e
+#                                         DESKTOP=y: impossível
+#   CONFIG_FEATURE_CROND_DIR          -> é STRING, não bool
+#
+# Nenhum com aviso: o applet simplesmente não está lá quando alguém precisa
+# dele no aparelho, que é o pior momento para descobrir.
+BUSYBOX_CONFIG="$(echo "$BUILD_DIR"/build/busybox-*/.config | awk '{print $1}')"
+if [[ -f "$ROOT/config/common.busybox.fragment" ]]; then
+  if [[ -f "$BUSYBOX_CONFIG" ]]; then
+    BUSYBOX_FRAGMENT_ARGS_CHECK=(--fragment "$ROOT/config/common.busybox.fragment")
+    if [[ -f "$DEVICE_DIR/busybox.fragment" ]]; then
+      BUSYBOX_FRAGMENT_ARGS_CHECK+=(--fragment "$DEVICE_DIR/busybox.fragment")
+    fi
+    if ! node "$ROOT/scripts/assert-busybox-config.mjs" \
+      --config "$BUSYBOX_CONFIG" \
+      "${BUSYBOX_FRAGMENT_ARGS_CHECK[@]}"; then
+      echo "ERRO: o busybox não usou applets pedidos pelo fragmento." >&2
+      echo "Configuração do busybox: $BUSYBOX_CONFIG" >&2
+      exit 1
+    fi
+  else
+    echo "AVISO: .config do busybox não encontrado em $BUILD_DIR/build/busybox-*." >&2
+    echo "O fragmento de applets não pôde ser verificado." >&2
   fi
 fi
 

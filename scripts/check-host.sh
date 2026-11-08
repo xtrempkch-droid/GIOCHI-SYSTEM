@@ -2,6 +2,7 @@
 # ============================================================
 # Giochi System — pré-voo do host antes do primeiro build
 # ============================================================
+# giochi-system:help:begin
 # Uso:
 #   bash scripts/check-host.sh [--offline] [--min-free-gb N]
 #
@@ -12,6 +13,7 @@
 # Por que existe: as dependências do Buildroot só aparecem como erro no meio
 # de um build de horas (bison/flex/gperf no host tools, dtc no kernel). Um
 # host incompleto custa a compilação inteira; aqui custa dois segundos.
+# giochi-system:help:end
 # ============================================================
 
 set -uo pipefail
@@ -22,7 +24,9 @@ MIN_FREE_GB=30
 BUILDROOT_URL_BASE="${BUILDROOT_URL_BASE:-https://buildroot.org/downloads}"
 
 usage() {
-  sed -n '2,9p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  awk '/^# giochi-system:help:begin$/ { dentro = 1; next }
+       /^# giochi-system:help:end$/   { exit }
+       dentro                         { sub(/^# ?/, ""); print }' "${BASH_SOURCE[0]}"
 }
 
 while (($#)); do

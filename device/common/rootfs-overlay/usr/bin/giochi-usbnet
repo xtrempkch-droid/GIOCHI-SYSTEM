@@ -38,6 +38,7 @@
 # cru. Aqui pode, então `--ms` expõe uma partição como disco removível: o `cp`
 # do PC funciona sem cliente nenhum.
 #
+# giochi-system:help:begin
 # Uso:
 #   giochi-usbnet                  # sobe o gadget (padrão RNDIS)
 #   giochi-usbnet --ecm            # sobe com ECM (macOS/ChromeOS)
@@ -45,6 +46,7 @@
 #   giochi-usbnet --ms-stop        # devolve a partição e volta ao RNDIS
 #   giochi-usbnet --stop           # desmonta o gadget
 #   giochi-usbnet --status         # o que está no ar, e o que o PC está vendo
+# giochi-system:help:end
 
 set -u
 
@@ -474,7 +476,12 @@ case "${1:-}" in
     --ms-stop) stop_mass_storage ;;
     "" | --rndis) start_gadget rndis ;;
     -h | --help)
-        sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'
+        # Sentinelas, e não `sed -n '2,40p'`: o recorte por número de linha
+        # imprimia 30 linhas de justificativa junto do uso, e passaria a mentir
+        # em silêncio quando o cabeçalho crescesse.
+        awk '/^# giochi-system:help:begin$/ { dentro = 1; next }
+             /^# giochi-system:help:end$/   { exit }
+             dentro                         { sub(/^# ?/, ""); print }' "$0"
         ;;
     *)
         warn "opção desconhecida: $1"

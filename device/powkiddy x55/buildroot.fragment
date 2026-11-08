@@ -40,3 +40,25 @@ BR2_TARGET_ROOTFS_EXT2_SIZE="1024M"
 #   virar pacote ou patch de kernel antes de os botões existirem.
 # - Patches de DTS (HDMI off, SDIO no-mmc/no-sd, dma-names do uart1): são
 #   patch de kernel, não símbolo de config. Listados em `README.md`.
+
+# ── utilitários de módulo (kmod), e POR QUE AQUI e não no defconfig ──
+# `BR2_PACKAGE_KMOD_TOOLS` (depmod, insmod, lsmod, modinfo, modprobe, rmmod com
+# support a modules.dep.bin/softdeps/blacklist) tem
+#     depends on BR2_PACKAGE_BUSYBOX_SHOW_OTHERS
+# e essa dependência só é satisfeita por `config/common.fragment`.
+#
+# O `make <defconfig>` roda ANTES dos fragmentos, e o kconfig do Buildroot
+# aplica `depends on` na leitura do defconfig: com SHOW_OTHERS ainda desligado o
+# símbolo nem aparece no `.config` (nem como `is not set`). O `olddefconfig`
+# depois vê SHOW_OTHERS=y e o símbolo passa a existir — com o valor DEFAULT, que
+# é `n`. O `=y` escrito no defconfig nunca é lido de novo.
+#
+# Medido no replay do pipeline do X55 em 08/11/2026: o assert dos fragmentos
+# passava com 25 símbolos e o `BR2_PACKAGE_KMOD_TOOLS=y` do defconfig tinha sido
+# descartado em silêncio. A imagem saía com o `modprobe` do busybox, que NÃO
+# resolve modules.dep.bin, softdeps nem blacklist — e o `S15modules` depende
+# disso.
+#
+# Regra que decorre: símbolo cuja dependência vem de fragmento mora no
+# FRAGMENTO, nunca no defconfig.
+BR2_PACKAGE_KMOD_TOOLS=y

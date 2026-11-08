@@ -157,11 +157,17 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             autoconf automake bc bison build-essential bzip2 ca-certificates \
             cpio curl device-tree-compiler dosfstools e2fsprogs file flex \
-            gettext gperf git help2man libelf-dev libncurses-dev libssl-dev \
+            gawk gettext gperf git help2man libelf-dev libncurses-dev libssl-dev \
             libtool libudev-dev mtools parted patch perl pkg-config python3 \
             python3-dev python3-setuptools rsync swig tar texinfo unzip wget \
-            xz-utils \
+            xz-utils zlib1g-dev \
             ccache
+          # `gawk` e `zlib1g-dev` estavam na lista do `check-host.sh` e do
+          # `docker/builder.Dockerfile` e NÃO aqui. Não quebra hoje porque o
+          # runner do ubuntu-24.04 já os traz instalados — mas isso é depender do
+          # que a imagem do runner tem, não do que o build precisa, e a falha
+          # apareceria no meio de um build de horas com `awk: not found` ou
+          # `zlib.h: No such file`. Custa uma linha.
 
       - name: Cache Buildroot downloads
         uses: actions/cache@v4

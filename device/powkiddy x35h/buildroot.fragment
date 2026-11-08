@@ -9,3 +9,15 @@
 
 # Marca o build como derivado da X55 para quem lê o artefato.
 # Nada além disso: ver defconfig e linux.fragment.
+
+# ── utilitários de módulo (kmod) ─────────────────────────────
+# `BR2_PACKAGE_KMOD_TOOLS` tem `depends on BR2_PACKAGE_BUSYBOX_SHOW_OTHERS`, que
+# só é ligado em `config/common.fragment` — e o `make <defconfig>` roda ANTES dos
+# fragmentos. Resultado medido em 08/11/2026: o `=y` do defconfig era descartado
+# sem aviso (o símbolo nem aparece no `.config` do defconfig, e o `olddefconfig`
+# posterior o traz com o default `n`). A imagem ficava com o `modprobe` do
+# busybox, que não resolve `modules.dep.bin`, softdeps nem blacklist.
+#
+# Símbolo cuja dependência vem de fragmento mora no FRAGMENTO. Mesmo raciocínio
+# e mesma medição do `buildroot.fragment` da X55.
+BR2_PACKAGE_KMOD_TOOLS=y

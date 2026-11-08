@@ -78,16 +78,25 @@ CONFIG_IOSTAT=y
 CONFIG_MPSTAT=y
 
 # ── arquivo e transferência ─────────────────────────────────
-# `scp`/`sftp` vêm do dropbear (já na imagem comum). Estes são os que faltam
-# quando é preciso copiar algo rápido sem servidor.
+# `scp`/`sftp` vêm do **OpenSSH** (a imagem não tem dropbear, §10-A: os dois
+# juntos disputavam a porta 22). Estes são os que faltam quando é preciso copiar
+# algo rápido sem servidor.
 CONFIG_BASE64=y
 CONFIG_UNZIP=y
 CONFIG_GZIP=y
 CONFIG_TAR=y
-CONFIG_FEATURE_TAR_GZIP=y
-CONFIG_FEATURE_TAR_XZ=y
-CONFIG_FEATURE_TAR_AUTODETECT=y
+# Nomes MEDIDOS no Kconfig do busybox 1.36.1 (`archival/Config.in`):
+# `FEATURE_SEAMLESS_GZ` / `FEATURE_SEAMLESS_XZ`. Os que estavam aqui,
+# `CONFIG_FEATURE_TAR_GZIP` e `CONFIG_FEATURE_TAR_XZ`, **não existem desde o
+# 1.31** — o `olddefconfig` do busybox descartava os dois em silêncio, e o
+# resultado medido no R35S era `# CONFIG_FEATURE_SEAMLESS_GZ is not set`:
+# `tar xzf` NÃO funcionava, embora o fragmento dissesse que sim.
+#
+# `AUTODETECT` liga sozinho UMA das compressões (ligou o XZ), e não dá para
+# depender de qual: com as duas explícitas, as duas funcionam.
+CONFIG_FEATURE_SEAMLESS_GZ=y
 CONFIG_FEATURE_SEAMLESS_XZ=y
+CONFIG_FEATURE_TAR_AUTODETECT=y
 CONFIG_DD=y
 CONFIG_SYNC=y
 
@@ -101,14 +110,27 @@ CONFIG_FEATURE_VI_SEARCH=y
 
 # ── processo e serviço ──────────────────────────────────────
 CONFIG_PS=y
-CONFIG_FEATURE_PS_WIDE=y
+# `FEATURE_PS_WIDE` NÃO pode ser ligado nesta imagem e ficou fora de propósito.
+# Medido: `procps/Config.in` do busybox 1.36.1 declara
+#   depends on (PS || MINIPS) && !DESKTOP
+# e `CONFIG_DESKTOP=y` na config final, então o símbolo é descartado pelo
+# `olddefconfig` sem uma linha de aviso.
+#
+# Além disso ele seria inútil: a imagem traz **procps-ng** e o binário dele vence
+# o symlink do busybox no PATH (§12.46). O `ps` que o operador usa é o do
+# procps-ng, e nele `-w` é outra coisa.
 CONFIG_KILL=y
 CONFIG_KILLALL=y
 CONFIG_KILLALL5=y
 CONFIG_PGREP=y
 CONFIG_PKILL=y
 CONFIG_CRONTAB=y
-CONFIG_FEATURE_CROND_DIR=y
+# `FEATURE_CROND_DIR` é STRING, não bool (`miscutils/Config.in`):
+#   config FEATURE_CROND_DIR
+#   string "crond spool directory"
+#   default "/var/spool/cron"
+# Escrever `=y` aqui era descartado e o default ficava — o efeito desejado, por
+# um caminho que não era o escrito. O valor padrão serve; a linha saiu.
 
 # ── shell ───────────────────────────────────────────────────
 CONFIG_ASH=y

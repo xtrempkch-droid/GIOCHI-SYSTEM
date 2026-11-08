@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -22,29 +22,33 @@ import { ROOT } from "../scripts/lib/devices.mjs";
 const DOCKER = path.join(ROOT, "docker");
 const le = (nome) => readFileSync(path.join(DOCKER, nome), "utf8");
 
-test("as três ferramentas existem e o Dockerfile oficial as copia", async () => {
-  for (const nome of [
-    "baud-scan.py",
-    "serial-listen.py",
-    "serial-watch.py",
-    "serial-loopback.py",
-    "serial-push.py",
-  ]) {
-    assert.ok(le(nome).length > 500, `${nome} está vazio?`);
+test("as ferramentas existem e o Dockerfile oficial leva TODAS", async () => {
+  const nomes = readdirSync(DOCKER).filter((n) => n.endsWith(".py")).sort();
+  assert.ok(nomes.length >= 10, `só ${nomes.length} scripts em docker/`);
+
+  for (const nome of nomes) {
+    assert.ok(le(nome).length > 200, `${nome} está vazio?`);
   }
+
+  // A verificação é sobre a CLASSE (§12.50), não sobre uma lista escrita à mão.
+  // A lista de cinco nomes que estava aqui deixou passar três scripts
+  // (`serial-cmd.py`, `serial-pull.py`, `serial-push-blob.py`) que existiam no
+  // repositório e não iam para a imagem: quem seguisse o comando do doc sem
+  // `-v ./docker:...` morria em "can't open file '/work/serial-push-blob.py'",
+  // que não diz que faltou o COPY. Já tinha acontecido antes com o
+  // `serial-watch.py`, e a correção da época foi acrescentar UM nome.
   const dockerfile = le("serial.Dockerfile");
-  // Sem esta linha a imagem não tem as ferramentas e o comando do doc falha
-  // com "No such file or directory", que não diz que faltou o COPY.
-  // Já aconteceu: o serial-watch.py foi escrito DEPOIS de a imagem ser
-  // construída, e o container morreu com "can't open file" no meio da captura.
-  for (const nome of [
-    "baud-scan.py",
-    "serial-listen.py",
-    "serial-watch.py",
-    "serial-loopback.py",
-    "serial-push.py",
-  ]) {
-    assert.match(dockerfile, new RegExp(nome.replace(/\./g, "\\.")), `${nome} fora do COPY`);
+  const linhaCopy = dockerfile
+    .split("\n")
+    .filter((l) => l.startsWith("COPY"))
+    .join(" ");
+  assert.match(linhaCopy, /\*\.py|COPY \./, "o COPY tem de pegar a pasta inteira");
+
+  // Se alguém voltar para a lista explícita, cada nome tem de estar lá — e o
+  // teste falha apontando QUAL ficou de fora.
+  if (/\*\.py/.test(linhaCopy) === false) {
+    const faltando = nomes.filter((n) => !linhaCopy.includes(n));
+    assert.deepEqual(faltando, [], `scripts fora do COPY: ${faltando.join(", ")}`);
   }
 });
 
@@ -91,23 +95,27 @@ test("o vigia distingue 'porta ausente' de 'porta ocupada'", () => {
   assert.match(vigia, /SerialException/);
 });
 
-test("os scripts python compilam", () => {
+test("os scripts python compilam — TODOS, não os quatro de sempre", () => {
+  // A lista era de quatro nomes, e o `serial-push-blob.py` — o que a
+  // documentação manda usar para mandar arquivo ao aparelho — nunca foi
+  // compilado por teste nenhum. `ast.parse` custa milissegundos e não precisa de
+  // `pyserial`: não há motivo para compilar um subconjunto.
   const dir = mkdtempSync(path.join(tmpdir(), "serial-tools-"));
   try {
-    for (const nome of [
-      "baud-scan.py",
-      "serial-listen.py",
-      "serial-watch.py",
-      "serial-loopback.py",
-    ]) {
+    const nomes = readdirSync(DOCKER).filter((n) => n.endsWith(".py"));
+    assert.ok(nomes.length >= 10, `só ${nomes.length} scripts python em docker/`);
+    for (const nome of nomes) {
       const destino = path.join(dir, nome);
       writeFileSync(destino, le(nome));
-      // `ast.parse` prova sintaxe sem precisar de pyserial instalado no host.
-      execFileSync("python3", [
-        "-c",
-        `import ast,sys; ast.parse(open(sys.argv[1], encoding="utf-8").read())`,
-        destino,
-      ]);
+      assert.doesNotThrow(
+        () =>
+          execFileSync("python3", [
+            "-c",
+            `import ast,sys; ast.parse(open(sys.argv[1], encoding="utf-8").read())`,
+            destino,
+          ]),
+        `${nome} não compila`,
+      );
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });

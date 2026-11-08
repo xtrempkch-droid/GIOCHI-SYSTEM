@@ -176,10 +176,12 @@ BR2_PACKAGE_FLAC=y
 BR2_PACKAGE_LIBVORBIS=y
 
 # ── utilitários base ─────────────────────────────────────────
-# KMOD_TOOLS depende de BUSYBOX_SHOW_OTHERS (ligado no comum). O modprobe do
-# kmod resolve modules.dep.bin/softdeps/blacklist; o do BusyBox não.
+# `BR2_PACKAGE_KMOD_TOOLS` NÃO fica aqui: ele depende de
+# `BR2_PACKAGE_BUSYBOX_SHOW_OTHERS`, que só é ligado por
+# `config/common.fragment`, e o `make <defconfig>` roda antes dos fragmentos.
+# Escrito no defconfig ele era descartado em silêncio (medido em 08/11/2026) e
+# a imagem ficava com o `modprobe` do busybox. Está no `buildroot.fragment`.
 BR2_PACKAGE_KMOD=y
-BR2_PACKAGE_KMOD_TOOLS=y
 BR2_PACKAGE_ZSTD=y
 BR2_PACKAGE_LIBARCHIVE=y
 BR2_PACKAGE_OPENSSL=y

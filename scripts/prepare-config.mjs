@@ -262,10 +262,13 @@ if (dtsPaths.length > 0) {
   lines = setKey(lines, "BR2_LINUX_KERNEL_CUSTOM_DTS_PATH", quote(dtsPaths.join(" ")));
 }
 
-// Overrides de pacote: arquivo .mk incluído pelo Buildroot depois das receitas.
-// Serve para acrescentar opção a um pacote sem editar a árvore do Buildroot —
-// caso do strace 6.7, que precisa de `--enable-bundled=yes` para compilar
-// contra os headers do kernel 6.12.
+// Overrides de pacote: arquivo .mk incluído pelo Buildroot ANTES das receitas
+// de pacote (`Makefile:528` vs `:531` no 2024.02) — não depois. A ordem importa:
+// com `VAR = ...` na receita, um `VAR += ...` escrito aqui é apagado em silêncio,
+// e é por isso que `config/package-overrides.mk` usa `override` nos casos em que
+// a receita atribui com `=`. Serve para acrescentar opção a um pacote sem editar
+// a árvore do Buildroot — caso do strace 6.7, que precisa de
+// `--enable-bundled=yes` para compilar contra os headers do kernel 6.12.
 if (args["package-override"]) {
   const override = path.resolve(args["package-override"]);
   if (!existsSync(override)) {

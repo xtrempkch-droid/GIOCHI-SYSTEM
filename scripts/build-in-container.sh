@@ -2,6 +2,7 @@
 # ============================================================
 # Giochi System — build dentro de um container (sem root no host)
 # ============================================================
+# giochi-system:help:begin
 # Uso:
 #   bash scripts/build-in-container.sh <device-id>
 #   bash scripts/build-in-container.sh --check
@@ -16,6 +17,7 @@
 # Os artefatos continuam aparecendo em `out/` no host, porque o repositório é
 # montado em /work. Downloads e ccache ficam em ~/.cache/giochi-system no host,
 # então um rebuild não baixa tudo de novo.
+# giochi-system:help:end
 # ============================================================
 
 set -euo pipefail
@@ -27,7 +29,9 @@ REBUILD_IMAGE=0
 IMAGE_TAG="${GIOCHI_BUILDER_IMAGE:-giochi-builder:2}"
 
 usage() {
-  sed -n '2,18p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  awk '/^# giochi-system:help:begin$/ { dentro = 1; next }
+       /^# giochi-system:help:end$/   { exit }
+       dentro                         { sub(/^# ?/, ""); print }' "${BASH_SOURCE[0]}"
 }
 
 while (($#)); do

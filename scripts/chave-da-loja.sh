@@ -2,10 +2,12 @@
 # ============================================================
 # Giochi System — as DUAS chaves públicas da loja + verificador de assinatura
 # ============================================================
+# giochi-system:help:begin
 # Uso:
 #   bash scripts/chave-da-loja.sh --gerar              # cria os pares que faltam
 #   bash scripts/chave-da-loja.sh --gerar licenca      # só um deles
 #   bash scripts/chave-da-loja.sh --verificar          # confere o que está versionado
+# giochi-system:help:end
 #
 # ## Por que DUAS chaves, e não uma
 #
@@ -156,6 +158,16 @@ cmd_verificar() {
   return "$falhou"
 }
 
+uso() {
+  # Sentinelas, e não `sed -n '2,10p'`. O recorte por número de linha já estava
+  # impreciso (imprimia também o título da seção seguinte) e passaria a mentir em
+  # silêncio no dia em que o cabeçalho crescesse — é a mesma armadilha que o
+  # `tests/flash-grow.test.mjs` registra para o `--help` do `flash-sd.sh`.
+  awk '/^# giochi-system:help:begin$/ { dentro = 1; next }
+       /^# giochi-system:help:end$/   { exit }
+       dentro                         { sub(/^# ?/, ""); print }' "${BASH_SOURCE[0]}"
+}
+
 case "${1:-}" in
   --gerar)
     shift
@@ -164,8 +176,12 @@ case "${1:-}" in
   --verificar)
     cmd_verificar
     ;;
+  -h|--help)
+    uso
+    exit 0
+    ;;
   *)
-    sed -n '2,10p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    uso >&2
     exit 2
     ;;
 esac

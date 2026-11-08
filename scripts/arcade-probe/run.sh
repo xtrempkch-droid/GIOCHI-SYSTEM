@@ -2,9 +2,11 @@
 # ============================================================
 # Giochi System — medir o arcade com e sem geometry shader
 # ============================================================
+# giochi-system:help:begin
 # Uso:
 #   bash scripts/arcade-probe/run.sh
 #   bash scripts/arcade-probe/run.sh --rebuild
+# giochi-system:help:end
 #
 # Roda em ambiente fechado (container), sobre Xvfb + llvmpipe. Nada toca o host
 # alem deste diretorio, e nada depende do aparelho.
@@ -32,7 +34,12 @@ REBUILD=0
 while (($#)); do
   case "$1" in
     --rebuild) REBUILD=1 ;;
-    -h|--help) sed -n '2,25p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)
+      awk '/^# giochi-system:help:begin$/ { dentro = 1; next }
+           /^# giochi-system:help:end$/   { exit }
+           dentro                         { sub(/^# ?/, ""); print }' "${BASH_SOURCE[0]}"
+      exit 0
+      ;;
     *) echo "ERRO: opção desconhecida: $1" >&2; exit 2 ;;
   esac
   shift

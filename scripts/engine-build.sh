@@ -3,10 +3,12 @@
 # engine-build.sh — compila a GIOCHI-ENGINE contra o sysroot do Buildroot
 # ============================================================
 #
+# giochi-system:help:begin
 # Uso:
 #   bash scripts/engine-build.sh powkiddy-x35h                 # compila
 #   bash scripts/engine-build.sh powkiddy-x35h --instalar      # compila e instala
 #   bash scripts/engine-build.sh powkiddy-x35h --instalar 10.55.0.2
+# giochi-system:help:end
 #
 # ## Por que não `cross`
 #
@@ -69,7 +71,9 @@ while [ $# -gt 0 ]; do
 done
 
 if [ -z "$DEVICE" ]; then
-    sed -n '2,12p' "$0"
+    awk '/^# giochi-system:help:begin$/ { dentro = 1; next }
+         /^# giochi-system:help:end$/   { exit }
+         dentro                         { sub(/^# ?/, ""); print }' "$0"
     exit 1
 fi
 

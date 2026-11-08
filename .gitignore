@@ -13,6 +13,12 @@ buildroot-*.tar.gz
 # Node (não há dependências hoje, mas mantém o repo limpo)
 node_modules/
 
+# Bytecode de Python: os scripts de `docker/` são compilados em teste e num
+# `python3 -m py_compile` qualquer. Sem esta linha o `git status` fica sujo
+# depois de rodar a suíte, e bytecode não é fonte.
+__pycache__/
+*.pyc
+
 # Editores e sistema
 .vscode/
 .idea/

@@ -1,12 +1,14 @@
 # AGENTS.md — Giochi System
 
 > Handoff técnico do repositório. Leia antes de continuar o trabalho.
-> Atualizado em: 08/11/2026 (revisão 7 — **auditoria da árvore**: nove defeitos
-> encontrados, todos do tipo "verde e errado", e todos com teste que os prende.
-> Os dois mais graves: o gate do harfbuzz **nunca disparou** (dependia de variável
-> `BR2_*` que o Buildroot não exporta ao post-build) e um patch de kernel ausente
-> matava o build **sem imprimir nada** — a mesma morte silenciosa do §12.53, num
-> lugar onde ninguém tinha olhado. Ver §12.59.)
+> Atualizado em: 08/11/2026 (revisão 7 — **auditoria em duas passadas**: quinze
+> defeitos encontrados, todos do tipo "verde e errado", e todos com teste que os
+> prende. Os mais graves: o gate do harfbuzz **nunca disparou** (dependia de
+> variável `BR2_*` que o Buildroot não exporta ao post-build); um patch de kernel
+> ausente matava o build **sem imprimir nada**; e **dois dos três Kconfigs da
+> árvore não tinham verificação nenhuma** — o do busybox e o `defconfig` do
+> aparelho, onde um símbolo cuja dependência vem de fragmento é descartado em
+> silêncio. Ver §12.59 e §12.60.)
 
 ---
 
@@ -77,7 +79,7 @@ Repositório: `https://github.com/xtrempkch-droid/GIOCHI-SYSTEM` — branch `mai
 
 | Verificação | Resultado |
 | --- | --- |
-| `node tests/run-all.mjs` | **456/456** (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, devices 13, assert-config 12, fdt 11, …) |
+| `node tests/run-all.mjs` | **471/471** (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, devices 13, assert-config 12, fdt 11, …) |
 | `node scripts/validate-devices.mjs` | OK — 7 devices, 1 habilitado |
 | `node scripts/list-devices.mjs --github-matrix` | matriz com `qemu-aarch64` |
 | matriz com `--device powkiddy-x55 --allow-draft` | devolve **só** o X55 |
@@ -439,7 +441,7 @@ si (§12.4), mas provavelmente **não** era a causa dos 3 s.
 
 ```bash
 node scripts/validate-devices.mjs
-node tests/run-all.mjs                          # 456 testes
+node tests/run-all.mjs                          # 471 testes
 node scripts/list-devices.mjs
 node scripts/list-devices.mjs --github-matrix
 node scripts/list-devices.mjs --github-matrix --device powkiddy-x55 --allow-draft
@@ -481,7 +483,7 @@ absoluto** do host — §12.40).
 
 ## 10. Testes
 
-`node tests/run-all.mjs` → **456/456**:
+`node tests/run-all.mjs` → **471/471**:
 
 | Arquivo | Testes | Cobre |
 | --- | --- | --- |
@@ -3096,6 +3098,9 @@ Testes novos, e o que cada um prende:
 | `tests/build-device-vars.test.mjs` | 8 (era 5) | estado de patches executa de verdade, inclusive com patch ausente; `out/` limpo só depois do `make` |
 | `tests/rk3326-legacy-boot.test.mjs` | 18 (era 17) | inclui o nome do alvo `uboot-dirclean` e o estado de `uboot.fragment` + `uboot-patches/` |
 | `tests/selftest-contract.test.mjs` | 16 (era 12) | nenhum `\s` em grep, nenhum `grep -c \|\| echo 0`, nenhuma contagem morta, e a lenda do `amixer` fora do código |
+| `tests/busybox-config.test.mjs` | 7 | o gate do busybox morde nos três casos medidos (símbolo inexistente, dependência não satisfeita, string pedida como bool) |
+| `tests/defconfig-gate.test.mjs` | 4 | o defconfig do aparelho entra no assert, com os placeholders já resolvidos |
+| `tests/help-sentinels.test.mjs` | 4 | nenhum `--help` recortado por linha, sentinelas completas, e o `--help` do rootfs sem prosa |
 
 **Documentação que estava mentindo, e foi corrigida:** `buildrootFragments` e
 `firmwareFiles` eram descritos como "aceitos na doc e não lidos por script" —
@@ -3113,6 +3118,109 @@ quatro opções da receita **de propósito**: `override` congela a variável, en
 o `+=` condicional do `strace.mk` (libunwind/libiberty) deixa de alcançá-la —
 verificado com `make -p` e com o `config.log` do build do R35S, que registra
 `--enable-mpers=no --enable-bundled=yes --without-libunwind --without-libiberty`.
+
+### 12.60 Segunda passada: o Kconfig do busybox e o defconfig sem gate
+
+A §12.59 varreu os scripts de build e o post-build. Esta passada foi nas áreas
+que **não** tinham sido lidas: os 13 scripts Python de serial, os 8 init scripts
+do overlay, os geradores Node, o `prepare-config`, o `chave-da-loja`, os
+`defconfig` e os fragmentos de configuração. Quatro achados, e os dois primeiros
+eram o mesmo buraco em arquivos diferentes.
+
+| # | Onde | Defeito | Sintoma |
+| --- | --- | --- | --- |
+| 1 | `config/common.busybox.fragment` | 4 símbolos que **não fazem o que dizem** (abaixo) | `tar xzf` não funcionava no aparelho |
+| 2 | `build-device.sh` | o fragmento de busybox era o **único Kconfig sem gate** | os 4 de cima passaram meses sem ninguém ver |
+| 3 | `device/*/defconfig` | `BR2_PACKAGE_KMOD_TOOLS=y` descartado em silêncio nos dois aparelhos | `modprobe` do busybox, que não resolve `modules.dep.bin` |
+| 4 | `docker/serial.Dockerfile` | copiava 10 de 13 scripts | `can't open file '/work/serial-push-blob.py'` |
+| 5 | 9 scripts | `--help` recortado por número de linha | 2 já sangravam prosa/código na ajuda |
+
+#### O busybox é o terceiro Kconfig, e era o único sem verificação
+
+`assert-config` cobre `BR2_*`; `assert-kernel-config` cobre `CONFIG_*` do
+kernel. O busybox resolve o **próprio** `.config` com o **próprio**
+`olddefconfig`, e ninguém comparava o resultado. Medido no `.config` real do
+`busybox-1.36.1` do R35S:
+
+| Linha do fragmento | O que realmente acontecia |
+| --- | --- |
+| `CONFIG_FEATURE_TAR_GZIP=y` | símbolo **não existe** desde o 1.31 (é `FEATURE_SEAMLESS_GZ`) → `# ... is not set` |
+| `CONFIG_FEATURE_TAR_XZ=y` | idem (`FEATURE_SEAMLESS_XZ`); ligou por acidente via `AUTODETECT` |
+| `CONFIG_FEATURE_PS_WIDE=y` | `depends on (PS \|\| MINIPS) && !DESKTOP`, e `CONFIG_DESKTOP=y` → **impossível** |
+| `CONFIG_FEATURE_CROND_DIR=y` | é **string**, não bool (`default "/var/spool/cron"`): o `=y` foi descartado |
+
+O primeiro é o que dói: o fragmento prometia gzip no `tar`, e o `tar` da imagem
+só entendia `.xz`. `tar xzf` é justamente o que a documentação do sistema base
+usa para mover arquivo por `nc` quando não há `scp`.
+
+`scripts/assert-busybox-config.mjs` fecha o buraco reusando a lógica do assert
+do kernel (a pergunta é a mesma; duplicar o código não). Roda no build depois do
+`olddefconfig`, antes da coleta, e **falha** o build.
+
+#### O defconfig é lido ANTES dos fragmentos — e o kconfig aplica `depends on`
+
+`BR2_PACKAGE_KMOD_TOOLS` tem `depends on BR2_PACKAGE_BUSYBOX_SHOW_OTHERS`, e
+essa dependência só é satisfeita pelo `config/common.fragment`. A sequência é:
+
+```text
+1. make <defconfig>        kconfig aplica depends on; SHOW_OTHERS ainda =n
+                           -> KMOD_TOOLS não entra no .config (nem como "is not set")
+2. prepare-config          SHOW_OTHERS=y entra
+3. make olddefconfig       o símbolo passa a existir, com o DEFAULT (n)
+                           -> o =y do defconfig nunca é lido de novo
+```
+
+Medido em 08/11/2026 reproduzindo o pipeline da X55 sem compilar
+(`make <defconfig>` → `prepare-config` → `make olddefconfig`):
+
+```text
+assert dos FRAGMENTOS:  OK — 25 símbolos
+assert do DEFCONFIG:    BR2_PACKAGE_KMOD_TOOLS descartado
+```
+
+Depois da correção (símbolo no `buildroot.fragment`), o mesmo replay dá
+**OK — 98 símbolos**, porque o defconfig do aparelho passou a ser verificado
+também. O gate usa o defconfig **instalado** em `$BR2_DIR/configs/`, onde os
+placeholders de U-Boot já viraram caminho — assertar o original acusaria
+divergência em todo aparelho com U-Boot customizado.
+
+**Regra que fica:** símbolo cuja `depends on` é satisfeita por um fragmento mora
+no **fragmento**, nunca no defconfig. E o `defconfig` do aparelho entra no
+`assert-config`; o do Buildroot (`qemu-aarch64`) não, porque ele contém símbolos
+que o próprio Buildroot ajusta e afirmar sobre ele daria falso positivo no único
+aparelho habilitado.
+
+#### `--help` por número de linha: nove lugares, dois já errados
+
+O padrão `sed -n '2,20p' "$0"` já estava registrado como defeito pelo
+`tests/flash-grow.test.mjs`, e continuava em nove scripts. Dois **já** estavam
+errados de fato, e os dois são do rootfs, onde `--help` é a única documentação
+que existe sem SSH:
+
+```text
+giochi-usb --help       imprimia "## Por que isto existe" e mais nada
+giochi-usbnet --help    imprimia 39 linhas, 30 delas de justificativa
+```
+
+Todos passaram a usar sentinelas `# giochi-system:help:begin` / `:end`, como o
+`giochi-buttons` já fazia. `tests/help-sentinels.test.mjs` fecha a classe: proíbe
+o recorte por linha em qualquer script, exige os **dois** marcadores (meio par é
+pior que nenhum — o `awk` imprime o arquivo inteiro), e confere que o `--help`
+do rootfs não imprime título de seção nem vaza shell.
+
+#### O resto da segunda passada
+
+- `docker/serial.Dockerfile` passou a fazer `COPY *.py`: três scripts
+  (`serial-cmd.py`, `serial-pull.py`, `serial-push-blob.py`) existiam no
+  repositório e não iam para a imagem. É o §12.50 na forma de Dockerfile — a
+  correção anterior tinha acrescentado **um** nome à lista, não fechado a classe.
+- `tests/serial-tools.test.mjs` compila **todos** os `.py` (era só quatro) e
+  verifica o `COPY` contra a pasta, não contra uma lista.
+- `.gitignore` ganhou `__pycache__/`: `python3 -m py_compile` cria a pasta e o
+  `git status` fica sujo sem ninguém ter mexido em fonte.
+- CI passou a instalar `gawk` e `zlib1g-dev`, que estavam no `check-host.sh` e no
+  `docker/builder.Dockerfile` e **não** no workflow. Funciona hoje porque o
+  runner já os traz — o que é depender do runner, não do build.
 
 ## 13. Aparelhos
 
@@ -3476,7 +3584,7 @@ o cartão — não só no `target/`.
 
 | Item | Estado |
 | --- | --- |
-| Código e configuração | **pronto** — 456/456 testes |
+| Código e configuração | **pronto** — 471/471 testes |
 | Imagem X55 (`Image` + `rootfs.ext4` + DTB + bootloader) | **existe** em `out/powkiddy-x55/`, `built_at_utc=2026-11-04T21:05:13Z` |
 | `/etc/inittab` na imagem | **linha 30: `::respawn:/usr/bin/giochi-init`** — conferida com `debugfs` no `rootfs.ext4` |
 | `work/` do X55 | preservado em `~/.cache/giochi-system/work/powkiddy-x55` (17 GB, já com `target/` finalizado) |
@@ -3617,7 +3725,7 @@ Ordem sugerida para a próxima sessão (nada aqui precisa da X55):
 
 ```bash
 node scripts/validate-devices.mjs      # 7 devices, 1 habilitado
-node tests/run-all.mjs                 # 456/456
+node tests/run-all.mjs                 # 471/471
 node scripts/list-devices.mjs --github-matrix
 ```
 
@@ -3683,7 +3791,7 @@ as duas correções (`uboot-patches/0001-…-adc-nao-fatal.patch` +
 
 ```bash
 cd /home/charles/Giochi/GIOCHI-SYSTEM
-node tests/run-all.mjs                                   # esperado: 456/456
+node tests/run-all.mjs                                   # esperado: 471/471
 git add device/r35s/README.md AGENTS.md
 git commit -m "r35s: o U-Boot mainline liga; a frase do README estava desatualizada
 
