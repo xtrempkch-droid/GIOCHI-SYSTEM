@@ -445,7 +445,7 @@ si (§12.4), mas provavelmente **não** era a causa dos 3 s.
 
 ```bash
 node scripts/validate-devices.mjs
-node tests/run-all.mjs                          # 504 testes
+node tests/run-all.mjs                          # 509 testes
 node scripts/list-devices.mjs
 node scripts/list-devices.mjs --github-matrix
 node scripts/list-devices.mjs --github-matrix --device powkiddy-x55 --allow-draft
