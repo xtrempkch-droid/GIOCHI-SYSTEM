@@ -146,10 +146,15 @@ status() {
     fi
 
     echo "== ssh =="
-    if pidof dropbear >/dev/null 2>&1; then
-        echo "  dropbear rodando"
+    # A imagem usa **OpenSSH** (§10-A): o dropbear saiu porque os dois juntos
+    # disputavam a porta 22 e o `scp` moderno é SFTP, que o dropbear não tem.
+    # Este bloco dizia "dropbear NÃO está rodando" para sempre — o `pidof
+    # dropbear` nunca acha nada nesta imagem, e um status que aponta para o
+    # servidor errado manda procurar defeito onde não há.
+    if pidof sshd >/dev/null 2>&1; then
+        echo "  sshd rodando (OpenSSH)"
     else
-        echo "  dropbear NÃO está rodando"
+        echo "  sshd NÃO está rodando — o SSH por USB não vai responder"
     fi
     echo
     echo "Do PC:  ssh root@$DEV_ADDR"

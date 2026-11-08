@@ -54,5 +54,6 @@ import "./post-build-harfbuzz.test.mjs";
 import "./flash-guards.test.mjs";
 import "./ci-cache-e-sd-image.test.mjs";
 import "./busybox-config.test.mjs";
+import "./serial-login-path.test.mjs";
 import "./defconfig-gate.test.mjs";
 import "./help-sentinels.test.mjs";

@@ -3,7 +3,7 @@
 # S30usbnet — rede por cabo USB no boot
 # ============================================================
 # Sobe o gadget assim que o sistema inicia, antes de qualquer serviço que
-# dependa de rede (dropbear vem em S50). Se falhar, o boot CONTINUA: um aparelho
+# dependa de rede (o sshd vem em S50). Se falhar, o boot CONTINUA: um aparelho
 # sem rede USB ainda serve para jogar e para o console — derrubar o boot por
 # causa do gadget transformaria um recurso de acesso num defeito.
 #

@@ -79,7 +79,7 @@ Repositório: `https://github.com/xtrempkch-droid/GIOCHI-SYSTEM` — branch `mai
 
 | Verificação | Resultado |
 | --- | --- |
-| `node tests/run-all.mjs` | **471/471** (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, devices 13, assert-config 12, fdt 11, …) |
+| `node tests/run-all.mjs` | **474/474** (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, devices 13, assert-config 12, fdt 11, …) |
 | `node scripts/validate-devices.mjs` | OK — 7 devices, 1 habilitado |
 | `node scripts/list-devices.mjs --github-matrix` | matriz com `qemu-aarch64` |
 | matriz com `--device powkiddy-x55 --allow-draft` | devolve **só** o X55 |
@@ -441,7 +441,7 @@ si (§12.4), mas provavelmente **não** era a causa dos 3 s.
 
 ```bash
 node scripts/validate-devices.mjs
-node tests/run-all.mjs                          # 471 testes
+node tests/run-all.mjs                          # 474 testes
 node scripts/list-devices.mjs
 node scripts/list-devices.mjs --github-matrix
 node scripts/list-devices.mjs --github-matrix --device powkiddy-x55 --allow-draft
@@ -483,7 +483,7 @@ absoluto** do host — §12.40).
 
 ## 10. Testes
 
-`node tests/run-all.mjs` → **471/471**:
+`node tests/run-all.mjs` → **474/474**:
 
 | Arquivo | Testes | Cobre |
 | --- | --- | --- |
@@ -3222,6 +3222,83 @@ do rootfs não imprime título de seção nem vaza shell.
   `docker/builder.Dockerfile` e **não** no workflow. Funciona hoje porque o
   runner já os traz — o que é depender do runner, não do build.
 
+### 12.61 Terceira passada: o caminho de recuperação que nunca tinha sido exercitado
+
+As duas primeiras passadas cobriram os scripts de build e as configurações.
+Esta foi na **lógica de execução** dos scripts Python de serial e dos binários
+do overlay — e, pela primeira vez, na pergunta inversa: *os testes testam o que
+dizem testar?*
+
+#### `serial-push-blob.py`: o login estava quebrado por TIPOS, e ninguém viu
+
+O caminho de recuperação (console fora do shell: login expirado, `giochi-init`
+imprimindo no meio) tinha dois erros de tipo:
+
+```python
+if b"login:" in saida:          # saida é STR (o drenar decodifica)
+print(saida[-500:].decode(...)) # str não tem .decode
+```
+
+O primeiro dava `TypeError`, o segundo `AttributeError` — os dois **no caminho
+que só roda quando o login é necessário**. O caminho feliz (sessão já aberta)
+nunca passava por ali, então o script "funcionou" por meses com a recuperação
+morta. É a mesma forma do gate do harfbuzz (§12.59): o código existe, a
+justificativa existe, e a primeira linha o desliga — aqui por tipos em vez de
+ambiente.
+
+**Por que nenhum teste pegou:** a suíte fazia `ast.parse` nos scripts Python.
+Sintaxe passa; o erro é de TIPOS em tempo de execução.
+
+**O teste que falta agora existe** (`tests/serial-login-path.test.mjs`):
+executa o script DE VERDADE com um módulo `serial` falso e respostas
+roteirizadas (`login: ` → `# ` → `wc` → `md5`), e percorre o caminho completo
+até o `OK: md5 confere dos dois lados`. Verificado nos dois sentidos:
+reintroduzir o defeito faz o teste morrer com o `TypeError` exato.
+
+Duas lições de método que ficam:
+
+1. **`ast.parse` prova sintaxe, não comportamento.** Script que fala com
+   hardware só se prova com hardware falso — o `serial` do pyserial é módulo
+   normal e pode ser substituído por stub em `sys.modules`.
+2. **O roteiro tem de respeitar o protocolo do script**: o `drenar` lê em laço
+   até a janela fechar, então o stub precisa servir **um item por drenagem**
+   (na primeira leitura após um `write`), senão a primeira drenagem consome a
+   fila inteira e o teste testa outra coisa. As duas primeiras tentativas do
+   stub erraram exatamente isso (relógio falso dessincronizando as janelas, e
+   fila inteira na primeira leitura) — e o sintoma era o teste reprovando o
+   código CORRETO, que é o defeito espelhado.
+
+#### O status do SSH apontava para o servidor errado
+
+`giochi-usbnet --status` dizia "dropbear NÃO está rodando" **para sempre**: a
+imagem usa OpenSSH desde a §10-A e o `pidof dropbear` nunca acha nada. Um status
+que aponta para o servidor errado manda procurar defeito onde não há — agora
+reporta `sshd` (OpenSSH). Mesma classe da tabela do §12.58 ("fuser/lsof/strace
+já estavam lá; o relatório mediu imagem velha").
+
+#### O que esta passada CONFERIU e não achou defeito
+
+- `giochi-init` inteiro: cota de restart por tipo de saída, janela deslizante,
+  marcador de desistência, restauração de brilho, configurador de controles.
+  A única sutileza é o `window_start` reusar o `now` lido antes do lançamento —
+  inofensivo, porque a próxima volta relê o uptime e o reset ocorre de qualquer
+  forma quando o launcher rodou > 60 s (que é o comportamento desejado).
+- `S30usbnet`, `S40wifi`, `S01splash`, `S15modules`, `giochi-godot`,
+  `giochi-bootlog` (incluindo a busca de partição por conteúdo e a ordem
+  calculada pelo disco do rootfs) e `giochi-usb`.
+- A guarda do mass-storage do `giochi-usbnet` (major:minor via `/sys/dev/block`,
+  sem `strtonum` — o §12.44 segue como descrito).
+- `serial-cmd.py`, `serial-push.py`, `ymodem-send.py`, `serial-log.py`,
+  `serial-boot.py`, `serial-interrupt.py`, `serial-loopback.py` — sem misturas
+  de str/bytes; o ymodem já está provado em hardware.
+- `lib/fdt.mjs`, `lib/dsi-panel.mjs`, `lib/assert-config.mjs` — as assinaturas
+  conferem com os testes existentes.
+- Referências `docs/controles.md` e `docs/integracao.md`: parecem mortas, mas
+  são do repo do `Giochi app` (`Giochi app/docs/...`) — corretas.
+- O `docs/x55-bringup.md` diz "SSH (dropbear) responde na porta 22": é o
+  REGISTRO da época em que dropbear estava na imagem, e por isso fica como
+  estava — bringup é documento histórico, não verdade atual.
+
 ## 13. Aparelhos
 
 | ID | Pasta | SoC | Arch | Status | Falta |
@@ -3584,7 +3661,7 @@ o cartão — não só no `target/`.
 
 | Item | Estado |
 | --- | --- |
-| Código e configuração | **pronto** — 471/471 testes |
+| Código e configuração | **pronto** — 474/474 testes |
 | Imagem X55 (`Image` + `rootfs.ext4` + DTB + bootloader) | **existe** em `out/powkiddy-x55/`, `built_at_utc=2026-11-04T21:05:13Z` |
 | `/etc/inittab` na imagem | **linha 30: `::respawn:/usr/bin/giochi-init`** — conferida com `debugfs` no `rootfs.ext4` |
 | `work/` do X55 | preservado em `~/.cache/giochi-system/work/powkiddy-x55` (17 GB, já com `target/` finalizado) |
@@ -3725,7 +3802,7 @@ Ordem sugerida para a próxima sessão (nada aqui precisa da X55):
 
 ```bash
 node scripts/validate-devices.mjs      # 7 devices, 1 habilitado
-node tests/run-all.mjs                 # 471/471
+node tests/run-all.mjs                 # 474/474
 node scripts/list-devices.mjs --github-matrix
 ```
 
@@ -3791,7 +3868,7 @@ as duas correções (`uboot-patches/0001-…-adc-nao-fatal.patch` +
 
 ```bash
 cd /home/charles/Giochi/GIOCHI-SYSTEM
-node tests/run-all.mjs                                   # esperado: 471/471
+node tests/run-all.mjs                                   # esperado: 474/474
 git add device/r35s/README.md AGENTS.md
 git commit -m "r35s: o U-Boot mainline liga; a frase do README estava desatualizada
 

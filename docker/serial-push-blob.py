@@ -136,7 +136,11 @@ with serial.Serial(port, baud, timeout=0.3) as link:
 
     ok, saida = tem_shell()
     if not ok:
-        if b"login:" in saida:
+        # `saida` é STR (o `drenar` decodifica); comparar com bytes aqui dava
+        # TypeError no exato momento em que o login é necessário — o caminho
+        # feliz (shell já aberto) nunca passava por aqui, por isso o defeito
+        # ficou invisível. Medido em 08/11/2026 com o caminho reproduzido.
+        if "login:" in saida:
             link.write(b"root\r")
             time.sleep(0.8)
             drenar(0.5)
@@ -145,7 +149,10 @@ with serial.Serial(port, baud, timeout=0.3) as link:
             ok, saida = tem_shell(2.5)
     if not ok:
         print("ERRO: não cheguei a um shell no aparelho.", file=sys.stderr)
-        print(saida[-500:].decode("utf-8", "replace"), file=sys.stderr)
+        # `saida` já é texto decodificado — `.decode()` nela dava
+        # AttributeError e escondia justamente o diagnóstico que este print
+        # existe para mostrar.
+        print(saida[-500:], file=sys.stderr)
         sys.exit(8)
 
     # Eco desligado: sem isto cada bloco volta pela console e o tty descarta
@@ -173,7 +180,7 @@ with serial.Serial(port, baud, timeout=0.3) as link:
     #
     # Cada heredoc leva ~2 MB para que uma falha custe pouco e a retomada seja
     # possível — e `>>` acumula.
-    linhas = encoded.split("\n")
+    #
     # Reagrupa em linhas de 76 caracteres (padrão de MIME), que é o que o
     # `base64 -d` espera e o que mantém o heredoc legível.
     passo = 76
