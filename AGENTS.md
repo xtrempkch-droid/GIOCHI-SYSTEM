@@ -1,7 +1,7 @@
 # AGENTS.md — Giochi System
 
 > Handoff técnico do repositório. Leia antes de continuar o trabalho.
-> Atualizado em: 08/11/2026 (revisão 8 — **auditoria em três passadas + uma no aparelho**. Vinte defeitos encontrados, todos do tipo "verde e errado", e todos
+> Atualizado em: 08/11/2026 (revisão 8 — **auditoria em três passadas + uma no aparelho**. Vinte e um defeitos encontrados, todos do tipo "verde e errado", e todos
 > com teste que os prende. Os mais graves: o gate do harfbuzz **nunca disparou**
 > (dependia de variável `BR2_*` que o Buildroot não exporta ao post-build); um
 > patch de kernel ausente matava o build **sem imprimir nada**; **dois dos três
@@ -3593,6 +3593,59 @@ gerasse `modules.dep`, a correção da passada 2 trocaria "sem `depmod`" por
 
 O `.bin` só é gerado pelo `depmod` do kmod, então quem o gerou foi o próprio
 build. A troca é segura — mas o fato de ter sido preciso medir é o ponto.
+
+### 12.62-B O CI reprovou o mesmo commit que tinha passado: a cota podia ser desligada por leitura falha
+
+O commit da quarta passada passou no *Validate* de um push e **falhou** no do
+push seguinte — mesmo código, `esperado 5 tentativas, veio 9`. Localmente nunca
+reproduziu, nem sob 8× de carga de CPU, e a explicação óbvia (teste lento demais)
+não fecha: máquina lenta dá **menos** tentativas, não mais.
+
+A conta que fecha 9 é `5 + 4`: a cota zerou no meio. E o único lugar que zera
+`restarts` é a janela deslizante:
+
+```sh
+now=$(uptime_seconds)          # cut -d. -f1 /proc/uptime || echo 0
+if [ $((now - window_start)) -ge $RESTART_WINDOW ]; then
+    restarts=0; window_start=$now
+fi
+```
+
+Se `uptime_seconds` devolve vazio, `$(( ))` trata como 0; na volta seguinte
+`now - 0` passa de 60 s, a janela reinicia e a contagem recomeça. Medido no
+script real, com janelas diferentes:
+
+```text
+janela 3600 s ->  5 tentativas
+janela   60 s ->  5
+janela    2 s -> 12      <- é este caminho que produz 9
+```
+
+**O defeito não era o teste estar errado — era a proteção poder ser desligada.**
+No aparelho, um `/proc/uptime` ilegível por um instante transformaria a cota em
+"reinicia para sempre", que é precisamente o que ela existe para impedir: a tela
+piscando sem parar, sem mensagem.
+
+Correções, todas pequenas:
+
+| Peça | O que faz |
+| --- | --- |
+| `case "$now" in ''|*[!0-9]*) now=0 ;; esac` | leitura inválida não entra em aritmética |
+| `[ "$now" -gt 0 ] && [ "$now" -ge $((window_start + RESTART_WINDOW)) ]` | sem valor inválido, e só anda para frente |
+| `GIOCHI_RESTART_WINDOW` / `GIOCHI_UPTIME_FILE` | o teste fixa a janela e simula o relógio |
+| `uptime=${now}s` no log da queda | o dado que faltava para diagnosticar isso pelo stderr |
+
+Dois testes, e o principal **falha se a janela for desligada** (verificado
+mutando `if false; then`): "uptime ilegível não zera a cota" roda com janela de
+1 s, que resetaria a cada volta se a guarda não existisse; e "um salto real de
+uptime zera a cota, de propósito" prende o outro lado — sem ele, alguém
+"consertaria" a cota removendo a janela, e quedas espaçadas por horas passariam a
+punir o usuário.
+
+**A lição de método:** um teste intermitente é uma informação, não um estorvo.
+Aqui ele apontou um caminho real de desligamento da proteção. E o que destravou
+foi olhar o **número**: 9 = 5 + 4 diz que a contagem zerou depois da quinta, e
+não "o teste foi mais rápido".
 
 ## 13. Aparelhos
 
