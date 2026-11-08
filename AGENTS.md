@@ -3380,6 +3380,23 @@ prw-------  1 root root 0 /run/psplash_fifo        ← /tmp/psplash_fifo: No suc
 havia um FIFO. Um `[ -p ]` no caminho errado não falha, não avisa e não deixa
 rastro; ele só faz o `if` tomar o ramo errado para sempre.
 
+**Confirmado num SEGUNDO aparelho** (R35S, 08/11/2026, imagem `12b431d`), o que
+fecha a dúvida de ser específico da X55 — o código está no overlay **comum**,
+logo vale para os três:
+
+```text
+uptime 3571 s ; psplash pid 105 starttime 176 (= 1,76 s depois do boot)
+  fds em /dev/fb0: 1
+/run/psplash_fifo : prw-r-----  (existe)
+/tmp/psplash_fifo : No such file or directory
+launcher DRM master: nenhum      <- a sessão inteira rodou com o splash na frente
+```
+
+Ou seja: o splash ficou ~59 min na tela e o launcher, quando subiu, não era o
+master do `card0`. É o mesmo defeito, com outro SoC (RK3326) e outro painel
+(640x480) — o que se espera de código comum, e é a razão de a correção estar em
+`S01splash`/`giochi-init` e não no aparelho.
+
 #### Defeito B — o console de texto nunca existia, e o Kconfig estava certo
 
 Três avisos do selftest na imagem velha apontavam para `CONFIG_`:
