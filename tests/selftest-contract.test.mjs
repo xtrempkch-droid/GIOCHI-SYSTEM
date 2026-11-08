@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -337,4 +337,75 @@ test("a desistência do giochi-init vira FAIL no selftest, com o motivo", async 
   // obriga a abrir o arquivo por SSH, que é justamente o que falta quando a
   // tela está parada e o USB não subiu.
   assert.match(texto, /tr '\\n' ' ' <"?\$PARADA_FILE"?/);
+});
+
+// ── as duas armadilhas de busybox que apareceram no mesmo bloco ──────────────
+//
+// O bloco de áudio fazia:
+//
+//   CARDS=$(grep -c '^\s*[0-9]' /proc/asound/cards 2>/dev/null)
+//
+// e as duas coisas erradas ali dão o MESMO sintoma — `FAIL nenhuma placa de som`
+// num aparelho com som:
+//
+//   1. `\s` é extensão do GNU grep, e o alvo desta imagem é o busybox (§12.20).
+//      Onde ela não é aceita, `^\s*[0-9]` vira "zero ou mais letras `s` seguidas
+//      de dígito" — e as linhas de `/proc/asound/cards` começam com ESPAÇO.
+//   2. `grep -c` SEM casa imprime `0` **e** sai com status 1. Com
+//      `|| echo 0` o valor vira "0\n0", que não é número, e o `[ -gt ]` falha em
+//      silêncio (§12.56). Foi o que aconteceu no gate do SDL2/ALSA.
+//
+// A regra que fecha os dois: `[[:space:]]` no lugar de `\s`, e nunca
+// `grep -c ... || echo 0`.
+test("nenhum script do rootfs usa `\\s` em grep — busybox não garante a extensão", async () => {
+  const dir = new URL("../device/common/rootfs-overlay/usr/bin/", import.meta.url);
+  const arquivos = readdirSync(dir);
+  const achados = [];
+  for (const nome of arquivos) {
+    const texto = readFileSync(new URL(nome, dir), "utf8");
+    for (const linha of texto.split("\n")) {
+      if (linha.trim().startsWith("#")) continue;      // o comentário EXPLICA a regra
+      if (!/\bgrep\b/.test(linha) && !/\bsed\b/.test(linha)) continue;
+      // `\s` dentro do padrão de grep/sed, e não uma barra invertida qualquer.
+      if (/['"][^'"]*\\s[^'"]*['"]/.test(linha)) achados.push(`${nome}: ${linha.trim()}`);
+    }
+  }
+  assert.deepEqual(achados, [], "use [[:space:]] — \\s não é POSIX:\n  " + achados.join("\n  "));
+});
+
+test("nenhum script do rootfs faz `grep -c ... || echo 0`", async () => {
+  // O `|| echo 0` existe para "não deixar o status vazar", mas `grep -c` já
+  // imprime 0: o resultado é dois zeros numa string só.
+  const dir = new URL("../device/common/rootfs-overlay/usr/bin/", import.meta.url);
+  const achados = [];
+  for (const nome of readdirSync(dir)) {
+    const texto = readFileSync(new URL(nome, dir), "utf8");
+    for (const linha of texto.split("\n")) {
+      if (linha.trim().startsWith("#")) continue;
+      if (/grep\s+-[a-zA-Z]*c[a-zA-Z]*\b.*\|\|\s*echo\s+0/.test(linha)) {
+        achados.push(`${nome}: ${linha.trim()}`);
+      }
+    }
+  }
+  assert.deepEqual(achados, [], "`grep -c` já imprime 0; o `|| echo 0` produz \"0\\n0\":\n  " + achados.join("\n  "));
+});
+
+test("o selftest não atribui contagem que ninguém lê", async () => {
+  // `LEASES=$(grep -c ...)` era calculada e nunca usada — código morto que
+  // carregava o defeito do teste acima sem nenhum efeito. Variável que só
+  // existe para justificar uma linha é a que envelhece errada.
+  const texto = await read();
+  assert.ok(!/^\s*LEASES=/m.test(texto), "LEASES não é lida por ninguém: remova");
+});
+
+test("o selftest não repete a lenda de que `amixer` não existe no Buildroot", async () => {
+  // §12.16: `amixer` EXISTE, como subopção do `alsa-utils` desligada por
+  // padrão. "Não empacotado" e "empacotado e desligado" dão o mesmo sintoma, e
+  // o comentário que os confunde sobreviveu onze revisões no AGENTS — não pode
+  // voltar no código.
+  const texto = await read();
+  assert.ok(
+    !/amixer`? N[ÃA]O existe/i.test(texto),
+    "amixer existe no Buildroot; o que faltava era a subopção ligada",
+  );
 });

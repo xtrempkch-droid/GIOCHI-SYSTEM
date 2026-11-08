@@ -28,8 +28,11 @@ O pacote `openssh` é incluído no rootfs comum. Antes de expor um device na red
 - O script baixa o tarball oficial de `buildroot.org` por HTTPS.
 - O build usa o `.config` final e registra a versão, o commit e a data no `build-info.txt`.
 - O artefato inclui `SHA256SUMS`.
-- Para maior rigor, adicione um SHA256 fixo do tarball do Buildroot e verifique antes de extrair.
-- Pacotes baixados pelo Buildroot ficam em `.cache/buildroot-dl`; em CI, esse cache deve ser tratado como não confiável até o build validar.
+- O SHA256 do tarball do Buildroot é **fixado** em `buildroot.sha256` e conferido
+  antes de extrair (`build-device.sh` imprime `sha256: OK`); hash divergente ou
+  ausente interrompe o build em vez de seguir com o arquivo trocado.
+- Pacotes baixados pelo Buildroot ficam em `.cache/dl` (é o `BR2_DL_DIR`); em
+  CI, esse cache deve ser tratado como não confiável até o build validar.
 
 ## Segredos no Git
 

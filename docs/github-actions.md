@@ -91,7 +91,12 @@ Os artefatos ficam disponíveis por 14 dias. Para uma release permanente, baixe 
 O workflow usa `actions/cache` para:
 
 - `.cache/downloads` — tarball do Buildroot;
-- `.cache/buildroot-dl` — fontes e pacotes baixados pelo Buildroot.
+- `.cache/dl` — fontes e pacotes baixados pelo Buildroot (`BR2_DL_DIR`).
+
+> O diretório do segundo item é `dl`, não `buildroot-dl`: é o que
+> `build-device.sh` passa em `--dl-dir` (`$GIOCHI_SYSTEM_CACHE_DIR/dl`). Com o
+> nome errado aqui e no workflow, o cache era salvo e restaurado vazio, e todo
+> build baixava tudo de novo — sem erro nenhum, só lento.
 
 A chave é **estável** — `giochi-system-<device>-<versão>` —, sem `hashFiles`.
 

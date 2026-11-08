@@ -67,7 +67,7 @@ done
 
 # Lista candidatos: discos removíveis, com tamanho e se estão montados.
 list_candidates() {
-  local name size removable model tran
+  local name size removable model
   for path in /sys/block/*; do
     name="$(basename "$path")"
     case "$name" in
@@ -77,7 +77,6 @@ list_candidates() {
     [[ "$removable" == "1" ]] || continue
     size="$(cat "$path/size" 2>/dev/null || echo 0)"
     model="$(cat "$path/device/model" 2>/dev/null || echo '?')"
-    tran="$(cat "$path/device/../../removable" >/dev/null 2>&1; echo -n '')"
     printf '  /dev/%-8s %8.1f GiB  removível  %s\n' \
       "$name" "$(awk -v s="$size" 'BEGIN { printf "%.1f", s * 512 / 1073741824 }')" "$model"
   done
@@ -134,6 +133,23 @@ if [[ "$(cat "$SYSFS/size")" == "0" ]]; then
   echo "ERRO: $TARGET reporta 0 setores (nenhum cartão inserido?)." >&2
   exit 2
 fi
+
+# O disco do sistema pode ser removível — é o caso de quem roda o host num SSD
+# USB ou num cartão. "Removível" sozinho não protege nada, e esta checagem
+# existia no `flash-dd.sh` e NÃO aqui: o script com mais recursos (SHA256,
+# --grow) era o menos protegido no caso que apaga o computador de quem está
+# trabalhando. Compara o disco de `/` e de `/boot`, pelo nome do disco pai —
+# `lsblk -nlo PKNAME` devolve `sdb` para `/dev/sdb2`.
+RAIZ="$(findmnt -no SOURCE / 2>/dev/null || true)"
+BOOT="$(findmnt -no SOURCE /boot 2>/dev/null || true)"
+for fonte in "$RAIZ" "$BOOT"; do
+  [[ -n "$fonte" ]] || continue
+  pai="$(basename "$(readlink -f "$(lsblk -nlo PKNAME "$fonte" 2>/dev/null | head -1)" 2>/dev/null || true)")"
+  if [[ -n "$pai" && "$pai" == "$NAME" ]]; then
+    echo "ERRO: $TARGET é o disco de $fonte. Recusando gravar no sistema em uso." >&2
+    exit 2
+  fi
+done
 
 MOUNTED="$(lsblk -nlo MOUNTPOINT "$TARGET" 2>/dev/null | grep -v '^$' || true)"
 if [[ -n "$MOUNTED" ]]; then

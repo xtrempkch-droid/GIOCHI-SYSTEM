@@ -178,6 +178,36 @@ fi
 echo
 
 # ------------------------------------------------------------
+# Versões de host que JÁ quebraram o Buildroot 2024.02
+# ------------------------------------------------------------
+# A lição do §12.33 foi "o check-host tem de olhar versão, não só presença de
+# comando": GCC 14+ e CMake 4+ mudaram comportamento e derrubaram pacotes de
+# host (declaração implícita virou erro; mínimo de CMake < 3.5 foi removido).
+# As duas correções são automáticas — `config/package-overrides.mk` força
+# `-std=gnu17` e `-Wno-error=implicit-function-declaration` nos tools de host, e
+# o `build-device.sh` exporta `CMAKE_POLICY_VERSION_MINIMUM=3.5` —, então isto
+# aqui é AVISO, não falha. O objetivo é que ninguém descubra a versão do host no
+# meio de um build de três horas.
+echo "Versões de host que já quebraram o Buildroot 2024.02"
+if command -v gcc >/dev/null 2>&1; then
+  GCC_VERSION="$(gcc -dumpversion 2>/dev/null | cut -d. -f1)"
+  if [[ "$GCC_VERSION" =~ ^[0-9]+$ ]] && ((GCC_VERSION >= 14)); then
+    warn "gcc $GCC_VERSION (>= 14): declaração implícita é erro; o override já aplica -Wno-error"
+  else
+    pass "gcc ${GCC_VERSION:-?} (sem as quebras do 14+)"
+  fi
+fi
+if command -v cmake >/dev/null 2>&1; then
+  CMAKE_MAJOR="$(cmake --version 2>/dev/null | head -1 | grep -oE '[0-9]+' | head -1)"
+  if [[ "$CMAKE_MAJOR" =~ ^[0-9]+$ ]] && ((CMAKE_MAJOR >= 4)); then
+    pass "cmake $CMAKE_MAJOR (>= 4): o build exporta CMAKE_POLICY_VERSION_MINIMUM=3.5"
+  else
+    pass "cmake ${CMAKE_MAJOR:-?}"
+  fi
+fi
+echo
+
+# ------------------------------------------------------------
 # Bibliotecas de desenvolvimento (headers) exigidas por pacotes host
 # ------------------------------------------------------------
 # Um comando presente não garante header: libssl-dev não instala binário.

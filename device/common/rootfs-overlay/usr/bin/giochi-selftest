@@ -568,9 +568,14 @@ fi
 head2 "áudio"
 
 if [ -r /proc/asound/cards ]; then
-    CARDS=$(grep -c '^\s*[0-9]' /proc/asound/cards 2>/dev/null)
+    # `[[:space:]]` e não `\s`: `\s` é extensão do GNU grep, e o alvo desta
+    # imagem é o busybox (§12.20). Onde ele não é aceito, `^\s*[0-9]` vira
+    # "zero ou mais letras `s` seguidas de dígito" — e as linhas de
+    # `/proc/asound/cards` começam com ESPAÇO, então a contagem dava zero e o
+    # veredito era `FAIL nenhuma placa de som` num aparelho com som.
+    CARDS=$(grep -c '^[[:space:]]*[0-9]' /proc/asound/cards 2>/dev/null)
     if [ "${CARDS:-0}" -gt 0 ]; then
-        pass "placas de som: $(grep '^\s*[0-9]' /proc/asound/cards | sed 's/^ *//' | tr '\n' ' ')"
+        pass "placas de som: $(grep '^[[:space:]]*[0-9]' /proc/asound/cards | sed 's/^[[:space:]]*//' | tr '\n' ' ')"
     else
         fail "nenhuma placa de som — asoc provavelmente em deferred probe"
     fi
@@ -591,9 +596,15 @@ fi
 #   X55   : "Speaker Amp INL" -> HPOL   (amp alimentado por HPOL)  => Mux = HP
 #   R35S  : "Speaker"         -> SPKO   (falante no SPKO)          => Mux = SPK
 #
-# `amixer` NÃO existe no Buildroot 2024.02 (o pacote alsa-utils só traz
-# alsactl e alsamixer). Por isso o caminho principal aqui é o `alsactl store`,
-# que despeja todos os controles com nome e valor em formato de texto.
+# `amixer` existe no Buildroot — como SUBOPÇÃO do `alsa-utils`, desligada por
+# padrão (§12.16). Durante onze revisões este comentário dizia que ele "não
+# existe", porque "não empacotado" e "empacotado e desligado" dão o mesmo
+# sintoma numa imagem. Hoje ele está nos defconfigs dos aparelhos com tela.
+#
+# O caminho principal continua sendo o `alsactl store`: ele é o mecanismo que o
+# ALSA prevê para APLICAR estado de placa (é o que o `S51mixer` usa), e o
+# formato é um arquivo versionável. O `amixer` é a reserva, para o caso de uma
+# imagem construída sem a subopção.
 EXPECT_MUX=""
 EXPECT_WHY=""
 # Globs, e NÃO `find`: o `find` do busybox não desce em `/proc/device-tree`
@@ -708,7 +719,11 @@ if usb0_existe; then
     # (pid 176) e NÃO deixa /var/run/udhcpd.pid. O pidfile como critério dava
     # "udhcpd parado" num servidor que havia acabado de dar IP ao PC.
     if pidof udhcpd >/dev/null 2>&1; then
-        LEASES=$(grep -c '^[0-9a-f]' /var/lib/misc/udhcpd.leases 2>/dev/null || echo 0)
+        # Sem `grep -c ... || echo 0`: `grep -c` SEM casa imprime `0` **e** sai 1,
+        # então o `|| echo 0` produzia "0\n0" — e essa string, que não é número,
+        # é o defeito do §12.56. Aqui o valor não é usado para decidir nada (só
+        # o `pidof` decide), então a variável saiu de vez em vez de virar uma
+        # contagem que ninguém lê.
         pass "udhcpd ativo (pid $(pidof udhcpd | cut -d' ' -f1)) — o PC recebe IP sozinho"
     else
         # Sem udhcpd ainda dá para conectar, mas exige IP estático no PC.

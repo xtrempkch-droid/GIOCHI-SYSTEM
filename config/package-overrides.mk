@@ -1,7 +1,23 @@
 # Overrides de pacote do Buildroot (BR2_PACKAGE_OVERRIDE_FILE)
 # ============================================================
-# Este arquivo é incluído depois das receitas de pacote, então dá para
-# acrescentar opções sem editar a árvore do Buildroot nem carregar patch.
+# Este arquivo é incluído ANTES das receitas de pacote, não depois.
+#
+#   Makefile:507  include package/Makefile.in
+#   Makefile:528  -include $(PACKAGE_OVERRIDE_FILE)     <- aqui
+#   Makefile:~530 include package/*/*.mk                <- as receitas vêm DEPOIS
+#
+# A frase estava invertida até 08/11/2026 ("incluído depois das receitas"), e a
+# diferença não é cosmética: com a ordem errada, `VAR = ...` na receita apaga o
+# `VAR += ...` escrito aqui, em silêncio. É o que o bloco do strace explica mais
+# abaixo. Regra que decorre:
+#
+#   - `VAR += x` só sobrevive se a receita TAMBÉM usar `+=` e a variável já
+#     existir (é o caso de `LINUX_FIRMWARE_FILES`, e o de `HOST_CFLAGS` em
+#     package/Makefile.in);
+#   - quando a receita usa `=`, é preciso `override VAR += x` — ou `override
+#     VAR = ...` repetindo as opções padrão.
+#
+# Verificação barata: `make -p -n -C <buildroot> O=<build> | grep '^VAR'`.
 #
 # Ele existe porque um pacote do Buildroot 2024.02 não compila contra os
 # headers do kernel 6.12 — e a falha aparece longe da causa.

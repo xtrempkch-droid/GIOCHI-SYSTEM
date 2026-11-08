@@ -120,9 +120,21 @@ fi
 
 # O DTB tem de ser exatamente o do aparelho: a X35S e a X55 têm painéis
 # diferentes, e um DTB trocado dá tela preta com backlight aceso.
+#
+# NÃO existe reserva com o nome de outro aparelho. Até 08/11/2026 existia
+# `DTB_NAME="${DTB_NAME:-rk3566-powkiddy-x55}"`, e é a dívida do §12.24 na
+# forma exata que ele descreve: um literal "do aparelho" num script de propósito
+# geral. Num aparelho novo sem `INTREE_DTS_NAME`, o script procuraria o DTB da
+# X55 — que ESTÁ em `out/` no mesmo diretório — e gravaria o painel errado no
+# cartão. O cartão bootaria e não mostraria nada, sem uma linha de erro.
 DTB_NAME="$(node "$ROOT/scripts/device-info.mjs" "$DEVICE_ID" dts 2>/dev/null || true)"
 if [[ -z "$DTB_NAME" ]]; then
-  DTB_NAME="rk3566-powkiddy-x55"
+  echo "ERRO: $DEVICE_ID não declara BR2_LINUX_KERNEL_INTREE_DTS_NAME no defconfig." >&2
+  echo "Sem esse campo não há como saber qual DTB vai para o cartão, e" >&2
+  echo "adivinhar significa gravar o painel de outro aparelho." >&2
+  echo "Declare em device/<pasta>/defconfig, ex.:" >&2
+  echo "  BR2_LINUX_KERNEL_INTREE_DTS_NAME=\"rockchip/rk3566-powkiddy-x55\"" >&2
+  exit 2
 fi
 DTB_FILE="$OUT_DIR/dtbs/$DTB_NAME.dtb"
 if [[ ! -f "$DTB_FILE" ]]; then

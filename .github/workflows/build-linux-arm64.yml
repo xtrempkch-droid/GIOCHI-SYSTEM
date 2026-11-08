@@ -166,9 +166,18 @@ jobs:
       - name: Cache Buildroot downloads
         uses: actions/cache@v4
         with:
+          # `build-device.sh` usa `$GIOCHI_SYSTEM_CACHE_DIR/dl` para
+          # `BR2_DL_DIR`. O caminho `.cache/buildroot-dl` que estava aqui (e
+          # nos docs) não é usado por nenhum script: o cache era salvo e
+          # restaurado vazio, então TODO build baixava o tarball do Buildroot
+          # e todos os pacotes de novo — o oposto do que o `ccache` ganha.
+          #
+          # E NADA de comentário dentro do `path: |`: ali é bloco literal, e
+          # uma linha começando com `#` vira um CAMINHO literal para o
+          # `actions/cache` — a explicação entraria na lista de padrões.
           path: |
             .cache/downloads
-            .cache/buildroot-dl
+            .cache/dl
           # Chave ESTÁVEL (sem hashFiles). Com hash de config/device a chave muda
           # a cada commit, então TODO build é frio — baixa o Buildroot e os
           # tarballs de novo. Cache do actions é imutável: chave estável restaura

@@ -131,11 +131,22 @@ fi
 #
 # A pergunta é a CONSEQUÊNCIA (o `.so` cita o soname?), não a intenção (o
 # símbolo está no `.config`?). É a regra do §12.29 aplicada ao build.
+#
+# SEGUNDO DEFEITO, medido em 08/11/2026: a primeira versão desta função começava
+# com `[ "${BR2_PACKAGE_HARFBUZZ:-n}" = "y" ] || return 0`, e **nunca rodou**.
+# O Buildroot chama o post-build com `EXTRA_ENV` = PATH, BR2_DL_DIR, BUILD_DIR,
+# CONFIG_DIR e O — nenhum `BR2_PACKAGE_*` chega ao ambiente (é a mesma armadilha
+# do HOST_DIR, documentada no topo deste arquivo). Com `:-n` o teste era sempre
+# falso e a função retornava antes de olhar a imagem.
+#
+# Gate que nunca dispara é pior que gate nenhum: ele dá a impressão de cobertura
+# e não cobre. A versão abaixo pergunta pela CONSEQUÊNCIA e não depende de
+# ambiente nenhum: se `libharfbuzz` está na imagem e o `libSDL2_ttf` não a cita,
+# o `sdl2_ttf` foi configurado antes de harfbuzz existir. Isso é exatamente o
+# que o `.mk` garante que não acontece num build limpo
+# (`ifeq ($(BR2_PACKAGE_HARFBUZZ),y)` -> `--enable-harfbuzz`).
 verifica_harfbuzz() {
-    # Só interessa quando alguém pediu harfbuzz.
-    [ "${BR2_PACKAGE_HARFBUZZ:-n}" = "y" ] || return 0
-
-    local ttf=""
+    local ttf="" hb=""
     for d in "$TARGET_DIR/usr/lib" "$TARGET_DIR/lib"; do
         for f in "$d"/libSDL2_ttf-2.0.so.0.*; do
             [ -f "$f" ] && { ttf="$f"; break; }
@@ -144,12 +155,22 @@ verifica_harfbuzz() {
     done
     [ -n "$ttf" ] || return 0   # aparelho sem SDL2_ttf: nada a verificar
 
+    # Sem harfbuzz na imagem não há o que exigir: um aparelho que não usa
+    # escrita complexa legitimamente não o empacota.
+    for d in "$TARGET_DIR/usr/lib" "$TARGET_DIR/lib"; do
+        for f in "$d"/libharfbuzz.so*; do
+            [ -f "$f" ] && { hb="$f"; break; }
+        done
+        [ -n "$hb" ] && break
+    done
+    [ -n "$hb" ] || return 0
+
     if grep -aq 'libharfbuzz\.so' "$ttf"; then
         echo "post-build: SDL2_ttf pede libharfbuzz (ok)"
         return 0
     fi
 
-    echo "post-build: ERRO — BR2_PACKAGE_HARFBUZZ=y mas $(basename "$ttf") NÃO pede harfbuzz." >&2
+    echo "post-build: ERRO — $(basename "$hb") está na imagem mas $(basename "$ttf") NÃO pede harfbuzz." >&2
     echo "  O texto com escrita complexa (árabe, hindi, tailandês) sai errado," >&2
     echo "  sem erro em tempo de execução — o shaping simplesmente não acontece." >&2
     echo "  Causa: o build incremental não reconfigura pacote já construído (§12.29)." >&2

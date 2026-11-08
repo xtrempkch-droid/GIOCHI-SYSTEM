@@ -1,12 +1,12 @@
 # AGENTS.md — Giochi System
 
 > Handoff técnico do repositório. Leia antes de continuar o trabalho.
-> Atualizado em: 06/11/2026 (revisão 6 — **o R35S testado por dentro**: SSH por
-> `usb0`, `PASS 34 · WARN 7 · FAIL 0 · SKIP 4`, áudio confirmado, e a **GPU
-> medida** — GLES 3.1 no panfrost, sem geometry shader, que era o número que
-> faltava. A medição quase deu "está tudo bem": a imagem saía com `softpipe` e a
-> `GL_VERSION` respondia igual. Ver §12.51 e
-> [`docs/gpu-drivers.md`](docs/gpu-drivers.md).)
+> Atualizado em: 08/11/2026 (revisão 7 — **auditoria da árvore**: nove defeitos
+> encontrados, todos do tipo "verde e errado", e todos com teste que os prende.
+> Os dois mais graves: o gate do harfbuzz **nunca disparou** (dependia de variável
+> `BR2_*` que o Buildroot não exporta ao post-build) e um patch de kernel ausente
+> matava o build **sem imprimir nada** — a mesma morte silenciosa do §12.53, num
+> lugar onde ninguém tinha olhado. Ver §12.59.)
 
 ---
 
@@ -77,7 +77,7 @@ Repositório: `https://github.com/xtrempkch-droid/GIOCHI-SYSTEM` — branch `mai
 
 | Verificação | Resultado |
 | --- | --- |
-| `node tests/run-all.mjs` | **402/402** (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, devices 13, assert-config 12, fdt 11, …) |
+| `node tests/run-all.mjs` | **456/456** (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, devices 13, assert-config 12, fdt 11, …) |
 | `node scripts/validate-devices.mjs` | OK — 7 devices, 1 habilitado |
 | `node scripts/list-devices.mjs --github-matrix` | matriz com `qemu-aarch64` |
 | matriz com `--device powkiddy-x55 --allow-draft` | devolve **só** o X55 |
@@ -188,10 +188,15 @@ Tamanhos com `gzip -1`: rootfs 1 GiB → 52 MB; FAT de boot 256 MiB → 17 MB.
 
 **Continua pendente:**
 
-- **`buildrootFragments` (plural)** e **`firmwareFiles`** seguem aceitos na
-  documentação e **não** lidos por script. O que existe e funciona é
-  `buildrootFragment` (singular) e `firmware-required.txt` (verificação de
-  presença, não download). Ou implementar, ou remover da doc.
+- ~~**`buildrootFragments` (plural)** e **`firmwareFiles`** seguem aceitos na
+  documentação e **não** lidos por script.~~ **Corrigido em 08/11/2026:** os dois
+  são lidos. `build-device.sh` faz `mapfile -t EXTRA_FRAGMENTS < <(device-info
+  buildrootFragments)` e passa cada um ao `prepare-config` (staging sem espaço,
+  depois do fragmento principal), e faz `mapfile -t FIRMWARE_DECL < <(device-info
+  firmwareFiles)` copiando para `/lib/firmware` com a subpasta preservada.
+  Os dois têm validação de existência no schema e teste no `validate-devices`.
+  `firmware-required.txt` continua sendo a conferência de **presença no rootfs** —
+  é outra pergunta ("o arquivo saiu na imagem?"), não a de origem.
 - **`rocknix-joypad`** (driver fora da árvore) não está empacotado — o X55 tem
   16 botões via `gpio-keys` e 4 eixos via `adc-joystick`, sem ele.
 - **`genimage`** dentro do Buildroot, substituindo `make-sd-image.sh` como etapa
@@ -334,8 +339,16 @@ Giochi system/
 | `bootNotes` | recomendado | anotações de boot |
 | `docs` | sim | README do aparelho |
 
-Campos **aceitos na documentação mas não lidos por script**: `buildrootFragments`,
-`kernelPatches`, `firmwareFiles`. Não conte com eles até o loader implementar.
+Campos lidos pelos scripts: `buildrootFragments` (por área, depois do
+principal), `kernelPatches` (`BR2_LINUX_KERNEL_PATCH`, com hash de estado),
+`firmwareFiles` (copiados para `/lib/firmware`), `dtsPaths`, `bootloader`,
+`kernelCmdline`, `panel`.
+
+> Esta linha dizia o contrário até 08/11/2026 — que os três primeiros eram
+> "aceitos na documentação mas não lidos por script". O `build-device.sh` já os
+> lia; o documento é que estava velho. Campo que a doc diz que não funciona e
+> funciona é dívida na direção oposta, e custa o mesmo: alguém reimplementa o que
+> existe.
 
 ## 7. Pipeline de build
 
@@ -426,7 +439,7 @@ si (§12.4), mas provavelmente **não** era a causa dos 3 s.
 
 ```bash
 node scripts/validate-devices.mjs
-node tests/run-all.mjs                          # 402 testes
+node tests/run-all.mjs                          # 456 testes
 node scripts/list-devices.mjs
 node scripts/list-devices.mjs --github-matrix
 node scripts/list-devices.mjs --github-matrix --device powkiddy-x55 --allow-draft
@@ -468,7 +481,7 @@ absoluto** do host — §12.40).
 
 ## 10. Testes
 
-`node tests/run-all.mjs` → **402/402**:
+`node tests/run-all.mjs` → **456/456**:
 
 | Arquivo | Testes | Cobre |
 | --- | --- | --- |
@@ -483,6 +496,10 @@ absoluto** do host — §12.40).
 | `tests/firmware-required.test.mjs` | 5 | `rtl8821cs_*` no override, firmware obrigatório presente |
 | `tests/buildroot-hash.test.mjs` | 2 | hash do tarball fixado e usado |
 | `tests/base-system.test.mjs` | 19 | contrato do sistema base: udhcpd, RNDIS (não ECM), `os_desc` completo, `PermitRootLogin`/`UseDNS`, dropbear ausente, recusa de build com pacote removido |
+| `tests/post-build-harfbuzz.test.mjs` | 5 | o gate do harfbuzz roda no `EXTRA_ENV` REAL do Buildroot (sem nenhum `BR2_*`); reprova biblioteca presente + `sdl2_ttf` sem ela, e aceita "não pediu" |
+| `tests/flash-guards.test.mjs` | 4 | a classe inteira: `flash-sd.sh` **e** `flash-dd.sh` recusam o disco de `/` e `/boot`, antes do `dd` |
+| `tests/ci-cache-e-sd-image.test.mjs` | 6 | cache do CI salva o `BR2_DL_DIR` que o script usa (`.cache/dl`), docs batem, e `make-sd-image.sh` não tem DTB de reserva de outro aparelho |
+| `tests/build-device-vars.test.mjs` | 7 | variável não atribuída aborta o build; o estado de patches/fragmento roda de verdade, inclusive com patch ausente (falha alto, não em silêncio) |
 
 ## 10-A. O sistema base — acesso antes de interface
 
@@ -3029,6 +3046,74 @@ parecia vazio com o rootfs correto gravado. O que desmentiu foi o magic `53 ef`
 lido direto no offset 320 MiB. A lição é a mesma do §12.30: ferramenta ausente
 não é dado ausente — quando tudo dá "não tem", o suspeito é o instrumento.
 
+### 12.59 A auditoria de 08/11/2026: nove defeitos, todos "verde e errado"
+
+Varredura completa da árvore, sem aparelho ligado. O critério foi o que este
+documento sempre usou: **o que faz o build passar e a imagem sair errada, sem
+mensagem**. Nove achados, todos corrigidos, cada um com teste que falha se
+voltar. Nenhum apareceu por leitura de código apenas — os dois primeiros foram
+reproduzidos em shell, e o resto só apareceu ao comparar script com script.
+
+| # | Onde | Defeito | Como se manifestava |
+| --- | --- | --- | --- |
+| 1 | `post-build.sh` | `verifica_harfbuzz` começava com `[ "${BR2_PACKAGE_HARFBUZZ:-n}" = "y" ] \|\| return 0`; o Buildroot **não exporta `BR2_*`** ao post-build | o gate **nunca rodou**: build verde e zero cobertura |
+| 2 | `build-device.sh` | `... \| xargs ... sha256sum {} 2>/dev/null` sob `set -euo pipefail` | patch ausente derrubava o script com **exit 123 e nenhuma saída** |
+| 3 | `build-device.sh` | só os patches de **kernel** eram hasheados | editar `uboot-patches/` ou `uboot.fragment` com `KEEP_WORK=1` dava U-Boot velho (§12.11 para o outro pacote) |
+| 4 | `flash-sd.sh` | tinha `--grow` e SHA256, **não** tinha a guarda "não é o disco de `/`" que o `flash-dd.sh` tem | gravar um SSD USB/cartão que sustenta o sistema apaga o host |
+| 5 | `make-sd-image.sh` | `DTB_NAME="${DTB_NAME:-rk3566-powkiddy-x55}"` | aparelho novo sem `INTREE_DTS_NAME` gravaria o **painel da X55** |
+| 6 | workflow + docs | o cache salvava `.cache/buildroot-dl`; o script usa `$CACHE_ROOT/dl` | cache sempre vazio: todo build baixava tudo de novo |
+| 7 | `giochi-selftest` | `grep -c '^\s*[0-9]'` e `LEASES=$(grep -c ... \|\| echo 0)` | `\s` não é POSIX (busybox) e o `\|\| echo 0` produz `"0\n0"` — os dois dão `FAIL nenhuma placa de som` com som |
+| 8 | `build-device.sh` | `rm -rf "$OUT_DIR"` **antes** do `make` | build que falhava apagava a última imagem boa (o `out/_anterior-…` da §21 foi feito à mão por causa disso) |
+| 9 | `package-overrides.mk` | cabeçalho dizia "incluído *depois* das receitas" | a ordem real é antes (`Makefile:528` vs `:531`); quem cresse no comentário escreveria `+=` e perderia a opção em silêncio |
+
+**O achado 1 é o mais instrutivo.** O gate nasceu com a justificativa certa
+(§12.29), a mensagem certa e a correção certa — e a primeira linha o desligava.
+O próprio arquivo, cinquenta linhas acima, documenta que o Buildroot passa só
+`PATH, BR2_DL_DIR, BUILD_DIR, CONFIG_DIR, O` ao post-build. A regra que sai:
+**gate não pode depender de ambiente que não foi medido.** A versão nova pergunta
+pela consequência e não lê variável nenhuma: `libharfbuzz` na imagem + `libSDL2_ttf`
+sem citá-la = build construído antes da dependência existir.
+
+**O achado 2 é o §12.53 de novo, e a lição é sobre onde procurar.** A correção
+do §12.53 foi aplicada na linha que doeu (`linux.fragment`), não na **classe**
+(comando em pipeline que pode falhar com `stderr` mudo). A linha dos patches
+nunca foi olhada, e ficou dois meses esperando um aparelho com patch removido
+para matar um build em 0 s. `hash_entradas()` agora falha alto, dizendo qual
+caminho falta.
+
+**O achado 4 é o §12.50 aplicado a script:** a guarda existia num dos dois
+scripts que gravam cartão. Defeito de classe coberto por caso é cobertura
+aparente — `tests/flash-guards.test.mjs` percorre a lista `DESTRUTIVOS` em vez
+de testar um arquivo.
+
+Testes novos, e o que cada um prende:
+
+| Arquivo | Testes | Prende |
+| --- | --- | --- |
+| `tests/post-build-harfbuzz.test.mjs` | 5 | o gate roda no `EXTRA_ENV` **real** (sem `BR2_*`) e reprova o caso que motiva |
+| `tests/flash-guards.test.mjs` | 4 | os **dois** scripts recusam o disco de `/` e `/boot`, antes do `dd` |
+| `tests/ci-cache-e-sd-image.test.mjs` | 6 | o cache do CI é o caminho que o script escreve; `make-sd-image.sh` sem DTB de reserva |
+| `tests/build-device-vars.test.mjs` | 8 (era 5) | estado de patches executa de verdade, inclusive com patch ausente; `out/` limpo só depois do `make` |
+| `tests/rk3326-legacy-boot.test.mjs` | 18 (era 17) | inclui o nome do alvo `uboot-dirclean` e o estado de `uboot.fragment` + `uboot-patches/` |
+| `tests/selftest-contract.test.mjs` | 16 (era 12) | nenhum `\s` em grep, nenhum `grep -c \|\| echo 0`, nenhuma contagem morta, e a lenda do `amixer` fora do código |
+
+**Documentação que estava mentindo, e foi corrigida:** `buildrootFragments` e
+`firmwareFiles` eram descritos como "aceitos na doc e não lidos por script" —
+o `build-device.sh` já os lia (§6); a contagem de testes dizia 402 e eram 433;
+`docs/x55-bringup.md` repetia que `amixer` "não existe no Buildroot" (§12.16); e
+`docs/security.md` pedia para "adicionar um SHA256 do tarball" que já existe em
+`buildroot.sha256` desde a primeira revisão.
+
+**O que a auditoria NÃO achou:** nenhum defeito nos gates de `assert-config` /
+`assert-kernel-config`, no `prepare-config.mjs`, no `chave-da-loja.sh`, no
+`giochi-init` e nos overrides de pacote — estes foram conferidos contra a árvore
+real do Buildroot 2024.02 em `~/.cache/giochi-system/work/*/buildroot-2024.02`,
+não contra a lembrança. Em particular, `override STRACE_CONF_OPTS` repete as
+quatro opções da receita **de propósito**: `override` congela a variável, então
+o `+=` condicional do `strace.mk` (libunwind/libiberty) deixa de alcançá-la —
+verificado com `make -p` e com o `config.log` do build do R35S, que registra
+`--enable-mpers=no --enable-bundled=yes --without-libunwind --without-libiberty`.
+
 ## 13. Aparelhos
 
 | ID | Pasta | SoC | Arch | Status | Falta |
@@ -3391,7 +3476,7 @@ o cartão — não só no `target/`.
 
 | Item | Estado |
 | --- | --- |
-| Código e configuração | **pronto** — 402/402 testes |
+| Código e configuração | **pronto** — 456/456 testes |
 | Imagem X55 (`Image` + `rootfs.ext4` + DTB + bootloader) | **existe** em `out/powkiddy-x55/`, `built_at_utc=2026-11-04T21:05:13Z` |
 | `/etc/inittab` na imagem | **linha 30: `::respawn:/usr/bin/giochi-init`** — conferida com `debugfs` no `rootfs.ext4` |
 | `work/` do X55 | preservado em `~/.cache/giochi-system/work/powkiddy-x55` (17 GB, já com `target/` finalizado) |
@@ -3532,7 +3617,7 @@ Ordem sugerida para a próxima sessão (nada aqui precisa da X55):
 
 ```bash
 node scripts/validate-devices.mjs      # 7 devices, 1 habilitado
-node tests/run-all.mjs                 # 402/402
+node tests/run-all.mjs                 # 456/456
 node scripts/list-devices.mjs --github-matrix
 ```
 
@@ -3598,7 +3683,7 @@ as duas correções (`uboot-patches/0001-…-adc-nao-fatal.patch` +
 
 ```bash
 cd /home/charles/Giochi/GIOCHI-SYSTEM
-node tests/run-all.mjs                                   # esperado: 402/402
+node tests/run-all.mjs                                   # esperado: 456/456
 git add device/r35s/README.md AGENTS.md
 git commit -m "r35s: o U-Boot mainline liga; a frase do README estava desatualizada
 

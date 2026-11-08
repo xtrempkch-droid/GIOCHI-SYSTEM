@@ -3,16 +3,19 @@
 # giochi-buttons — testa os botões e eixos do aparelho, com nome de gente.
 #
 # Uso:
-#   giochi-buttons            # botões de gamepad + volume (17 + 2)
+# giochi-system:help:begin
+#   giochi-buttons            # botões de gamepad + volume (16 + 1 opcional, + 2 de volume)
 #   giochi-buttons --axes     # só os eixos analógicos
 #   giochi-buttons --volume   # só volume (KEY_VOLUMEUP/DOWN)
 #   giochi-buttons --all      # um dispositivo por vez
 #   giochi-buttons --list     # o que existe e o que se espera pressionar
 #   giochi-buttons --raw      # evtest cru, sem tradução
+# giochi-system:help:end
 #
 # Por que existe: provar que um botão chega ao kernel com o código certo exige
-# ver EV_KEY. O `giochi-selftest` conta capacidades — sabe que o dispositivo
-# declara 17 teclas — mas não sabe se a tecla física está ligada no GPIO certo,
+# ver EV_KEY. O `giochi-selftest` conta capacidades — sabe quantas teclas o
+# dispositivo declara (16 obrigatórias + 1 opcional neste aparelho, §12.22) — mas
+# não sabe se a tecla física está ligada no GPIO certo,
 # nem se o mapeamento do `buttons.map` corresponde ao que o jogo espera. Isso só
 # se responde apertando.
 #
@@ -28,7 +31,13 @@ MAP=/etc/giochi/buttons.map
 EVTEST=evtest
 
 usage() {
-    sed -n '3,17p' "$0" | sed 's/^# \{0,1\}//'
+    # Sentinelas, e não número de linha: era `sed -n '3,17p'`, que passa a
+    # mentir em silêncio quando o cabeçalho cresce — a mesma armadilha que o
+    # `tests/flash-grow.test.mjs` registra para o `--help` do flash-sd.sh
+    # ("um recorte por número de linha passa a mentir em silêncio").
+    awk '/^# giochi-system:help:begin$/ { dentro = 1; next }
+         /^# giochi-system:help:end$/   { exit }
+         dentro                         { sub(/^# ?/, ""); print }' "$0"
     exit "${1:-0}"
 }
 

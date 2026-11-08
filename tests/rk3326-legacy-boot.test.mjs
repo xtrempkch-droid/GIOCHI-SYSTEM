@@ -250,3 +250,30 @@ test("o bootcmd fixa mmc0 — o scan genérico não acha o cartão", () => {
   // E sysboot como ferramenta de resgate.
   assert.match(fragment, /^CONFIG_CMD_SYSBOOT=y$/m);
 });
+
+test("editar o U-Boot num build retomado limpa o pacote — com o nome certo", () => {
+  // §12.11 não distingue pacote: `uboot.fragment` e `uboot-patches/` ficam
+  // gravados no `.stamp_configured`/`.stamp_patched` do Buildroot, e um build
+  // com KEEP_WORK=1 dava build verde com o U-Boot VELHO. No R35S isso é a placa
+  // parando em "Please RESET the board", porque o patch que torna o
+  // `rk_board_late_init` não-fatal não entrou.
+  //
+  // O nome do alvo é o do PACOTE, `uboot-dirclean` (variáveis `UBOOT_*` em
+  // `boot/uboot/uboot.mk`), e não o do produto. Escrevi `u-boot-dirclean` na
+  // primeira versão e o make responde "No rule to make target" — daí o teste.
+  const build = readFileSync(`${ROOT}scripts/build-device.sh`, "utf8");
+  const executavel = build
+    .split("\n")
+    .filter((linha) => !linha.trimStart().startsWith("#"))
+    .join("\n");
+  assert.match(executavel, /make -C "\$BR2_DIR" O="\$BUILD_DIR" uboot-dirclean/);
+  assert.ok(
+    !/make .*u-boot-dirclean/.test(executavel),
+    "u-boot-dirclean não existe no Buildroot: o alvo é uboot-dirclean",
+  );
+  // E o estado tem de cobrir fragmento E patches do U-Boot.
+  assert.match(executavel, /UBOOT_STATE_FILE=/);
+  assert.match(executavel, /uboot-inputs\.state/);
+  assert.match(executavel, /-d "\$DEVICE_DIR\/uboot-patches"/);
+  assert.match(executavel, /-f "\$DEVICE_DIR\/uboot\.fragment"/);
+});

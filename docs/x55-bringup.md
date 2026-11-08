@@ -217,17 +217,29 @@ tem `AutoEnable=false`: o controlador aparecia em `bluetoothctl list` e ficava
 quebrado". O overlay traz um `main.conf` mínimo com `AutoEnable = true`;
 depois do boot, `Powered: yes` sem nenhum comando.
 
-### `amixer` não existe, e o teste de áudio aprendeu isso
+### `amixer` não vinha na imagem, e o teste de áudio aprendeu a contornar
 
-O Buildroot 2024.02 empacota `alsactl` e `alsamixer`, **não** `amixer`. O
-`giochi-selftest` usava `amixer` para conferir o `Playback Mux` e caía em SKIP.
-Agora o caminho principal é `alsactl store`, que despeja todos os controles com
-nome e valor:
+> **Correção de fato (08/11/2026, §12.16 do AGENTS):** esta seção afirmava que o
+> Buildroot 2024.02 "empacota `alsactl` e `alsamixer`, **não** `amixer`". É
+> falso: `BR2_PACKAGE_ALSA_UTILS_AMIXER` existe no `package/alsa-utils/Config.in`
+> e simplesmente **não tem `default y`** — só `ALSACTL` e `ALSAMIXER` têm.
+> "Não empacotado" e "empacotado e desligado" dão o mesmo sintoma numa imagem, e
+> foi por isso que a confusão sobreviveu tanto tempo. Hoje `amixer`, `aplay`,
+> `arecord` e `speaker-test` estão nos defconfigs dos aparelhos com tela.
+
+O `giochi-selftest` usava `amixer` para conferir o `Playback Mux` e caía em SKIP
+numa imagem onde ele não vinha ligado. O caminho principal passou a ser
+`alsactl store`, que despeja todos os controles com nome e valor:
 
 ```text
 name 'Playback Mux'
 value HP
 ```
+
+Isso não foi contorno: `alsactl` é o mecanismo que o ALSA prevê para **aplicar
+estado de placa** (é o que o `S51mixer` faz com `/etc/giochi/asound.state`), e o
+formato é um arquivo versionável em vez de uma sequência de comandos. O `amixer`
+ficou como reserva, para uma imagem construída sem a subopção.
 
 No aparelho: `[PASS] Playback Mux = HP (falante roteado por HPOL/HPOR)`.
 O placar subiu para **PASS 21 · SKIP 1** — o único SKIP restante é o 3D, que

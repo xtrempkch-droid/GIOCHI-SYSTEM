@@ -135,7 +135,16 @@ echo "  cache:     $CACHE_ROOT"
 echo "  out:       $OUT_DIR"
 echo
 
-rm -rf "$OUT_DIR"
+# O `out/<device>/` NÃO é apagado aqui: ele é limpo só na hora de coletar os
+# artefatos, no fim do build. A versão anterior fazia `rm -rf "$OUT_DIR"` neste
+# ponto, e o efeito era o pior possível num projeto cujo build leva 1–3 h: um
+# build que falhasse no `make` (ou no `assert-config`, ou no `assert-kernel`)
+# levava junto a última imagem que funcionava — e o `/out/_anterior-x55-…` que
+# aparece na documentação foi criado **à mão** justamente por causa disso.
+#
+# Nada é escrito em `out/` antes da coleta, então adiar a limpeza não muda mais
+# nada do build. O que muda é o estado depois de uma falha: o artefato anterior
+# continua lá, inteiro, com o `SHA256SUMS` dele.
 mkdir -p "$DOWNLOAD_DIR" "$BUILDROOT_DL_DIR" "$WORK_DIR" "$BUILD_DIR" "$OUT_DIR"
 
 # Patch novo em um build retomado (KEEP_WORK=1) NÃO é aplicado: o Buildroot vê
@@ -143,8 +152,67 @@ mkdir -p "$DOWNLOAD_DIR" "$BUILDROOT_DL_DIR" "$WORK_DIR" "$BUILD_DIR" "$OUT_DIR"
 # imagem sem a correção, e o log dizendo "patch: ..." como se tivesse entrado.
 # Aqui a comparação é feita e, se o conjunto de patches mudou, o pacote do
 # kernel é limpo para reaplicar.
+#
+# A versão anterior era
+#
+#   ... | xargs -r -d '\n' -I{} sha256sum {} 2>/dev/null | awk ... | sort ...
+#
+# e tinha três defeitos, os três medidos em 08/11/2026:
+#
+#   1. `sha256sum` num arquivo inexistente devolve não-zero; o `xargs` então
+#      devolve **123**, e com `set -euo pipefail` a ATRIBUIÇÃO derruba o script
+#      ali mesmo — antes do cabeçalho, sem uma linha de diagnóstico. É a mesma
+#      falha do §12.53 (o `linux.fragment` do qemu-aarch64), num lugar onde
+#      ninguém tinha olhado. Reproduzido em shell: `bash t.sh` sai 123 e não
+#      imprime nada.
+#   2. o `2>/dev/null` no `xargs` escondia justamente a mensagem que diria qual
+#      arquivo faltou.
+#   3. só os patches do KERNEL eram hasheados. `device/<pasta>/uboot-patches/` e
+#      `uboot.fragment` têm exatamente o mesmo problema (§12.11 não distingue
+#      pacote), e editá-los num build retomado dava build verde com o U-Boot
+#      velho — que no R35S significa o `rk_board_late_init()` do odroid-go2
+#      abortar e a placa parar em "Please RESET the board".
+#
+# `hash_entradas` recebe caminhos um por linha e imprime um hash estável do
+# CONJUNTO. Falha alto e claro quando um caminho não existe.
+# giochi-system:patch-state:begin
+hash_entradas() {
+  local linha arquivo="" hashes=()
+  while IFS= read -r linha; do
+    [ -n "$linha" ] || continue
+    if [ ! -e "$linha" ]; then
+      echo "ERRO: patch declarado não existe: $linha" >&2
+      return 2
+    fi
+    if [ -d "$linha" ]; then
+      while IFS= read -r arquivo; do
+        [ -n "$arquivo" ] || continue
+        hashes+=("$(sha256sum "$arquivo" | awk '{print $1}')")
+      done < <(find "$linha" -type f \( -name '*.patch' -o -name '*.diff' \) | sort)
+    else
+      hashes+=("$(sha256sum "$linha" | awk '{print $1}')")
+    fi
+  done
+  ((${#hashes[@]})) || return 0
+  printf '%s\n' "${hashes[@]}" | sort | tr '\n' ' '
+}
+
 PATCH_STATE_FILE="$WORK_DIR/kernel-patches.state"
-CURRENT_PATCHES="$(node "$ROOT/scripts/device-info.mjs" "$DEVICE_ID" kernelPatches 2>/dev/null | xargs -r -d '\n' -I{} sha256sum {} 2>/dev/null | awk '{print $1}' | sort | tr '\n' ' ')"
+# `kernelPatches` (caminhos ABSOLUTOS) e `dtsPaths` (RELATIVOS à pasta do
+# aparelho, porque é assim que o staging os consome mais abaixo) são as duas
+# entradas do pacote linux que podem mudar sem que o `.config` mude. Misturar as
+# duas formas sem normalizar daria "patch declarado não existe" para todo
+# aparelho que declare DTS — por isso o prefixo aqui.
+KERNEL_PATCH_LIST="$(node "$ROOT/scripts/device-info.mjs" "$DEVICE_ID" kernelPatches)"
+while IFS= read -r dts_rel; do
+  [[ -n "$dts_rel" ]] || continue
+  KERNEL_PATCH_LIST="$KERNEL_PATCH_LIST
+$DEVICE_DIR/$dts_rel"
+done <<<"$(node "$ROOT/scripts/device-info.mjs" "$DEVICE_ID" dtsPaths)"
+CURRENT_PATCHES="$(printf '%s\n' "$KERNEL_PATCH_LIST" | hash_entradas)" || {
+  echo "ERRO: não consegui calcular o estado dos patches do kernel." >&2
+  exit 2
+}
 PREVIOUS_PATCHES="$(cat "$PATCH_STATE_FILE" 2>/dev/null || true)"
 FORCE_KERNEL_REBUILD=0
 if [[ "$CURRENT_PATCHES" != "$PREVIOUS_PATCHES" ]]; then
@@ -155,6 +223,32 @@ if [[ "$CURRENT_PATCHES" != "$PREVIOUS_PATCHES" ]]; then
   fi
   printf '%s' "$CURRENT_PATCHES" >"$PATCH_STATE_FILE" 2>/dev/null || true
 fi
+
+# U-Boot: mesmo mecanismo, outro pacote. O fragmento e o diretório de patches
+# existem só quando o aparelho os declara (o defconfig usa os placeholders de
+# fragmento e de diretório de patches, trocados por caminho sem espaço mais
+# abaixo), então a lista é montada a partir do que existe.
+UBOOT_STATE_FILE="$WORK_DIR/uboot-inputs.state"
+UBOOT_INPUTS=""
+[[ -f "$DEVICE_DIR/uboot.fragment" ]] && UBOOT_INPUTS="$DEVICE_DIR/uboot.fragment"
+[[ -d "$DEVICE_DIR/uboot-patches" ]] && UBOOT_INPUTS="$UBOOT_INPUTS
+$DEVICE_DIR/uboot-patches"
+CURRENT_UBOOT_STATE=""
+if [[ -n "$UBOOT_INPUTS" ]]; then
+  CURRENT_UBOOT_STATE="$(printf '%s\n' "$UBOOT_INPUTS" | hash_entradas)" || {
+    echo "ERRO: não consegui calcular o estado dos patches/fragmento do U-Boot." >&2
+    exit 2
+  }
+fi
+PREVIOUS_UBOOT_STATE="$(cat "$UBOOT_STATE_FILE" 2>/dev/null || true)"
+FORCE_UBOOT_REBUILD=0
+if [[ "$CURRENT_UBOOT_STATE" != "$PREVIOUS_UBOOT_STATE" ]]; then
+  if compgen -G "$BUILD_DIR/build/uboot-*/.stamp_configured" >/dev/null; then
+    FORCE_UBOOT_REBUILD=1
+  fi
+  printf '%s' "$CURRENT_UBOOT_STATE" >"$UBOOT_STATE_FILE" 2>/dev/null || true
+fi
+# giochi-system:patch-state:end
 
 # O FRAGMENTO do kernel tem o mesmo problema, por outro caminho: mudar
 # `CONFIG_*` não é "patch novo", mas o Buildroot também não reconfigura o
@@ -734,6 +828,22 @@ if ((FORCE_KERNEL_REBUILD)); then
   make -C "$BR2_DIR" O="$BUILD_DIR" linux-dirclean >/dev/null 2>&1 || true
 fi
 
+# U-Boot tem o mesmo `.stamp_patched`/`.stamp_configured`: editar um patch ou o
+# fragmento com KEEP_WORK=1 dava build verde e U-Boot velho. `|| true` porque
+# falhar aqui não deve derrubar o build — mas o aviso importa, senão o operador
+# acha que a correção entrou.
+#
+# O alvo é `uboot-dirclean`, com o nome do PACOTE (`UBOOT_*` em
+# `boot/uboot/uboot.mk`), não o nome do produto: `u-boot-dirclean` não existe e
+# o make responde "No rule to make target". Conferido com
+# `make -p -n | grep '^uboot-dirclean'` na árvore 2024.02.
+if ((FORCE_UBOOT_REBUILD)); then
+  echo "  uboot:     fragmento/patches mudaram — limpando o pacote uboot para reaplicar"
+  if ! make -C "$BR2_DIR" O="$BUILD_DIR" uboot-dirclean >/dev/null 2>&1; then
+    echo "AVISO: 'uboot-dirclean' falhou; o U-Boot pode sair sem a mudança." >&2
+  fi
+fi
+
 # O `S50hwclock` no aparelho se recusa a gravar no RTC um ano anterior ao da
 # construção da imagem — gravar um relógio de 1970 no RTC é pior que não gravar.
 # O piso tem de vir do build, não de um número escrito à mão que envelhece.
@@ -1024,7 +1134,14 @@ if [[ -f "$KERNEL_FRAGMENT" || -f "$KERNEL_REQUIRED" ]]; then
   fi
 fi
 
+# Limpeza do `out/` SÓ agora, com o build já compilado e os gates aprovados.
+# Antes de coletar, apagar os artefatos antigos evita que um arquivo que não é
+# mais produzido (um DTB renomeado, um `u-boot.itb` que deixou de existir)
+# sobreviva de um build anterior e vá para a imagem de cartão em `out/`.
+# Se qualquer coisa falhar daqui para trás, o artefato anterior fica intacto.
 echo "Coletando artefatos..."
+rm -rf "$OUT_DIR"
+mkdir -p "$OUT_DIR"
 shopt -s nullglob
 copied=0
 # `-L` é obrigatório: o Buildroot entrega `rootfs.ext4` como SYMLINK para

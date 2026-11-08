@@ -235,3 +235,144 @@ test("o bloco do fragmento limpa o kernel quando o hash muda", () => {
   assert.match(output, /FORCE=1/, "fragmento novo com kernel já configurado pede dirclean");
   assert.match(output, /STATE=[0-9a-f]{64}/, "o hash do fragmento tem de ser gravado");
 });
+
+// ── estado dos PATCHES: sem morte silenciosa ────────────────────────────────
+//
+// Irmão do teste acima, na linha logo antes dele. A versão original era
+//
+//   CURRENT_PATCHES="$(... | xargs -r -d '\n' -I{} sha256sum {} 2>/dev/null | ...)"
+//
+// e tinha três defeitos, medidos em 08/11/2026:
+//
+//   1. `sha256sum` num arquivo ausente devolve não-zero, o `xargs` devolve 123, e
+//      com `set -euo pipefail` a ATRIBUIÇÃO derruba o script ali mesmo — antes
+//      do cabeçalho, sem uma linha de diagnóstico (a mesma família do §12.53);
+//   2. o `2>/dev/null` escondia justamente a mensagem que diria qual arquivo
+//      faltou;
+//   3. só o KERNEL era hasheado — `uboot-patches/` e `uboot.fragment` tinham o
+//      mesmo problema do §12.11 e ninguém detectava.
+//
+// Como no teste do fragmento, a verificação é por EXECUÇÃO: extrai o bloco entre
+// `giochi-system:patch-state:{begin,end}` e roda num bash real. `bash -n` passa
+// nos dois casos, então sintaxe nunca ia pegar.
+const PATCH_BEGIN = "giochi-system:patch-state:begin";
+const PATCH_END = "giochi-system:patch-state:end";
+
+function extractPatchBlock() {
+  const lines = SCRIPT.split("\n");
+  const from = lines.findIndex((line) => line.includes(PATCH_BEGIN));
+  const to = lines.findIndex((line) => line.includes(PATCH_END));
+  assert.ok(from > 0 && to > from, "marcadores do bloco de patches ausentes no script");
+  return lines.slice(from + 1, to).join("\n");
+}
+
+test("o estado dos patches falha ALTO quando um patch não existe", () => {
+  const root = mkdtempSync(join(tmpdir(), "giochi-patch-"));
+  const workDir = join(root, "work");
+  const buildDir = join(root, "build");
+  mkdirSync(workDir, { recursive: true });
+  mkdirSync(buildDir, { recursive: true });
+
+  const harness = [
+    "set -euo pipefail",
+    `ROOT=${JSON.stringify(process.cwd())}`,
+    'DEVICE_ID="r35s"',
+    `DEVICE_DIR=${JSON.stringify(join(process.cwd(), "device", "r35s"))}`,
+    `WORK_DIR=${JSON.stringify(workDir)}`,
+    `BUILD_DIR=${JSON.stringify(buildDir)}`,
+    "FORCE_KERNEL_REBUILD=0",
+    "FORCE_UBOOT_REBUILD=0",
+    "KERNEL_REBUILD_REASON=",
+    // Um caminho que não existe: é o caso que matava o script em silêncio.
+    `FANTASMA=${JSON.stringify(join(root, "nao-existe.patch"))}`,
+    extractPatchBlock(),
+    `SAIDA="$( { printf '%s\\n' "$FANTASMA" | hash_entradas; } 2>&1 )" || ESTADO=$?`,
+    'printf "ESTADO=%s\\n" "${ESTADO:-0}"',
+    'printf "MSG=%s\\n" "$SAIDA"',
+  ].join("\n");
+
+  // `execFileSync` lança quando o filho sai não-zero; aqui o harness captura o
+  // status por conta própria, então o exit é 0 e a saída traz os dois campos.
+  const output = execFileSync("bash", ["-c", harness], { encoding: "utf8" });
+  assert.match(output, /ESTADO=2/, "tem de sair com status próprio, não com 123 do xargs");
+  assert.match(
+    output,
+    /MSG=ERRO: patch declarado não existe: .*nao-existe\.patch/,
+    "a mensagem tem de dizer QUAL arquivo faltou — era o que o 2>/dev/null comia",
+  );
+});
+
+test("o estado dos patches cobre o aparelho real e muda quando o conteúdo muda", () => {
+  const root = mkdtempSync(join(tmpdir(), "giochi-patch2-"));
+  const workDir = join(root, "work");
+  const buildDir = join(root, "build");
+  mkdirSync(workDir, { recursive: true });
+  mkdirSync(join(buildDir, "build", "linux-6.12"), { recursive: true });
+  writeFileSync(join(buildDir, "build", "linux-6.12", ".stamp_patched"), "");
+
+  const a = join(root, "a.patch");
+  const b = join(root, "b.patch");
+  writeFileSync(a, "conteudo A\n");
+  writeFileSync(b, "conteudo B\n");
+
+  const harness = [
+    "set -euo pipefail",
+    `ROOT=${JSON.stringify(process.cwd())}`,
+    'DEVICE_ID="r35s"',
+    `DEVICE_DIR=${JSON.stringify(join(process.cwd(), "device", "r35s"))}`,
+    `WORK_DIR=${JSON.stringify(workDir)}`,
+    `BUILD_DIR=${JSON.stringify(buildDir)}`,
+    "FORCE_KERNEL_REBUILD=0",
+    "FORCE_UBOOT_REBUILD=0",
+    "KERNEL_REBUILD_REASON=",
+    `A=${JSON.stringify(a)}`,
+    `B=${JSON.stringify(b)}`,
+    extractPatchBlock(),
+    'printf "DO_APARELHO=%s\\n" "$CURRENT_PATCHES"',
+    'printf "STATE_FILE=%s\\n" "$(cat "$PATCH_STATE_FILE" 2>/dev/null || echo vazio)"',
+    'printf "FORCE=%s\\n" "$FORCE_KERNEL_REBUILD"',
+    'printf "H1=%s\\n" "$(printf "%s\\n" "$A" | hash_entradas)"',
+    'printf "AB=%s\\n" "$(printf "%s\\n%s\\n" "$A" "$B" | hash_entradas)"',
+    'printf "SEM_ENTRADA=[%s]\\n" "$(printf "" | hash_entradas)"',
+  ].join("\n");
+
+  const output = execFileSync("bash", ["-c", harness], { encoding: "utf8" });
+  // O r35s declara 3 patches de kernel: o hash do conjunto não pode sair vazio.
+  const doAparelho = (output.match(/DO_APARELHO=(.*)/)?.[1] ?? "").trim();
+  const hashes = doAparelho.split(/\s+/).filter(Boolean);
+  assert.ok(hashes.length >= 3, `3 patches = pelo menos 3 hashes; veio "${doAparelho}"`);
+  for (const h of hashes) assert.match(h, /^[0-9a-f]{64}$/);
+  // Primeiro run com stamp existente: pede dirclean, como o do fragmento.
+  assert.match(output, /FORCE=1/, "primeiro run com kernel já patcheado pede dirclean");
+  assert.match(output, /STATE_FILE=[0-9a-f]{64}/, "o estado tem de ficar gravado");
+  // Ordem e conteúdo: o hash de cada arquivo entra no conjunto.
+  const ab = (output.match(/AB=(.*)/)?.[1] ?? "").trim();
+  const h1 = (output.match(/H1=(.*)/)?.[1] ?? "").trim();
+  assert.match(h1, /^[0-9a-f]{64}$/, "hash de um arquivo só");
+  assert.ok(ab.includes(h1), "o hash de cada arquivo entra no conjunto");
+  assert.match(output, /SEM_ENTRADA=\[\]/, "lista vazia não pode virar linha em branco");
+});
+
+// ── `out/` só é limpo depois do build dar certo ─────────────────────────────
+//
+// O script apagava `out/<device>/` no começo. Num projeto cujo build leva 1–3 h,
+// um build que falha no `make` (ou no `assert-config`, ou no `assert-kernel`)
+// levava junto a última imagem que funcionava — e o `out/_anterior-x55-…` que
+// está na documentação foi criado À MÃO por causa disso.
+//
+// Nada é escrito em `out/` antes da coleta, então adiar a limpeza não muda mais
+// nada do build; o que muda é o estado depois de uma falha.
+test("o build não apaga o artefato anterior antes de compilar", () => {
+  const linhas = SCRIPT.split("\n");
+  const limpezas = linhas
+    .map((linha, indice) => ({ linha: linha.trim(), indice }))
+    .filter(({ linha }) => /^rm -rf "\$OUT_DIR"$/.test(linha));
+  assert.equal(limpezas.length, 1, "deve haver exatamente uma limpeza de out/");
+
+  const make = linhas.findIndex((linha) => /^make -C "\$BR2_DIR" O="\$BUILD_DIR"/.test(linha.trim()));
+  assert.ok(make > 0, "não achei a chamada do make");
+  assert.ok(
+    limpezas[0].indice > make,
+    "a limpeza de out/ voltou para antes do make: um build que falha apaga a imagem boa",
+  );
+});
