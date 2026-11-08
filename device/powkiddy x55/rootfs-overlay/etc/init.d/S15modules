@@ -14,7 +14,17 @@
 # do controlador). Carregar por script mantém o kernel menor.
 
 load_module() {
-  modprobe "$1" 2>/dev/null && echo "  $1" || true
+  if modprobe "$1" 2>/dev/null; then
+    echo "  $1"
+  else
+    # Falha VISÍVEL. A versão anterior era `modprobe "$1" 2>/dev/null && echo
+    # "  $1" || true`: o módulo que não carregava simplesmente não aparecia na
+    # lista, e o cabeçalho "Carregando módulos do X55:" logo acima fazia a saída
+    # parecer sucesso. É a mesma classe do §12.15 — dispositivo que existe pela
+    # metade. Aqui o módulo ausente continua não sendo fatal (o aparelho boota
+    # sem Wi-Fi), mas agora o operador vê qual faltou.
+    echo "  $1 FALHOU (modprobe saiu $?) — verifique /lib/modules e o firmware"
+  fi
 }
 
 case "$1" in
@@ -22,9 +32,12 @@ case "$1" in
     echo "Carregando módulos do X55:"
     # Wi-Fi RTL8821CS por SDIO. Depende de /lib/firmware/rtw88/rtw8821c_fw.bin.
     load_module rtw88_8821cs
-    # Bluetooth RTL8821CS por UART (3 fios, hci_h5).
+    # Bluetooth RTL8821CS por UART (3 fios). NÃO existe `rtl_bt.ko`: o suporte
+    # RTL deste chip é compilado DENTRO de `hci_uart.ko` por
+    # `CONFIG_BT_HCIUART_RTL=y` (medido no X55 em 08/11/2026: o módulo não está
+    # em /lib/modules e o `hci0` sobe com `hci_uart` carregado). Pedir
+    # `modprobe rtl_bt` era uma linha que nunca podia funcionar.
     load_module hci_uart
-    load_module rtl_bt
     ;;
   stop|restart|reload)
     ;;

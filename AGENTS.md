@@ -1,8 +1,7 @@
 # AGENTS.md — Giochi System
 
 > Handoff técnico do repositório. Leia antes de continuar o trabalho.
-> Atualizado em: 08/11/2026 (revisão 8 — **auditoria em três passadas + uma no
-> aparelho**. Vinte defeitos encontrados, todos do tipo "verde e errado", e todos
+> Atualizado em: 08/11/2026 (revisão 8 — **auditoria em três passadas + uma no aparelho**. Vinte defeitos encontrados, todos do tipo "verde e errado", e todos
 > com teste que os prende. Os mais graves: o gate do harfbuzz **nunca disparou**
 > (dependia de variável `BR2_*` que o Buildroot não exporta ao post-build); um
 > patch de kernel ausente matava o build **sem imprimir nada**; **dois dos três
@@ -84,7 +83,7 @@ Repositório: `https://github.com/xtrempkch-droid/GIOCHI-SYSTEM` — branch `mai
 
 | Verificação | Resultado |
 | --- | --- |
-| `node tests/run-all.mjs` | **486/486** (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, devices 13, assert-config 12, fdt 11, …) |
+| `node tests/run-all.mjs` | **488/488** (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, devices 13, assert-config 12, fdt 11, …) |
 | `node scripts/validate-devices.mjs` | OK — 7 devices, 1 habilitado |
 | `node scripts/list-devices.mjs --github-matrix` | matriz com `qemu-aarch64` |
 | matriz com `--device powkiddy-x55 --allow-draft` | devolve **só** o X55 |
@@ -446,7 +445,7 @@ si (§12.4), mas provavelmente **não** era a causa dos 3 s.
 
 ```bash
 node scripts/validate-devices.mjs
-node tests/run-all.mjs                          # 486 testes
+node tests/run-all.mjs                          # 488 testes
 node scripts/list-devices.mjs
 node scripts/list-devices.mjs --github-matrix
 node scripts/list-devices.mjs --github-matrix --device powkiddy-x55 --allow-draft
@@ -488,7 +487,7 @@ absoluto** do host — §12.40).
 
 ## 10. Testes
 
-`node tests/run-all.mjs` → **486/486**, em **53 arquivos**. A tabela abaixo é uma
+`node tests/run-all.mjs` → **488/488**, em **53 arquivos**. A tabela abaixo é uma
 seleção dos que prendem contratos de projeto; a lista completa é `ls tests/` e
 `tests/runner-coverage.test.mjs` **falha** se algum arquivo existir sem estar
 importado no `run-all.mjs` — foi assim que dois testes desta revisão quase
@@ -3541,6 +3540,60 @@ reporta 0% está inventando.
 - O `assumir_console` foi verificado com o launcher **já** rodando; a ordem
   inversa (console primeiro, launcher depois) não foi medida.
 
+#### Defeito F — `modprobe rtl_bt`: o módulo que não existe, na linha que não avisa
+
+O `S15modules` da X55 carregava três módulos, e um deles **não existe**:
+
+```sh
+load_module() { modprobe "$1" 2>/dev/null && echo "  $1" || true; }
+load_module hci_uart
+load_module rtl_bt          # <- rtl_bt.ko não existe
+```
+
+Medido no aparelho: `/lib/modules/6.12.0/kernel/drivers/bluetooth/` não tem
+`rtl_bt*`, porque o suporte RTL do RTL8821CS por UART é compilado **dentro** de
+`hci_uart.ko` por `CONFIG_BT_HCIUART_RTL=y`. O `hci0` sobe com `hci_uart`
+carregado (e `hci_h5` **não** é módulo separado — está lá dentro também).
+
+O que faz disso um §12 e não um commit de limpeza é o **helper**: com
+`&& echo ... || true`, o módulo que falha simplesmente não aparece na lista. A
+saída do boot era
+
+```text
+Carregando módulos do X55:
+  rtw88_8821cs
+  hci_uart
+```
+
+— que parece sucesso completo mesmo quando um dos três não carregou. Provei no
+aparelho chamando o helper antigo e o novo com o nome inexistente:
+
+```text
+antigo:  Carregando módulos do X55:
+           (fim — parece sucesso)
+novo:      rtl_bt FALHOU (modprobe saiu 1) — verifique /lib/modules e o firmware
+```
+
+`tests/onboard-drivers.test.mjs` passou a prender as três peças: sem
+`load_module rtl_bt`, com ramo de erro que **nomeia** o módulo, e com
+`CONFIG_BT_HCIUART_RTL=y` no fragmento (é ele que sustenta a correção — sem esse
+símbolo o BT do chip não existe em módulo nenhum).
+
+#### Um risco da passada 2 que o aparelho descartou
+
+Instalar `BR2_PACKAGE_KMOD_TOOLS` troca o `modprobe` do busybox pelo do `kmod`,
+que **exige** `modules.dep` (o do busybox tolera a ausência). Se o Buildroot não
+gerasse `modules.dep`, a correção da passada 2 trocaria "sem `depmod`" por
+"nenhum módulo carrega" — pior. Medido no aparelho antes de confiar:
+
+```text
+/lib/modules/6.12.0/modules.dep       117449 B
+/lib/modules/6.12.0/modules.dep.bin   176337 B
+```
+
+O `.bin` só é gerado pelo `depmod` do kmod, então quem o gerou foi o próprio
+build. A troca é segura — mas o fato de ter sido preciso medir é o ponto.
+
 ## 13. Aparelhos
 
 | ID | Pasta | SoC | Arch | Status | Falta |
@@ -3903,7 +3956,7 @@ o cartão — não só no `target/`.
 
 | Item | Estado |
 | --- | --- |
-| Código e configuração | **pronto** — 486/486 testes |
+| Código e configuração | **pronto** — 488/488 testes |
 | Imagem X55 (`Image` + `rootfs.ext4` + DTB + bootloader) | **existe** em `out/powkiddy-x55/`, `built_at_utc=2026-11-04T21:05:13Z` |
 | `/etc/inittab` na imagem | **linha 30: `::respawn:/usr/bin/giochi-init`** — conferida com `debugfs` no `rootfs.ext4` |
 | `work/` do X55 | preservado em `~/.cache/giochi-system/work/powkiddy-x55` (17 GB, já com `target/` finalizado) |
@@ -4044,7 +4097,7 @@ Ordem sugerida para a próxima sessão (nada aqui precisa da X55):
 
 ```bash
 node scripts/validate-devices.mjs      # 7 devices, 1 habilitado
-node tests/run-all.mjs                 # 486/486
+node tests/run-all.mjs                 # 488/488
 node scripts/list-devices.mjs --github-matrix
 ```
 
@@ -4110,7 +4163,7 @@ as duas correções (`uboot-patches/0001-…-adc-nao-fatal.patch` +
 
 ```bash
 cd /home/charles/Giochi/GIOCHI-SYSTEM
-node tests/run-all.mjs                                   # esperado: 486/486
+node tests/run-all.mjs                                   # esperado: 488/488
 git add device/r35s/README.md AGENTS.md
 git commit -m "r35s: o U-Boot mainline liga; a frase do README estava desatualizada
 

@@ -25,7 +25,7 @@
 // onboard listado aqui tem de estar `=y`, no fragmento E na `kernel-required.txt`
 // (o fragmento é delta; sem o gate, o símbolo some e a imagem sai verde).
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { test } from "node:test";
 
 const DEVICE = new URL("../device/", import.meta.url).pathname;
@@ -166,4 +166,54 @@ test("o S51mixer restaura só quando o aparelho declara estado", async () => {
 
   const mode = statSync(`${DEVICE}common/rootfs-overlay/etc/init.d/S51mixer`).mode;
   assert.ok(mode & 0o111, "S51mixer precisa do bit de execução (§12.50)");
+});
+
+// O módulo que não existe, e a falha que não aparecia.
+//
+// Medido no X55 em 08/11/2026: o `S15modules` chamava `modprobe rtl_bt`, e
+// `rtl_bt.ko` NÃO existe — o suporte RTL do RTL8821CS por UART é compilado
+// DENTRO de `hci_uart.ko` por `CONFIG_BT_HCIUART_RTL=y`. A linha nunca podia
+// funcionar, e ninguém notava porque o helper era:
+//
+//     modprobe "$1" 2>/dev/null && echo "  $1" || true
+//
+// Ou seja: o módulo que falhava apenas não aparecia na lista, e o cabeçalho
+// "Carregando módulos do X55:" fazia a saída parecer sucesso. Mesma família do
+// §12.15: dispositivo que existe pela metade é pior que ausente.
+test("S15modules não pede módulo que não existe, e reporta o que falha", () => {
+  const script = readFileSync(
+    `${DEVICE}powkiddy x55/rootfs-overlay/etc/init.d/S15modules`,
+    "utf8",
+  );
+  const codigo = script
+    .split("\n")
+    .filter((l) => !l.trimStart().startsWith("#"))
+    .join("\n");
+
+  assert.ok(
+    !/load_module\s+rtl_bt\b/.test(codigo),
+    "rtl_bt não é módulo: BT_HCIUART_RTL=y o compila dentro de hci_uart",
+  );
+  assert.match(codigo, /load_module hci_uart/, "hci_uart é o que carrega o BT de fato");
+
+  // O `&& echo || true` engolia a falha. O ramo de erro tem de existir e citar
+  // o módulo, senão o operador não sabe qual faltou.
+  assert.ok(!/&& echo .* \|\| true/.test(codigo), "falha de modprobe não pode ser silenciosa");
+  assert.match(codigo, /else/, "tem de haver ramo de erro");
+  assert.match(codigo, /FALHOU/, "e a mensagem tem de dizer que falhou");
+
+  // E o Kconfig que sustenta a correção continua no fragmento.
+  const frag = readFileSync(`${DEVICE}powkiddy x55/linux.fragment`, "utf8");
+  assert.match(
+    frag,
+    /^CONFIG_BT_HCIUART_RTL=y$/m,
+    "sem BT_HCIUART_RTL=y o BT do RTL8821CS não existe em módulo nenhum",
+  );
+});
+
+test("S15modules tem bit de execução no índice", () => {
+  // §12.50: o rcS chama "$script start" — sem +x o serviço não sobe, o build
+  // fica verde e os módulos nunca carregam.
+  const mode = statSync(`${DEVICE}powkiddy x55/rootfs-overlay/etc/init.d/S15modules`).mode;
+  assert.ok(mode & 0o111, "S15modules precisa de +x");
 });
