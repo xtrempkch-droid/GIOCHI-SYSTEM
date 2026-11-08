@@ -219,8 +219,98 @@ Leia `GL_RENDERER`, não `GL_VERSION`.
 
 ---
 
-## 7. Referências
+## 7. Desempenho: o throughput separado por parte (08/11/2026)
 
+A seção 6 responde "que recursos o driver entrega". Ela **não** responde "quanto
+ele entrega por segundo", e as duas coisas são perguntas diferentes: dá para ter
+GLES 3.1 funcionando e ser lento, e dá para ser rápido no preenchimento e lento
+no shader.
+
+`scripts/gpu-bench.c` mede as partes separadas, porque um número só (`glmark2`)
+não diz **onde** a diferença está. Mesmo fonte, mesmo toolchain, mesma Mesa
+24.0.0, GPU e CPUs fixadas em `performance`, duas a três rodadas com variação
+< 2% (08/11/2026):
+
+| Medida | R35S — Mali-G31 @ 480 MHz | X55 — Mali-G52 @ 800 MHz | Razão |
+| --- | --- | --- | --- |
+| `fill 640x480` | 192 Mpix/s | **568 Mpix/s** | 2,96× |
+| `fill 1280x720` | 260 Mpix/s | **941 Mpix/s** | 3,62× |
+| `alu_fragment` | 8,90 GFLOP/s | **28,9 GFLOP/s** | 3,25× |
+| `texture_bilinear` | 28,7 Mtexels/s | **78,6 Mtexels/s** | 2,74× |
+| `blend_overdraw_x8` | 304 Mpix/s | **942 Mpix/s** | 3,10× |
+| `many_draws_4000` | 49,0 kdraws/s | **90,7 kdraws/s** | 1,85× |
+| `vertex_throughput` | 7,09 Mvert/s | **15,1 Mvert/s** | 2,13× |
+| `compute_fma` | 3,77 GFLOP/s | **12,3 GFLOP/s** | 3,26× |
+| `cpu_fma` | 1,28 GFLOP/s | **3,43 GFLOP/s** | 2,68× |
+| `cpu_memcpy` | 0,78 GB/s | **3,07 GB/s** | 3,9× |
+
+Imagens: R35S `commit=12b431d`, X55 `commit=60e326f`.
+
+### A conta que fecha — e é o que dá crédito ao número
+
+| | Lanes | Clock | Pico teórico | Medido | % do pico |
+| --- | --- | --- | --- | --- | --- |
+| Mali-G31 MP2 | 16 | 480 MHz | 15,4 GFLOP/s | 8,90 | **58%** |
+| Mali-G52 MP2 | 32 | 800 MHz | 51,2 GFLOP/s | 28,94 | **56%** |
+
+As duas GPUs entregam **a mesma fração do próprio pico** com o mesmo shader. A
+razão de 3,25× é exatamente `2 (lanes) × 1,67 (clock) = 3,33` — ou seja, a
+diferença é **só de silício**; não há penalidade de driver no R35S nem ganho
+escondido na X55. Se um dos dois estivesse com o driver degradado, as duas
+porcentagens não casariam.
+
+**`many_draws` é o número que mais importa para o launcher**, e é o único que é
+de CPU: 49 kdraws/s no R35S com 4000 draws por quadro dá **~12 quadros/s**; na
+X55, **~23**. Um quadro com 4000 chamadas pequenas tem esse teto **mesmo com a
+GPU parada** — o mesmo efeito da §12.34: a ferramenta responde uma pergunta (GPU)
+e o gargalo está em outra (submissão). Fixar as CPUs em `performance` mudou este
+número em **+31%** na X55; a GPU, em nada. Repare que é também o item de menor
+ganho entre os dois aparelhos (1,85×), porque o que limita é a CPU, e A35→A55 é
+2,68×
+
+**`many_draws` é o número que mais importa para o launcher**, e é o único que é
+de CPU: 90,7 kdraws/s com 4000 draws por quadro dá ~23 quadros/s. Um quadro com
+4000 chamadas pequenas tem teto de 23 fps neste aparelho **mesmo com a GPU
+parada** — o mesmo efeito da §12.34: a ferramenta responde uma pergunta (GPU) e
+o gargalo está em outra (submissão). Fixar as CPUs em `performance` mudou este
+número em **+31%**; a GPU, em nada.
+
+### O que este número NÃO é
+
+- **Não mede o R35S com o painel dele.** Tudo é offscreen, num FBO de 1280x720.
+- **Não mede a tela.** Tudo é offscreen, num FBO de 1280x720; o painel da X55 é
+  720x1280 e o do R35S é 640x480. De propósito: taxa de preenchimento não pode
+  depender de qual painel o lote usou.
+- **Não mede latência de exibição**, vsync, nem o caminho KMSDRM. Para isso
+  existe `scripts/sdl-audio-probe.c` e o `--dump-frame` do launcher.
+
+### As quatro maneiras de medir errado, todas cometidas na primeira versão
+
+Ficam registradas porque nenhuma produziu erro — as quatro produziram número.
+
+| Sintoma medido | Causa | Correção |
+| --- | --- | --- |
+| `cpu_memcpy = inf GB/s` | o compilador apagou a cópia: o destino nunca era lido | checksum com acumulador `volatile` |
+| `fill 1280x720` **maior** que `640x480` (13406 vs 4426 Mpix/s) | cor constante ⇒ o panfrost troca o tile por `clear`; e tile com CRC igual não é escrito (transaction elimination) | shader lê `gl_FragCoord` e o conteúdo alterna por quadro |
+| `alu = 15575 GFLOP/s` | recorrência afim (`a = a*k + c`) colapsada em forma fechada; e cálculo só de uniform é feito uma vez por quad | recorrência não-linear, semente de `gl_FragCoord` |
+| `many_draws` medindo a Mesa, não o driver | `glGetUniformLocation` (busca por string) dentro do laço de 4000 desenhos | localizações resolvidas uma vez |
+
+E a quinta, que é a mais cara de descobrir: **o lote não executa o trabalho.**
+Enfileirar 200 quadros e sincronizar no fim devolve 49 ms de relógio para um
+trabalho que custa 44 ms **por quadro** sincronizado um a um — e nem
+`glReadPixels` força a execução do lote. Por isso `gpu-bench` mede com
+`glFinish()` por quadro: taxa agregada sem sincronização, neste driver, é ficção.
+
+**A trava contra as cinco:** todo teste limpa o FBO com cor sentinela e lê o
+pixel de volta antes de publicar o número. Teste que não escreveu nada sai como
+`INVALIDO`, não como número. Foi ela que denunciou três dos cinco defeitos.
+
+---
+
+## 8. Referências
+
+- [`../scripts/gpu-bench.c`](../scripts/gpu-bench.c) — o benchmark e cada
+  decisão de medição; `bash scripts/gpu-bench.sh <device> --run`.
 - [`evaluacao-pyglet-arcade.md`](evaluacao-pyglet-arcade.md) — o estudo do arcade,
   com a medição no hardware e a correção da afirmação "a GPU é limitada".
 - [`launcher.md`](launcher.md) — o contrato SDL2/KMSDRM que já funciona.

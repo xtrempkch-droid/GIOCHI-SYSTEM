@@ -52,6 +52,42 @@ PC (Windows/Linux/macOS)          aparelho
    ssh root@10.55.0.2              sshd atende na 22
 ```
 
+### 2-A. Dois aparelhos no mesmo PC: IP e MAC fixos não distinguem
+
+O `giochi-usbnet` usa **um endereço e um MAC fixos** em todo aparelho
+(`DEV_MAC=02:47:49:4f:43:49`, `HOST_MAC=…:48`, aparelho sempre em `10.55.0.2`).
+Com dois handhelds plugados ao mesmo tempo, os dois respondem a `10.55.0.2` e
+apresentam o **mesmo MAC** — não há como perguntar "quero o outro" por IP nem por
+MAC. Medido em 08/11/2026, com R35S e X55 ligados juntos:
+
+```text
+$ ip -brief addr | grep 10.55
+enx0247494f4348  UNKNOWN  10.55.0.1/24     ← X55   (usb 2-2, serial giochi-system-x55-)
+usb0             UNKNOWN  10.55.0.1/24     ← R35S  (usb 2-9, serial giochi-system-r35s-)
+$ ip neigh show dev usb0
+10.55.0.2 lladdr 02:47:49:4f:43:49 REACHABLE     ← mesmo MAC nos dois
+```
+
+`ssh -o BindInterface=usb0` **não resolve**: o tráfego continuou saindo pela
+interface do primeiro aparelho (conferido em `/sys/class/net/*/statistics`, que
+não se moveu na `usb0`). O que funciona é `SO_BINDTODEVICE`, que é o que o
+`ping -I` usa e que neste kernel **não exige root**:
+
+```bash
+ssh -o "ProxyCommand=python3 scripts/ssh-por-iface.py --iface usb0 %h %p" root@10.55.0.2
+bash scripts/gpu-bench.sh r35s --run --iface usb0      # já monta o ProxyCommand
+```
+
+O `scripts/ssh-por-iface.py` existe para isso. Quem identifica o aparelho é o
+**serial USB** (`/sys/bus/usb/devices/*/serial`, gravado pelo próprio hostname),
+não o endereço.
+
+**Por que não "consertar" o MAC por aparelho:** o MAC do gadget sai no descritor
+USB antes de o userspace configurar qualquer coisa, e derivá-lo do serial exigiria
+que o `giochi-usbnet` soubesse o serial (que ele tem, mas o endereço não pode
+variar sem que o PC perca o DHCP previsível). A decisão de manter fixo é
+deliberada — o preço é este, e a solução é escolher a interface.
+
 ### 2. SSH — OpenSSH, e só ele
 
 | Item | Valor |

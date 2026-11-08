@@ -461,6 +461,8 @@ bash scripts/build-in-container.sh powkiddy-x55 # build sem dependências no hos
 bash scripts/build-in-container.sh --sd-image powkiddy-x55   # imagem de cartão
 bash scripts/flash-sd.sh --list                 # discos removíveis
 bash scripts/gles-probe.sh powkiddy-x35h --run   # GLES/EGL reais, sem pacote novo
+bash scripts/gpu-bench.sh powkiddy-x55 --run --repetir 3   # throughput: fill, ALU, textura, draw (§12.63)
+bash scripts/gpu-bench.sh powkiddy-x55          # só compila o benchmark
 bash scripts/audio-alerta.sh --alar             # tom pela via SDL2 -> ALSA
 bash scripts/engine-build.sh r35s --instalar    # compila a GIOCHI-ENGINE
 python3 scripts/gles-probe.py                    # idem sem compilar (usa o python3 da imagem)
@@ -507,6 +509,7 @@ ficaram fora da contagem.
 | `tests/assert-kernel-config.test.mjs` | 8 | `CONFIG_*` que sobrevive/desaparece/cai para `=m`, `--required` |
 | `tests/firmware-required.test.mjs` | 5 | `rtl8821cs_*` no override, firmware obrigatório presente |
 | `tests/buildroot-hash.test.mjs` | 2 | hash do tarball fixado e usado |
+| `tests/gpu-bench.test.mjs` | 12 | as cinco formas de o benchmark mentir (§12.63): shader de cor constante, laço afim colapsado, tile não reescrito, `glGetUniformLocation` no laço, `300 es` no compute |
 | `tests/base-system.test.mjs` | 19 | contrato do sistema base: udhcpd, RNDIS (não ECM), `os_desc` completo, `PermitRootLogin`/`UseDNS`, dropbear ausente, recusa de build com pacote removido |
 | `tests/post-build-harfbuzz.test.mjs` | 5 | o gate do harfbuzz roda no `EXTRA_ENV` REAL do Buildroot (sem nenhum `BR2_*`); reprova biblioteca presente + `sdl2_ttf` sem ela, e aceita "não pediu" |
 | `tests/flash-guards.test.mjs` | 4 | a classe inteira: `flash-sd.sh` **e** `flash-dd.sh` recusam o disco de `/` e `/boot`, antes do `dd` |
@@ -3646,6 +3649,115 @@ punir o usuário.
 Aqui ele apontou um caminho real de desligamento da proteção. E o que destravou
 foi olhar o **número**: 9 = 5 + 4 diz que a contagem zerou depois da quinta, e
 não "o teste foi mais rápido".
+
+### 12.63 Benchmark que responde — e cinco jeitos de ele mentir
+
+`scripts/gpu-bench.c` + `gpu-bench.sh` existem para comparar GPU entre aparelhos
+no NOSSO stack. A primeira versão (08/11/2026, X55) rodou de primeira e devolveu
+cinco números, todos plausíveis à vista e **quatro deles falsos**:
+
+| Medido | Real | Causa |
+| --- | --- | --- |
+| `cpu_memcpy = inf GB/s` | 3,07 GB/s | o compilador apagou o `memcpy`: o destino nunca era lido |
+| `fill 1280x720 = 13406 Mpix/s` (maior que 640x480 = 4426) | 941 vs 568 | cor constante ⇒ panfrost troca o tile por `clear`; tile com CRC igual não é reescrito |
+| `alu = 15575 GFLOP/s` num G52 de ~51 de pico | 28,9 | recorrência afim colapsada; e cálculo só de uniform é feito uma vez por quad |
+| `many_draws` = 68 kdraws/s | 90,7 (CPU fixada) | `glGetUniformLocation` dentro do laço: media-se a Mesa, não o draw |
+| `compute` = `SKIP (sem ES 3.1)` | 12,3 GFLOP/s | shader usava `#version 300 es`; SSBO é 310 es. E `glBindImageTexture` liga TEXTURA, não SSBO |
+
+O sinal que denuncia o terceiro sem olhar o código é **aritmética**: 4096
+flops/pixel × 3,8 Gpx/s = 15,6 TFLOP/s, 300× o pico do chip. Número que excede o
+teto teórico do hardware não é descoberta, é erro de instrumento.
+
+#### O quinto, e é o mais caro: o lote não executa o trabalho
+
+Medido na X55: 200 quadros enfileirados sem sincronizar levam **49 ms**; **um**
+quadro com `glFinish` leva **44 ms**. Nem `glReadPixels` depois do lote força a
+execução — 200 quadros continuam custando 49 ms. Ou seja: taxa agregada medida
+sem sincronização, neste driver, é ficção.
+
+Por isso a medição é síncrona (um `glFinish` por quadro) e calibrada para ~0,5 s
+por teste. O custo fixo por quadro (~0,2 ms de CPU) entra igual nos dois
+aparelhos, então a comparação continua justa.
+
+**A trava que fecha a classe inteira:** todo teste limpa o FBO com cor sentinela,
+lê o pixel de volta com `glReadPixels` e, se nada foi escrito, imprime
+`INVALIDO` em vez do número. Ela denunciou três dos cinco defeitos na segunda
+execução. É o §12.30 de novo: perguntar pela consequência ("o pixel mudou?"), não
+pela intenção ("o comando foi enviado?").
+
+`tests/gpu-bench.test.mjs` (12 casos) prende cada correção por texto: shader lê
+`gl_FragCoord`, recorrência não-linear, `u_cycle` por quadro, nenhum
+`glGetUniformLocation` em laço de desenho, `#version 310 es`, verificação em todo
+teste, e o script fixando **GPU e CPU** — `governor` é o nome no devfreq e
+`scaling_governor` no cpufreq, e procurar só o primeiro deixava a CPU livre
+(+31% no teste CPU-bound ao fixar).
+
+#### O resultado: G52 × G31, e a conta que valida a medida
+
+08/11/2026, mesmo binário, Mesa 24.0.0 nos dois, governors fixados:
+
+| Medida | R35S G31 @480 | X55 G52 @800 | Razão |
+| --- | --- | --- | --- |
+| `fill 640x480` | 192 Mpix/s | **568** | 2,96× |
+| `fill 1280x720` | 260 | **941** | 3,62× |
+| `alu_fragment` | 8,90 GFLOP/s | **28,9** | 3,25× |
+| `texture_bilinear` | 28,7 Mtexels/s | **78,6** | 2,74× |
+| `blend_overdraw_x8` | 304 Mpix/s | **942** | 3,10× |
+| `many_draws_4000` | 49,0 kdraws/s | **90,7** | 1,85× |
+| `vertex_throughput` | 7,09 Mvert/s | **15,1** | 2,13× |
+| `compute_fma` | 3,77 GFLOP/s | **12,3** | 3,26× |
+| `cpu_fma` | 1,28 GFLOP/s | **3,43** | 2,68× |
+
+A validação não é a razão, é a **porcentagem do pico**: G31 MP2 = 16 lanes ×
+480 MHz × 2 = 15,4 GFLOP/s de teto, medidos 8,90 (**58%**); G52 MP2 = 32 ×
+800 × 2 = 51,2, medidos 28,9 (**56%**). As duas entregam a mesma fração do
+próprio pico com o mesmo shader, e 3,25× ≈ 2 (lanes) × 1,67 (clock). Se um dos
+dois estivesse com driver degradado, as porcentagens não casariam — é a mesma
+conferência que `size` × refresh fez nos painéis (13-A).
+
+E o item de menor ganho é o único de CPU: **1,85× em `many_draws`**, porque o
+que limita é a submissão, não a GPU. Consequência de produto: no R35S um quadro
+com 4000 draws pequenos tem teto de ~12 fps e na X55 ~23, **com a GPU ociosa**.
+Otimizar shader não move esse número.
+
+### 12.64 Dois aparelhos no mesmo PC: IP e MAC fixos não distinguem
+
+O `giochi-usbnet` usa `DEV_MAC=02:47:49:4f:43:49` e `HOST_MAC=…:48` fixos, e todo
+aparelho atende em `10.55.0.2`. Isso é deliberado (endereço previsível, DHCP
+determinístico), mas com **dois** handhelds plugados ao mesmo tempo os dois
+respondem ao mesmo IP com o mesmo MAC. Medido em 08/11/2026 com R35S e X55
+ligados juntos:
+
+```text
+enx0247494f4348   10.55.0.1/24    ← X55   (usb 2-2, serial giochi-system-x55-)
+usb0              10.55.0.1/24    ← R35S  (usb 2-9, serial giochi-system-r35s-)
+ip neigh show dev usb0 → 10.55.0.2 lladdr 02:47:49:4f:43:49   ← mesmo MAC
+```
+
+O sintoma é o pior tipo: **tudo funciona**, e o comando vai para o aparelho
+errado. `scp` para o "R35S" subiu o binário na X55; a medição teria saído com o
+resultado da X55 rotulado como R35S.
+
+**O que NÃO resolveu:** `ssh -o BindInterface=usb0`. O tráfego continuou saindo
+pela interface do primeiro aparelho — conferido nos contadores
+`/sys/class/net/*/statistics/rx_packets`, que não se moveram na `usb0`. A opção
+existe no OpenSSH 10.2 e mesmo assim não bastou.
+
+**O que resolve:** `SO_BINDTODEVICE` — o mesmo mecanismo do `ping -I`, e neste
+kernel (6.17) **sem exigir root**. `scripts/ssh-por-iface.py` é o ProxyCommand
+mínimo que faz isso; `gpu-bench.sh --iface usb0` monta a opção.
+
+**Quem identifica o aparelho é o serial USB**, não o endereço:
+
+```bash
+for p in /sys/bus/usb/devices/*/serial; do echo "$p: $(cat $p)"; done
+/sys/bus/usb/devices/2-2/serial: giochi-system-x55-
+/sys/bus/usb/devices/2-9/serial: giochi-system-r35s-
+```
+
+Corolário para qualquer script que fale com "o aparelho": com mais de um plugado,
+`10.55.0.2` é ambíguo, e a interface é o único discriminante. Ver
+[`docs/sistema-base.md`](docs/sistema-base.md) §2-A.
 
 ## 13. Aparelhos
 
