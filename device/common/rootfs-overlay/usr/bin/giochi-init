@@ -54,7 +54,11 @@ BRIGHTNESS_FILE="$CONFIG_DIR/brightness"
 # quebrado entra em laço de reinício e a tela pisca sem parar — pior que uma
 # mensagem de erro parada.
 RESTART_MAX=5
-RESTART_WINDOW=60
+# A janela é configurável por ambiente pela mesma razão que GIOCHI_LAUNCHER_WAIT:
+# sem isso não há como testar a cota sem depender do relógio da máquina. O teste
+# `RESTART_MAX=5` fixa a janela em 1 h para que a única coisa que possa zerar a
+# contagem seja a própria cota — e não um `/proc/uptime` que pulou.
+RESTART_WINDOW="${GIOCHI_RESTART_WINDOW:-60}"
 
 # ## Queda por sinal deliberado não é queda
 #
@@ -137,9 +141,14 @@ prepare_config_dir() {
     fi
 }
 
+# Arquivo do uptime. `GIOCHI_UPTIME_FILE` existe para o teste poder simular uma
+# leitura falha (vazia) ou um salto de relógio — as duas situações em que a
+# janela deslizante já zerou a cota por engano.
+UPTIME_FILE="${GIOCHI_UPTIME_FILE:-/proc/uptime}"
+
 uptime_seconds() {
     # /proc/uptime em vez de `date`: sempre existe, não depende de RTC correto.
-    cut -d. -f1 /proc/uptime 2>/dev/null || echo 0
+    cut -d. -f1 "$UPTIME_FILE" 2>/dev/null || echo 0
 }
 
 restore_brightness() {
@@ -358,10 +367,18 @@ main() {
         [ -x "$LAUNCHER" ] || wait_for_launcher
 
         now=$(uptime_seconds)
+        # Leitura falha do uptime NÃO pode zerar a cota. Medido no CI em
+        # 08/11/2026: com `now` vazio virando 0, na volta seguinte a conta
+        # `now - 0` passava de 60 s e a janela reiniciava — a cota de 5 era
+        # derrotada por um erro de leitura, e a tela voltava a piscar para
+        # sempre, que é exatamente o que a cota existe para impedir.
+        case "$now" in ''|*[!0-9]*) now=0 ;; esac
 
         # Janela deslizante: se passou tempo suficiente desde a primeira falha,
         # zera a contagem. Um launcher saudável nunca chega perto do limite.
-        if [ $((now - window_start)) -ge $RESTART_WINDOW ]; then
+        # A comparação é feita sem aritmética sobre valor inválido, e só anda
+        # para frente (`-gt`): uptime que anda para trás não zera nada.
+        if [ "$now" -gt 0 ] && [ "$now" -ge $((window_start + RESTART_WINDOW)) ]; then
             restarts=0
             window_start=$now
         fi
@@ -384,7 +401,7 @@ main() {
 
         restarts=$((restarts + 1))
 
-        log "launcher saiu com $status (queda $restarts de $RESTART_MAX na janela de ${RESTART_WINDOW}s)"
+        log "launcher saiu com $status (queda $restarts de $RESTART_MAX na janela de ${RESTART_WINDOW}s, uptime=${now}s)"
 
         # O limite é checado DEPOIS de contar a queda atual: `RESTART_MAX=5`
         # significa cinco tentativas de rodar, não seis. A versão anterior

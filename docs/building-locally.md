@@ -69,7 +69,7 @@ novo. Ajuste com `GIOCHI_CONTAINER_CACHE` e a tag com `GIOCHI_BUILDER_IMAGE`.
 
 ```bash
 node scripts/validate-devices.mjs
-node tests/run-all.mjs        # 488 testes, um processo só
+node tests/run-all.mjs        # 490 testes, um processo só
 node scripts/list-devices.mjs
 ```
 

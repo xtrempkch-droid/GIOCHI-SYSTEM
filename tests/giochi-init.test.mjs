@@ -129,11 +129,65 @@ test("com configurador OK, o sinalizador é removido", async () => {
 test("RESTART_MAX=5 significa cinco tentativas, não seis", async () => {
   // Medido antes da correção: o log dizia "reinício 6 de 5", porque a contagem
   // era incrementada e só então comparada com `-gt`.
+  //
+  // A janela é fixada em 1 h (`GIOCHI_RESTART_WINDOW`): com os 60 s de fábrica a
+  // contagem depende do relógio da máquina, e o teste ficou intermitente no CI
+  // (passou num run e deu "esperado 5, veio 9" em outro, mesmo commit). Com a
+  // janela fora de alcance, a ÚNICA coisa que pode zerar `restarts` é a própria
+  // cota — que é o que este teste existe para medir.
   const dir = await montaRaiz({ comLauncher: true, saidaLauncher: 7 });
-  const stderr = await roda(dir, 12000);
+  const stderr = await roda(dir, 12000, { GIOCHI_RESTART_WINDOW: "3600" });
   const tentativas = (stderr.match(/launcher saiu com 7/g) ?? []).length;
-  assert.equal(tentativas, 5, `esperado 5 tentativas, veio ${tentativas}`);
+  assert.equal(
+    tentativas,
+    5,
+    `esperado 5 tentativas, veio ${tentativas}\n--- stderr capturado ---\n${stderr}`,
+  );
   assert.match(stderr, /já caiu 5 vezes/);
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("uptime ilegível NÃO zera a cota: a tela não volta a piscar", async () => {
+  // Medido no CI em 08/11/2026: o mesmo commit passou num run e falhou no outro
+  // com "esperado 5 tentativas, veio 9". A causa não era a cota — era a leitura
+  // do uptime. Com `now` vazio valendo 0, na volta seguinte `now - 0` passava de
+  // 60 s, a janela reiniciava e a cota de 5 era derrotada. No aparelho isso é a
+  // tela piscando para sempre, que é o que a cota existe para impedir.
+  const dir = await montaRaiz({ comLauncher: true, saidaLauncher: 7 });
+  const vazio = path.join(dir, "uptime-vazio");
+  await writeFile(vazio, "");
+  const stderr = await roda(dir, 12000, {
+    GIOCHI_UPTIME_FILE: vazio,
+    GIOCHI_RESTART_WINDOW: "1",
+  });
+  const tentativas = (stderr.match(/launcher saiu com 7/g) ?? []).length;
+  assert.equal(tentativas, 5, `uptime ilegível não pode zerar a cota, veio ${tentativas}`);
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("um salto real de uptime ZERA a cota, de propósito", async () => {
+  // O outro lado: a janela existe para "se passou tempo suficiente desde a
+  // primeira falha, comece a contar de novo". Saltar de 100 para 10 000 tem de
+  // zerar — senão a cota puniria quedas espaçadas por horas.
+  const dir = await montaRaiz({ comLauncher: true, saidaLauncher: 7 });
+  const relogio = path.join(dir, "uptime");
+  await writeFile(relogio, "00100.00 00099.00\n");
+  // O launcher move o relógio a cada queda: 100 -> 10000 (bem além da janela).
+  const corpo = `#!/bin/sh
+echo "10000.00 00099.00" > ${relogio}
+exit 7
+`;
+  await writeFile(
+    path.join(dir, "opt/giochi/apps/launcher/bin/giochi-launcher"),
+    corpo,
+  );
+  const stderr = await roda(dir, 9000, {
+    GIOCHI_UPTIME_FILE: relogio,
+    GIOCHI_RESTART_WINDOW: "60",
+  });
+  const tentativas = (stderr.match(/launcher saiu com 7/g) ?? []).length;
+  assert.ok(tentativas > 5, `o salto deveria zerar a cota, mas parou em ${tentativas}`);
+  assert.match(stderr, /queda 1 de 5/);
   await rm(dir, { recursive: true, force: true });
 });
 
