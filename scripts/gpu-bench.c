@@ -344,51 +344,89 @@ static void invalid(const char *metric, const char *why)
     falhas++;
 }
 
-/* Mede com `glFinish` POR QUADRO.
+/* Mede com `glFinish` POR QUADRO, um desenho por quadro.
  *
- * Não é preciosismo: neste driver (panfrost/Mesa 24.0.0, medido na X55 em
- * 08/11/2026) enfileirar 200 quadros e sincronizar no fim devolve 49 ms de
- * relógio para um trabalho que custa 44 ms POR QUADRO quando sincronizado um a
- * um — ou seja, o trabalho enfileirado simplesmente não é executado, e a
- * "taxa de quadros" calculada assim é ficção (media 15 TFLOP/s num G52 de
- * ~50 GFLOP/s de pico).
+ * Três medições erraram antes desta, e as três estão registradas porque cada
+ * uma parecia certa:
  *
- * Com `glFinish` por quadro o número é reprodutível e casa com o teto teórico:
- * 28,5 GFLOP/s medidos contra ~51 GFLOP/s de pico. O custo fixo por quadro
- * (~0,2 ms de CPU) entra igual nos dois aparelhos, então a comparação continua
- * justa — e `gpu-bench.sh` imprime a fração de CPU junto.
+ * 1. **Enfileirar e sincronizar no fim.** 200 quadros custavam 49 ms, um quadro
+ *    sincronizado custava 44 ms. A conclusão apressada foi "o lote não executa o
+ *    trabalho", e a correção foi medir com `glFinish` por quadro — que é o que
+ *    ficou, e está certo. Mas a CAUSA era outra (item 2).
  *
- * O número de quadros é calibrado para ~0,5 s por teste. */
-static double medir(void (*draw)(void), int *frames)
+ * 2. **Eliminação de desenho.** A curva t(K) medida no R35S em 08/11/2026, com
+ *    o shader de ALU (que custa 141,7 ms por desenho):
+ *
+ *        K=1  141,673 ms    K=8   141,992 ms
+ *        K=2  142,137 ms    K=16  141,960 ms
+ *
+ *    141 ms × 16 seria 2,3 s; mediu-se 142 ms. Ou seja: **o driver descarta os
+ *    15 desenhos anteriores**, porque cada um sobrescreve o quadro inteiro e só
+ *    o último determina a imagem. Isso é otimização legítima, e é a explicação
+ *    correta do item 1 — não é falha de sincronização.
+ *
+ *    Consequência para quem mede: **não se pode somar desenhos de tela cheia
+ *    numa mesma passada**. O K=1 é o único número com significado, e é o
+ *    "custo de desenhar e apresentar um quadro".
+ *
+ * 3. **Diferenciar K=1 contra K=4 para "tirar o custo fixo".** Como os desenhos
+ *    extras são descartados, a diferença media o custo de um desenho que o
+ *    driver eliminou: `fill` saiu a 8,9 Gpix/s num G31 cujo pico é ~1 Gpix/s
+ *    (nove vezes o teto físico) e `alu`/`tex` caíram para INVALIDO. Número que
+ *    excede o teto do hardware não é descoberta, é erro de instrumento.
+ *
+ * O custo fixo existe e é medido à parte (`custo_glFinish`): uma passada com
+ * K=0 no R35S custa 0,080 ms, contra 1,63 ms de um desenho de preenchimento.
+ * Ou seja, o `glFinish` não é o problema — 95% do tempo é trabalho de GPU.
+ *
+ * Devolve o tempo total dos `n` quadros; `*frames` recebe `n`, e quem chama
+ * calcula `trabalho_por_quadro × n / dt`. */
+static double medir_k(void (*draw)(void), int k, int n)
 {
     struct timespec a, b;
+    int i, j;
+
+    for (i = 0; i < n; i++) {
+        for (j = 0; j < k; j++)
+            draw();
+        glFinish();
+    }
+    clock_gettime(CLOCK_MONOTONIC, &a);
+    for (i = 0; i < n; i++) {
+        for (j = 0; j < k; j++)
+            draw();
+        glFinish();
+    }
+    clock_gettime(CLOCK_MONOTONIC, &b);
+    return (double)(b.tv_sec - a.tv_sec) + (double)(b.tv_nsec - a.tv_nsec) / 1e9;
+}
+
+/* Custo de um quadro VAZIO (só `glFinish`), para o relatório. Não é subtraído de
+ * nada: existe para que o leitor veja que o tempo medido não é overhead de
+ * sincronização. */
+static double custo_vazio = -1;
+
+static double medir(void (*draw)(void), int *frames)
+{
     double lat, total;
-    int n, i;
+    int n;
 
     draw();
     glFinish();
 
-    clock_gettime(CLOCK_MONOTONIC, &a);
-    for (i = 0; i < 3; i++) {
-        draw();
-        glFinish();
-    }
-    clock_gettime(CLOCK_MONOTONIC, &b);
-    lat = ((double)(b.tv_sec - a.tv_sec) + (double)(b.tv_nsec - a.tv_nsec) / 1e9) / 3.0;
+    lat = medir_k(draw, 1, 3) / 3.0;
 
     n = (int)(0.5 / (lat > 1e-6 ? lat : 1e-6));
     if (n < 5)
         n = 5;
-    if (n > 300)
-        n = 300;
+    if (n > 200)
+        n = 200;
 
-    clock_gettime(CLOCK_MONOTONIC, &a);
-    for (i = 0; i < n; i++) {
-        draw();
-        glFinish();
-    }
-    clock_gettime(CLOCK_MONOTONIC, &b);
-    total = (double)(b.tv_sec - a.tv_sec) + (double)(b.tv_nsec - a.tv_nsec) / 1e9;
+    /* `medir_k(draw, 0, n)` é o quadro vazio: a mesma volta, sem desenho. */
+    if (custo_vazio < 0)
+        custo_vazio = medir_k(draw, 0, 20) / 20.0;
+
+    total = medir_k(draw, 1, n);
 
     *frames = n;
     note_clock();
@@ -835,6 +873,10 @@ static void test_fill(int w, int h, const char *label)
     }
 
     dt = medir(draw_fill, &frames);
+    if (dt <= 0) {
+        invalid(label, "CPU-bound nesta carga: a GPU nao e o gargalo");
+        return;
+    }
     report(label, (double)w * h * frames / dt / 1e6, "Mpix/s");
 }
 
@@ -894,6 +936,10 @@ static void test_blend(int w, int h)
     }
 
     dt = medir(draw_blend, &frames);
+    if (dt <= 0) {
+        invalid("blend_overdraw_x8", "CPU-bound nesta carga: a GPU nao e o gargalo");
+        return;
+    }
     report("blend_overdraw_x8", (double)w * h * frames * 8.0 / dt / 1e6, "Mpix/s");
 }
 
@@ -913,6 +959,10 @@ static void test_many_draws(int w, int h)
     }
 
     dt = medir(draw_many, &frames);
+    if (dt <= 0) {
+        invalid("many_draws_4000", "CPU-bound nesta carga: a GPU nao e o gargalo");
+        return;
+    }
     report("many_draws_4000", (double)4000 * frames / dt / 1e3, "kdraws/s");
 }
 
@@ -1097,6 +1147,24 @@ int main(int argc, char **argv)
     setup_gles(dpy);
     setup_objects();
 
+    if (getenv("GPU_BENCH_CURVA") != NULL) {
+        static const int ks[] = {0, 1, 2, 4, 8, 16};
+        int k;
+        glViewport(0, 0, 640, 480);
+        printf("\n== curva t(K): K desenhos por quadro, um glFinish (640x480) ==\n");
+        printf(" fill:\n");
+        for (k = 0; k < (int)(sizeof ks / sizeof ks[0]); k++) {
+            double t = medir_k(draw_fill, ks[k], 60);
+            printf("  K=%-3d %8.3f ms/quadro\n", ks[k], t * 1e3);
+        }
+        printf(" alu:\n");
+        for (k = 1; k < (int)(sizeof ks / sizeof ks[0]); k++) {
+            double t = medir_k(draw_alu, ks[k], 12);
+            printf("  K=%-3d %8.3f ms/quadro\n", ks[k], t * 1e3);
+        }
+        return 0;
+    }
+
     if (getenv("GPU_BENCH_LATENCIA") != NULL) {
         glViewport(0, 0, 640, 480);
         printf("\n== latencia (glFinish por quadro, 640x480) ==\n");
@@ -1133,6 +1201,9 @@ int main(int argc, char **argv)
     test_compute();
 
     printf("\n== resumo ==\n");
+    if (custo_vazio > 0)
+        printf("  %-28s %.3f ms (nao subtraido; mostra que o tempo medido e' de GPU)\n",
+               "custo_glFinish_vazio", custo_vazio * 1e3);
     if (gpu_mhz_max > 0)
         printf("  %-28s %ld MHz\n", "gpu_clock_max", gpu_mhz_max);
     else

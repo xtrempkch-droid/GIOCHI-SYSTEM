@@ -295,11 +295,34 @@ Ficam registradas porque nenhuma produziu erro — as quatro produziram número.
 | `alu = 15575 GFLOP/s` | recorrência afim (`a = a*k + c`) colapsada em forma fechada; e cálculo só de uniform é feito uma vez por quad | recorrência não-linear, semente de `gl_FragCoord` |
 | `many_draws` medindo a Mesa, não o driver | `glGetUniformLocation` (busca por string) dentro do laço de 4000 desenhos | localizações resolvidas uma vez |
 
-E a quinta, que é a mais cara de descobrir: **o lote não executa o trabalho.**
-Enfileirar 200 quadros e sincronizar no fim devolve 49 ms de relógio para um
-trabalho que custa 44 ms **por quadro** sincronizado um a um — e nem
-`glReadPixels` força a execução do lote. Por isso `gpu-bench` mede com
-`glFinish()` por quadro: taxa agregada sem sincronização, neste driver, é ficção.
+E a quinta, que é a mais cara de descobrir: **o driver elimina desenhos que
+sobrescrevem o quadro inteiro.** Enfileirar 200 quadros e sincronizar no fim
+devolve 49 ms para um trabalho que custa 44 ms **por quadro**; e nem
+`glReadPixels` força a execução do lote.
+
+A causa foi medida depois, com a curva t(K) no R35S (08/11/2026), usando o
+shader de ALU, que custa **141,7 ms** por desenho:
+
+```text
+K=1  141,673 ms        K=8   141,992 ms
+K=2  142,137 ms        K=16  141,960 ms
+```
+
+141 ms × 16 seria 2,3 s; mediram-se 142 ms. Isto é: **quinze desenhos foram
+descartados.** Cada um sobrescreve o quadro inteiro e só o último determina a
+imagem, então a eliminação é uma otimização correta — não falha de sincronização.
+
+Consequência de método, e é uma armadilha que custou outra rodada: **não se pode
+somar desenhos de tela cheia numa mesma passada**, e "tirar o custo fixo" por
+diferença entre K=1 e K=4 mede desenho que o driver eliminou. Foi assim que uma
+tentativa de correção produziu `fill` a 8,9 Gpix/s num G31 cujo pico é ~1 Gpix/s
+(nove vezes o teto físico) e `alu`/`tex` como `INVALIDO`. Número acima do teto do
+hardware não é descoberta: é erro de instrumento.
+
+Por isso `gpu-bench` mede **um desenho por quadro, com `glFinish`**, que é o custo
+de "desenhar e apresentar". E imprime `custo_glFinish_vazio` (0,081 ms no R35S,
+contra 1,63 ms de um preenchimento) para que se veja que o tempo medido é de GPU
+e não de sincronização.
 
 **A trava contra as cinco:** todo teste limpa o FBO com cor sentinela e lê o
 pixel de volta antes de publicar o número. Teste que não escreveu nada sai como

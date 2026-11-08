@@ -83,7 +83,7 @@ Repositório: `https://github.com/xtrempkch-droid/GIOCHI-SYSTEM` — branch `mai
 
 | Verificação | Resultado |
 | --- | --- |
-| `node tests/run-all.mjs` | **504/504** (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, devices 13, assert-config 12, fdt 11, …) |
+| `node tests/run-all.mjs` | **509/509** (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, devices 13, assert-config 12, fdt 11, gpu-bench 16, …) |
 | `node scripts/validate-devices.mjs` | OK — 7 devices, 1 habilitado |
 | `node scripts/list-devices.mjs --github-matrix` | matriz com `qemu-aarch64` |
 | matriz com `--device powkiddy-x55 --allow-draft` | devolve **só** o X55 |
@@ -489,7 +489,7 @@ absoluto** do host — §12.40).
 
 ## 10. Testes
 
-`node tests/run-all.mjs` → **504/504**, em **55 arquivos**. A tabela abaixo é uma
+`node tests/run-all.mjs` → **509/509**, em **56 arquivos**. A tabela abaixo é uma
 seleção dos que prendem contratos de projeto; a lista completa é `ls tests/` e
 `tests/runner-coverage.test.mjs` **falha** se algum arquivo existir sem estar
 importado no `run-all.mjs` — foi assim que dois testes desta revisão quase
@@ -509,7 +509,8 @@ ficaram fora da contagem.
 | `tests/assert-kernel-config.test.mjs` | 8 | `CONFIG_*` que sobrevive/desaparece/cai para `=m`, `--required` |
 | `tests/firmware-required.test.mjs` | 5 | `rtl8821cs_*` no override, firmware obrigatório presente |
 | `tests/buildroot-hash.test.mjs` | 2 | hash do tarball fixado e usado |
-| `tests/gpu-bench.test.mjs` | 12 | as cinco formas de o benchmark mentir (§12.63): shader de cor constante, laço afim colapsado, tile não reescrito, `glGetUniformLocation` no laço, `300 es` no compute |
+| `tests/gpu-bench.test.mjs` | 16 | as seis formas de o benchmark mentir (§12.63): shader de cor constante, laço afim colapsado, tile não reescrito, `glGetUniformLocation` no laço, `300 es` no compute, e a subtração de custo fixo por diferencial (que mede desenho eliminado) |
+| `tests/audio-alerta.test.mjs` | 3 | a duração anunciada chega ao probe e nenhum aparelho está cravado no script (§12.65) |
 | `tests/base-system.test.mjs` | 19 | contrato do sistema base: udhcpd, RNDIS (não ECM), `os_desc` completo, `PermitRootLogin`/`UseDNS`, dropbear ausente, recusa de build com pacote removido |
 | `tests/post-build-harfbuzz.test.mjs` | 5 | o gate do harfbuzz roda no `EXTRA_ENV` REAL do Buildroot (sem nenhum `BR2_*`); reprova biblioteca presente + `sdl2_ttf` sem ela, e aceita "não pediu" |
 | `tests/flash-guards.test.mjs` | 4 | a classe inteira: `flash-sd.sh` **e** `flash-dd.sh` recusam o disco de `/` e `/boot`, antes do `dd` |
@@ -3668,16 +3669,34 @@ O sinal que denuncia o terceiro sem olhar o código é **aritmética**: 4096
 flops/pixel × 3,8 Gpx/s = 15,6 TFLOP/s, 300× o pico do chip. Número que excede o
 teto teórico do hardware não é descoberta, é erro de instrumento.
 
-#### O quinto, e é o mais caro: o lote não executa o trabalho
+#### O quinto, e é o mais caro: o driver ELIMINA desenhos de tela cheia
 
 Medido na X55: 200 quadros enfileirados sem sincronizar levam **49 ms**; **um**
 quadro com `glFinish` leva **44 ms**. Nem `glReadPixels` depois do lote força a
-execução — 200 quadros continuam custando 49 ms. Ou seja: taxa agregada medida
-sem sincronização, neste driver, é ficção.
+execução — 200 quadros continuam custando 49 ms.
 
-Por isso a medição é síncrona (um `glFinish` por quadro) e calibrada para ~0,5 s
-por teste. O custo fixo por quadro (~0,2 ms de CPU) entra igual nos dois
-aparelhos, então a comparação continua justa.
+A explicação inicial ("o lote não executa o trabalho") estava incompleta. A curva
+t(K) medida no R35S com o shader de ALU (141,7 ms por desenho) mostra a causa:
+
+```text
+K=1  141,673 ms      K=8   141,992 ms
+K=2  142,137 ms      K=16  141,960 ms
+```
+
+141 ms × 16 seria 2,3 s; mediram-se 142 ms. **Quinze desenhos foram descartados**:
+cada um sobrescreve o quadro inteiro e só o último determina a imagem. É
+otimização legítima, e é o que a curva de ALU plana prova — não é falha de
+sincronização.
+
+Duas consequências, e a segunda custou uma rodada:
+
+1. a medição é síncrona, um desenho por quadro, calibrada para ~0,5 s por teste;
+2. **"tirar o custo fixo" por diferença entre K=1 e K=4 é inválido aqui** — ela
+   mede o desenho que o driver eliminou. A tentativa produziu `fill` a
+   8,9 Gpix/s num G31 cujo pico é ~1 Gpix/s (9× o teto) e derrubou `alu` e `tex`
+   para `INVALIDO`. A regra que fica: **número acima do teto teórico do hardware
+   não é descoberta, é erro de instrumento** — e o teto tem de estar escrito
+   antes da medição, não deduzido depois dela.
 
 **A trava que fecha a classe inteira:** todo teste limpa o FBO com cor sentinela,
 lê o pixel de volta com `glReadPixels` e, se nada foi escrito, imprime
@@ -3758,6 +3777,58 @@ for p in /sys/bus/usb/devices/*/serial; do echo "$p: $(cat $p)"; done
 Corolário para qualquer script que fale com "o aparelho": com mais de um plugado,
 `10.55.0.2` é ambíguo, e a interface é o único discriminante. Ver
 [`docs/sistema-base.md`](docs/sistema-base.md) §2-A.
+
+### 12.65 As três varreduras de 08/11/2026: seis defeitos, e um deles era da correção anterior
+
+Três passadas sobre o que tinha acabado de ser commitado (`3a59192`). Nenhum
+defeito apareceu na compilação: `-Wall -Wextra -Wshadow -Wconversion`,
+`shellcheck -S warning`, ASan/UBSan no host e `py_compile` passaram **limpos**.
+Os seis que existiam precisaram de execução, leitura de curva ou de um servidor
+de teste.
+
+**Passada 1 — o proxy SSH (`ssh-por-iface.py`), dois bugs:**
+
+| Defeito | Como apareceu | Efeito |
+| --- | --- | --- |
+| Sentinela `b"\0"` para "nada neste ciclo" no `recv` | servidor de eco local: 4 bytes enviados, **2 recebidos** | SSH é binário: um `0x00` que chegue sozinho é descartado e desincroniza o protocolo |
+| `select(..., 60)` com `return 0` no timeout | `sleep 70` remoto | a sessão **morre** depois de 60 s sem tráfego — qualquer comando silencioso cai |
+
+Nenhum dos dois aparece num teste de "conecta e lê um echo": o primeiro depende
+do tamanho do chunk, o segundo do tempo. Corrigidos; `tests/gpu-bench.test.mjs`
+prende os dois por texto e o segundo foi refeito com `sleep 70` real.
+
+**Passada 2 — a medição do benchmark, e aqui eu tinha quebrado o que funcionava:**
+
+A tentativa de "tirar o custo fixo por quadro" com `(t(K=4) − t(K=1))/3`
+produziu `fill` a 8,9 Gpix/s num G31 cujo pico é ~1 Gpix/s. A curva explicou:
+o driver **elimina** os desenhos que sobrescrevem o quadro inteiro, então a
+diferença media desenho descartado. Também apareceu um erro de unidade:
+`medir()` passou a devolver o custo de UM desenho e os chamadores continuaram
+multiplicando por `frames` — inflação de 200×. Revertido para K=1 com
+`custo_glFinish_vazio` medido e publicado (0,081 ms contra 1,63 ms de um
+preenchimento), e o R35S reproduziu os números originais dentro de 5%.
+
+**Passada 3 — a varredura no resto do repositório:**
+
+| Defeito | Onde | Efeito |
+| --- | --- | --- |
+| `r35s` cravado em `out/`, `work/` e na mensagem de erro | `scripts/audio-alerta.sh` | apontado para a X55, cross-compilava com o sysroot do R35S; os dois são aarch64 e o `libSDL2` liga dinâmico, então "funcionava" |
+| duração só cosmética: anunciava `${DURACAO_S}s` e chamava o probe **sem argumento** | idem | `--alar` (3 × 0,35 s) tocava 1,5 s cada, e a saída dizia 0,35 |
+
+O aparelho agora é descoberto no `build-info.txt` da imagem (com
+`GIOCHI_DEVICE` para sobrepor), e a duração chega ao binário em ms.
+
+**O que NÃO era defeito:** `local` num script `#!/bin/sh` foi acusado pelo
+shellcheck (SC3043) e testado antes de "corrigir" — `dash` e o `ash` do busybox
+implementam `local`, e o teste com `/bin/sh` e com `bash` passou nos dois. Trocar
+por variável global teria sido mudança sem ganho, e num script com `set -u` o
+risco de vazar valor entre chamadas.
+
+**A lição de método, e é a terceira vez que ela aparece:** os dois defeitos da
+passada 3 são a mesma família do §12.30 — a ferramenta relatando a intenção em
+vez do que fez. O script *dizia* 350 ms; o binário tocava 1500. E o `r35s`
+cravalo fazia o script compilar "com sucesso" para o aparelho errado. Nenhum dos
+dois produzia mensagem de erro.
 
 ## 13. Aparelhos
 
@@ -4121,7 +4192,7 @@ o cartão — não só no `target/`.
 
 | Item | Estado |
 | --- | --- |
-| Código e configuração | **pronto** — 504/504 testes |
+| Código e configuração | **pronto** — 509/509 testes |
 | Imagem X55 (`Image` + `rootfs.ext4` + DTB + bootloader) | **existe** em `out/powkiddy-x55/`, `built_at_utc=2026-11-04T21:05:13Z` |
 | `/etc/inittab` na imagem | **linha 30: `::respawn:/usr/bin/giochi-init`** — conferida com `debugfs` no `rootfs.ext4` |
 | `work/` do X55 | preservado em `~/.cache/giochi-system/work/powkiddy-x55` (17 GB, já com `target/` finalizado) |
@@ -4262,7 +4333,7 @@ Ordem sugerida para a próxima sessão (nada aqui precisa da X55):
 
 ```bash
 node scripts/validate-devices.mjs      # 7 devices, 1 habilitado
-node tests/run-all.mjs                 # 504/504
+node tests/run-all.mjs                 # 509/509
 node scripts/list-devices.mjs --github-matrix
 ```
 
@@ -4328,7 +4399,7 @@ as duas correções (`uboot-patches/0001-…-adc-nao-fatal.patch` +
 
 ```bash
 cd /home/charles/Giochi/GIOCHI-SYSTEM
-node tests/run-all.mjs                                   # esperado: 504/504
+node tests/run-all.mjs                                   # esperado: 509/509
 git add device/r35s/README.md AGENTS.md
 git commit -m "r35s: o U-Boot mainline liga; a frase do README estava desatualizada
 

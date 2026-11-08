@@ -38,7 +38,6 @@ fi
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SRC="$REPO_ROOT/scripts/sdl-audio-probe.c"
-BIN="$REPO_ROOT/out/r35s/sdl-audio-probe"
 
 ssh_dev() {
     ssh -o StrictHostKeyChecking=no -o ConnectTimeout=8 \
@@ -46,18 +45,36 @@ ssh_dev() {
         "root@$IP" "$@"
 }
 
+# Qual aparelho? Perguntado AO APARELHO, não fixado no script.
+#
+# A versão anterior cravava `r35s` em três lugares (o binário em `out/r35s/`, a
+# busca do toolchain em `work/r35s/` e a mensagem de erro). Apontado para a X55,
+# o script cross-compilava com o sysroot do R35S e ninguém percebia: os dois são
+# aarch64 e o `libSDL2` liga dinamicamente, então o binário "funcionava" com as
+# bibliotecas de outro aparelho. É o §12.24 na forma silenciosa — literal de
+# aparelho em script de propósito geral.
+DEVICE="${GIOCHI_DEVICE:-$(ssh_dev 'sed -n "s/^device=//p" /etc/giochi/build-info.txt 2>/dev/null' 2>/dev/null | tr -d '\r' | head -n 1)}"
+if [ -z "${DEVICE:-}" ]; then
+    echo "ERRO: não consegui descobrir o aparelho em $IP." >&2
+    echo "      A imagem não tem device= em /etc/giochi/build-info.txt." >&2
+    echo "      Defina GIOCHI_DEVICE=<id> para escolher o toolchain." >&2
+    exit 1
+fi
+echo "aparelho: $DEVICE" >&2
+BIN="$REPO_ROOT/out/$DEVICE/sdl-audio-probe"
+mkdir -p "$REPO_ROOT/out/$DEVICE"
+
 # Cross-compila se o binário não existe ou está velho. O gcc do Buildroot é
 # necessário porque o probe é aarch64 e precisa ligar no SDL2 do sysroot.
 if [ ! -x "$BIN" ] || [ "$SRC" -nt "$BIN" ]; then
     TOOLCHAIN=""
-    for base in "${GIOCHI_SYSTEM_WORK_DIR:-$HOME/.cache/giochi-system/work}"/r35s/build; do
-        for c in "$base"/host/bin/*-buildroot-linux-gnu-gcc; do
-            [ -x "$c" ] && TOOLCHAIN="$c" && break 2
-        done
+    WORK="${GIOCHI_SYSTEM_WORK_DIR:-$HOME/.cache/giochi-system/work}"
+    for c in "$WORK/$DEVICE"/build/host/bin/*-buildroot-linux-gnu-gcc; do
+        [ -x "$c" ] && TOOLCHAIN="$c" && break
     done
     [ -n "$TOOLCHAIN" ] || {
-        echo "ERRO: cross-toolchain do r35s não encontrado." >&2
-        echo "      O binário precisa do sysroot do build (SDL2 do aparelho)." >&2
+        echo "ERRO: cross-toolchain de '$DEVICE' não encontrado em $WORK/$DEVICE/build/host/bin." >&2
+        echo "      O binário precisa do sysroot do build (SDL2 daquele aparelho)." >&2
         exit 1
     }
     echo "compilando o probe..." >&2
@@ -83,13 +100,20 @@ echo "=== enviando o probe ==="
 scp -q -o StrictHostKeyChecking=no -o ConnectTimeout=10 "$BIN" "root@$IP:/tmp/sdl-audio-probe" || exit 1
 ssh_dev 'chmod +x /tmp/sdl-audio-probe'
 
+# A duração tem de CHEGAR ao probe. Na versão anterior o script anunciava
+# "${DURACAO_S}s" e chamava o binário sem argumento nenhum: o probe tocava o
+# próprio padrão de 1500 ms e a saída dizia outra coisa. `--alar` (3 bipes de
+# 0,35 s) na prática tocava 1,5 s — o defeito que o §12.30 descreve, em que a
+# ferramenta relata a intenção em vez do que fez.
+DURACAO_MS=$(awk -v s="$DURACAO_S" 'BEGIN { printf "%d", s * 1000 }')
+
 for i in $(seq 1 "$REPETICOES"); do
     echo
-    echo "--- tom $i de $REPETICOES (${DURACAO_S}s) ---"
+    echo "--- tom $i de $REPETICOES (${DURACAO_MS} ms) ---"
     # `SDL_AUDIODRIVER` não é fixado de propósito: queremos ver qual o SDL2
     # ESCOLHE. Fixar em `alsa` esconderia justamente o defeito do §12.56, em que
     # o SDL2 cai no `dsp`/OSS quando não tem ALSA compilado.
-    ssh_dev "cd /tmp && ./sdl-audio-probe" 2>&1 | sed 's/^/  /'
+    ssh_dev "cd /tmp && ./sdl-audio-probe $DURACAO_MS" 2>&1 | sed 's/^/  /'
 done
 
 echo

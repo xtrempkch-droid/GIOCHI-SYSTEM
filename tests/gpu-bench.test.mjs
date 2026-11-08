@@ -163,3 +163,54 @@ test("quem escolhe o aparelho é a interface, não o IP", () => {
   assert.match(PROXY, /setsockopt/);
   assert.match(PROXY, /--iface/);
 });
+
+test("o proxy não descarta byte e não mata sessão ociosa", () => {
+  // Dois defeitos MEDIDOS em 08/11/2026 com um servidor de teste local:
+  //
+  //  1. o laço usava `dados = b"\0"` como sentinela de "nada neste ciclo" e
+  //     comparava com ele. SSH é binário: um 0x00 legítimo que chegasse sozinho
+  //     no recv era engolido (4 bytes enviados, 2 recebidos), e byte perdido no
+  //     meio de um pacote desincroniza o protocolo;
+  //  2. `select(..., 60)` derrubava a sessão depois de 60 s sem tráfego — um
+  //     `sleep 70` remoto morria com a conexão.
+  //
+  // Nenhum dos dois aparece num teste de "conecta e lê um echo": o primeiro
+  // depende do tamanho do chunk, o segundo do tempo.
+  // Sem comentários: o comentário que EXPLICA o defeito contém o código que ele
+  // proíbe, e a primeira versão deste teste reprovava a própria documentação.
+  const CODIGO = PROXY.split("\n")
+    .map((l) => l.replace(/#.*$/, ""))
+    .join("\n");
+  assert.ok(!/dados = b"\\0"/.test(CODIGO),
+    "não pode existir sentinela b\\0 para 'nada neste ciclo'");
+  assert.match(CODIGO, /elif dados:/, "o caminho vazio tem de ser `elif dados:`");
+  assert.ok(!/select\.select\([^)]*,\s*60\)/.test(CODIGO),
+    "o select não pode ter timeout que encerre a sessão");
+  assert.match(PROXY, /Sessão ociosa é o caso normal/);
+});
+
+test("a medição é de UM desenho por quadro, e o descarte de desenho não volta", () => {
+  // A curva t(K) medida no R35S com o shader de ALU (141,7 ms por desenho):
+  //
+  //   K=1  141,673 ms     K=8   141,992 ms
+  //   K=2  142,137 ms     K=16  141,960 ms
+  //
+  // 141 ms x 16 seria 2,3 s. O driver descarta os desenhos anteriores porque
+  // cada um sobrescreve o quadro inteiro. Logo:
+  //  - enfileirar N quadros não mede N vezes nada;
+  //  - "tirar o custo fixo" por (t(K=4)-t(K=1))/3 mede desenho ELIMINADO, e
+  //    produziu fill a 8,9 Gpix/s num G31 cujo pico é ~1 Gpix/s (9x o teto).
+  assert.ok(!/overhead_frame/.test(SRC),
+    "a subtração do custo fixo por diferencial não pode voltar");
+  assert.match(SRC, /\*frames = n;/,
+    "medir() devolve o total de n quadros; *frames tem de ser n");
+  assert.ok(!/\*frames = 1;/.test(SRC),
+    "*frames = 1 inflaciona todos os números em n (foi 200x)");
+
+  // O quadro vazio tem de ser MEDIDO e mostrado: é o que prova que o tempo
+  // publicado é trabalho de GPU, não de sincronização (0,081 ms contra 1,63 ms
+  // de um preenchimento no R35S).
+  assert.match(SRC, /medir_k\(draw, 0, 20\)/, "custo do quadro vazio tem de ser medido");
+  assert.match(SRC, /custo_glFinish_vazio/, "e tem de sair no relatório");
+  assert.match(SRC, /GL_RENDERER/, "e o renderer continua obrigatório na saída");
+});
