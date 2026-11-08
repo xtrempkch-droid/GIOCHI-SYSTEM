@@ -2065,7 +2065,7 @@ Correção em quatro peças, cada uma com teste:
 
 | Peça | Por quê |
 | --- | --- |
-| `scripts/gerar-patch-joypad.mjs` | gera o patch a partir do fonte; o `.c` continua sendo a fonte da verdade |
+| `scripts/gerar-patch-modulos.mjs` | gera o patch a partir do fonte; o `.c` continua sendo a fonte da verdade. Gera **os dois** (`joypad` e `painel`), e `--check` confere que o patch continua em dia |
 | `device/r35s/patches/0002-…patch` | leva os arquivos e **liga** `Kconfig`/`Makefile` — arquivo na árvore sem gancho não compila |
 | `CONFIG_JOYSTICK_ODROIDGO3=y` | `=y` e não `=m`: módulo que depende do `S15modules` é gamepad que pode não existir no boot |
 | `kernel-required.txt` | se o patch parar de aplicar, o símbolo some e o build **falha** em vez de gerar imagem sem botão |
