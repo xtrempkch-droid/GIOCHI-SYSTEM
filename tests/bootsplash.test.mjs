@@ -226,12 +226,76 @@ test("sem launcher, o splash sai para o getty aparecer", () => {
   assert.match(bloco, /getty|console|interface/i, "e o motivo tem de estar escrito");
 });
 
-test("stop_splash usa QUIT e tem o kill como reserva", () => {
-  const bloco = INIT.slice(INIT.indexOf("stop_splash()"), INIT.indexOf("wait_for_launcher()"));
+test("stop_splash acha o FIFO em /run e sempre tem o kill como reserva", () => {
+  // O defeito que este teste prendia: ele exigia
+  // `[ -p /tmp/psplash_fifo ] || return 0`, que é EXATAMENTE o bug. O psplash
+  // faz `chdir("/run")` e cria `psplash_fifo` lá (`psplash.c`), então o teste
+  // de `/tmp` era sempre falso e `stop_splash` retornava sem fazer nada.
+  //
+  // Medido no X55 em 08/11/2026: o psplash estava vivo desde 1,7 s de uptime
+  // com o `uptime` em 12017 s, segurando `/dev/fb0` ao lado do launcher.
+  const bloco = INIT.slice(INIT.indexOf("psplash_fifo()"), INIT.indexOf("wait_for_launcher()"));
+  assert.match(bloco, /\/run\/psplash_fifo/, "o caminho real do FIFO é /run");
+  assert.match(bloco, /PSPLASH_FIFO_DIR/, "variável de ambiente tem precedência");
   assert.match(bloco, /psplash-write "QUIT"/, "QUIT é o caminho normal");
-  assert.match(bloco, /pidof psplash/, "kill como reserva se o FIFO sumiu");
-  // Idempotente: chamar duas vezes não pode falhar.
-  assert.match(bloco, /\[ -p \/tmp\/psplash_fifo \] \|\| return 0/);
+  // O kill não pode ser exceção de um teste de existência: se o FIFO existir
+  // e não houver leitor, o QUIT "funciona" e o processo fica.
+  assert.match(bloco, /pidof psplash/, "kill como reserva, sempre");
+  assert.ok(
+    !/\[ -p \/tmp\/psplash_fifo \] \|\| return 0/.test(bloco),
+    "o early-return no caminho errado não pode voltar",
+  );
+});
+
+test("o console de texto é assumido quando o launcher não é a interface", () => {
+  // `CONFIG_FRAMEBUFFER_CONSOLE_DEFERRED_TAKEOVER=y` faz o fbcon esperar alguém
+  // escrever no console virtual — e o getty está em `console` = ttyS2 (serial),
+  // então ninguém escreve. Medido no X55: `vtcon` só com `dummy device`,
+  // geometria 25x80, `fbcon/rotate=0`, com `fbcon=rotate:3` na cmdline.
+  // Depois de UMA linha em /dev/tty0: `(M) frame buffer device`, 45x160,
+  // `fbcon/rotate=3`.
+  assert.match(INIT, /assumir_console\(\)/, "a função tem de existir");
+  assert.match(INIT, /\/dev\/tty0/, "o gatilho é escrever no tty0");
+
+  const wait = INIT.slice(INIT.indexOf("wait_for_launcher()"), INIT.indexOf("main()"));
+  assert.match(wait, /assumir_console/, "sem launcher é o caso em que o console é a interface");
+  assert.match(wait, /stop_splash/, "e o splash tem de sair antes");
+
+  // A flag de desenvolvimento entrega o console para depuração: sem o takeover
+  // ela entrega uma tela parada, que é o oposto do que ela existe para dar.
+  const main = INIT.slice(INIT.indexOf("main()"));
+  const inicioRamo = main.indexOf('-f "$DEV_FREE_FILE"');
+  assert.ok(inicioRamo > 0, "não achei o ramo da flag de desenvolvimento");
+  const ramoDev = main.slice(inicioRamo, inicioRamo + 900);
+  assert.match(ramoDev, /assumir_console/, "o modo dev também precisa do console");
+});
+
+test("o DEFERRED_TAKEOVER continua, e agora tem contrapartida", () => {
+  // A opção existe por um motivo bom (não pintar preto antes do splash). O que
+  // faltava era o gatilho — sem ele, o fbcon nunca assume e o console não
+  // existe. Este teste amarra os dois lados para ninguém remover só um.
+  for (const f of [
+    "device/r35s/linux.fragment",
+    "device/powkiddy x55/linux.fragment",
+    "device/powkiddy x35h/linux.fragment",
+  ]) {
+    const frag = readFileSync(`${ROOT}${f}`, "utf8");
+    assert.match(frag, /^CONFIG_FRAMEBUFFER_CONSOLE_DEFERRED_TAKEOVER=y$/m, f);
+    assert.match(frag, /^# CONFIG_LOGO is not set$/m, f);
+  }
+  assert.match(INIT, /assumir_console/, "o giochi-init é a contrapartida do DEFERRED_TAKEOVER");
+});
+
+test("o selftest distingue 'fbcon não assumiu' de 'rotação desligada'", () => {
+  // As duas causas dão `fbcon/rotate=0`, e a correção é diferente: uma é
+  // `CONFIG_FRAMEBUFFER_CONSOLE_ROTATION=y`, a outra é o takeover. O aviso
+  // antigo mandava procurar no Kconfig uma opção que estava certa.
+  const texto = readFileSync(
+    `${ROOT}device/common/rootfs-overlay/usr/bin/giochi-selftest`,
+    "utf8",
+  );
+  assert.match(texto, /vtconsole/, "a distinção vem do vtconsole");
+  assert.match(texto, /fbcon não assumiu/, "e o texto tem de dizer qual das duas é");
 });
 
 // ── kernel: a janela preta do meio ───────────────────────────────────────

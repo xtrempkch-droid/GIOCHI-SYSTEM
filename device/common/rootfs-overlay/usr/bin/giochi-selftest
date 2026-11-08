@@ -74,8 +74,13 @@ else
 fi
 
 if [ -n "$MODEL" ] && [ -n "$COMPAT" ]; then
-    case "$COMPAT" in
-        *"$MODEL"*) ;;
+    # MEDIDO NO X55 (08/11/2026): os dois dizem a MESMA coisa em convenções
+    # diferentes — `/model` é o nome comercial ("Powkiddy x55") e `compatible`
+    # é o do DT ("powkiddy,x55 rockchip,rk3566"). Comparados crus, um aparelho
+    # saudável avisa sempre, e o aviso ensina o operador a ignorar o bloco.
+    _norm() { printf '%s' "$1" | tr 'A-Z' 'a-z' | tr -cd 'a-z0-9'; }
+    case "$(_norm "$COMPAT")" in
+        *"$(_norm "$MODEL")"*) ;;
         *)
             # Aviso, não falha: o sistema funciona; o rótulo é que mente.
             warn "model \"$MODEL\" não corresponde ao compatible (U-Boot sobrescreve /model)"
@@ -218,20 +223,38 @@ MODE_FIRST=$(ls /sys/class/drm/*/modes 2>/dev/null | head -n 1)
 DRM_MODE=""
 [ -n "$MODE_FIRST" ] && DRM_MODE=$(head -n 1 "$MODE_FIRST" 2>/dev/null)
 
+# Quem de fato pegou o console. MEDIDO NO X55 (08/11/2026): com
+# CONFIG_FRAMEBUFFER_CONSOLE_DEFERRED_TAKEOVER=y — ligado de propósito para não
+# haver janela preta antes do splash — o fbcon NÃO assume até alguém escrever no
+# VT, e o getty está no `console` (serial), então ninguém escreve. O sysfs
+# `fbcon/rotate` existe e vale 0 nos dois casos, então ele sozinho não distingue
+# "rotação desligada" de "nada na tela". Quem distingue é o vtconsole.
+FBCON_ATIVO=0
+for _v in /sys/class/vtconsole/vtcon*/name; do
+    [ -r "$_v" ] || continue
+    case "$(cat "$_v" 2>/dev/null)" in
+        "(M) frame buffer device"*) FBCON_ATIVO=1 ;;
+    esac
+done
+
 if [ -n "$FBCON_ROT" ]; then
     # 90x80 = 720/8 por 1280/16: retrato nativo, rotação não aplicada.
     GEOM=$(dmesg 2>/dev/null | sed -n 's/.*frame buffer device \([0-9]*x[0-9]*\).*/\1/p' | head -n 1)
-    case "$DRM_MODE" in
-        720x1280)
-            case "$FBCON_ROT" in
-                0) warn "console sem rotação (rotate=$FBCON_ROT${GEOM:+, $GEOM}) — painel é retrato, texto sai deitado" ;;
-                *) pass "console rotacionado (rotate=$FBCON_ROT${GEOM:+, $GEOM}) para painel retrato" ;;
-            esac
-            ;;
-        *)
-            pass "console rotate=$FBCON_ROT${GEOM:+, $GEOM} (painel ${DRM_MODE:-?})"
-            ;;
-    esac
+    if [ "$FBCON_ATIVO" -eq 0 ]; then
+        warn "console de texto NÃO está na tela — o fbcon não assumiu (DEFERRED_TAKEOVER espera alguém escrever em /dev/tty0); rotação não se aplica a um console que não aparece"
+    else
+        case "$DRM_MODE" in
+            720x1280)
+                case "$FBCON_ROT" in
+                    0) warn "console sem rotação (rotate=$FBCON_ROT${GEOM:+, $GEOM}) — painel é retrato, texto sai deitado" ;;
+                    *) pass "console rotacionado (rotate=$FBCON_ROT${GEOM:+, $GEOM}) para painel retrato" ;;
+                esac
+                ;;
+            *)
+                pass "console rotate=$FBCON_ROT${GEOM:+, $GEOM} (painel ${DRM_MODE:-?})"
+                ;;
+        esac
+    fi
 else
     warn "sem /sys/class/graphics/fbcon/rotate — CONFIG_FRAMEBUFFER_CONSOLE_ROTATION desligado?"
 fi
@@ -801,12 +824,24 @@ fi
 # ── energia ──────────────────────────────────────────────────
 head2 "energia"
 BAT=""
+BAT_PRESENTE=""
 for p in /sys/class/power_supply/*; do
     [ "$(read_or "$p/type")" = "Battery" ] || continue
+    # MEDIDO NO X55 (08/11/2026): `present=0` com `capacity=0` é o aparelho SEM
+    # célula — sem chicote, sem bateria. Reportar "0%" manda o operador carregar
+    # um aparelho que não tem o que carregar, e é indistinguível de bateria
+    # arriada, onde a ação é outra. O atributo é opcional, então vazio = presente.
+    BAT_PRESENTE="$(read_or "$p/present")"
     BAT="$(read_or "$p/capacity")% ($(read_or "$p/status"))"
     break
 done
-[ -n "$BAT" ] && pass "bateria: $BAT" || warn "sem bateria detectada"
+if [ -n "$BAT" ] && [ "$BAT_PRESENTE" = "0" ]; then
+    warn "bateria AUSENTE (present=0) — sem célula neste aparelho; 'capacidade 0%' aqui não é bateria vazia"
+elif [ -n "$BAT" ]; then
+    pass "bateria: $BAT"
+else
+    warn "sem bateria detectada"
+fi
 
 TEMP=""
 for t in /sys/class/thermal/thermal_zone*; do
@@ -889,6 +924,13 @@ if [ -x "$LAUNCHER" ]; then
         # O processo pode sumir entre o glob e o `open` (é /proc): o redirect
         # falha e polui a saída com "No such file". Silêncio é o certo aqui.
         cmd="$(tr '\0' ' ' <"$cmdline" 2>/dev/null)"
+        pid="${cmdline#/proc/}"
+        pid="${pid%/cmdline}"
+        # Fora a si mesmo e o pai: se alguém rodar este teste de um shell cuja
+        # linha de comando cite "giochi-launcher" (um `grep`, um `sh -c`), o
+        # processo entraria na contagem e um launcher MORTO passaria por vivo —
+        # o mesmo tipo de falso negativo que o §12.46 descreve.
+        case "$pid" in "$$"|"$PPID") continue ;; esac
         case "$cmd" in
             *giochi-launcher*) LAUNCHER_VIVO=$((LAUNCHER_VIVO + 1)) ;;
         esac

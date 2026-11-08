@@ -19,12 +19,34 @@
 # de cosmético transformaria um detalhe de apresentação num sistema que não
 # liga. Aqui, falha = aviso e segue.
 #
-# ## O FIFO
+# ## O FIFO, e o caminho que estava errado
 #
-# O `psplash` cria `/tmp/psplash_fifo` e escuta nele. `psplash-write "PROGRESS n"`
-# anima a barra; `psplash-write "QUIT"` encerra. O `S99` e o `giochi-init` usam
-# o QUIT, mas se eles não rodarem (boot interrompido), o `-n` mantém o psplash
-# vivo em vez de morrer quando o primeiro cliente fecha o FIFO.
+# O `psplash` faz `chdir(rundir)` e cria `"psplash_fifo"` — nome RELATIVO
+# (`psplash.c`, `#define PSPLASH_FIFO "psplash_fifo"`). O `rundir` vem de
+# `$PSPLASH_FIFO_DIR` e, quando a variável não existe, é **`/run`**:
+#
+#     rundir = getenv("PSPLASH_FIFO_DIR");
+#     if (!rundir) rundir = "/run";
+#     chdir(rundir);
+#
+# Nosso código procurava `/tmp/psplash_fifo` em três lugares (aqui na espera,
+# aqui no stop e no `giochi-init`), e `/tmp` NUNCA tem o arquivo.
+#
+# Consequência medida no X55 em 08/11/2026: o `stop_splash` do `giochi-init`
+# começava com `[ -p /tmp/psplash_fifo ] || return 0` e retornava SEMPRE. O
+# `psplash` ficou vivo de 1,7 s de uptime até 12017 s — e segurando `/dev/fb0`.
+# Este script também imprimia "psplash não criou o FIFO — seguindo" a cada boot,
+# que é um aviso sobre a ferramenta, não sobre o splash.
+#
+# A função abaixo procura os dois lugares e é a única fonte da verdade do
+# caminho; `$PSPLASH_FIFO_DIR` entra primeiro para acompanhar um build que mude
+# o diretório.
+psplash_fifo() {
+    for _f in "${PSPLASH_FIFO_DIR:-/run}/psplash_fifo" /run/psplash_fifo /tmp/psplash_fifo; do
+        [ -p "$_f" ] && { printf '%s' "$_f"; return 0; }
+    done
+    return 1
+}
 
 case "$1" in
     start)
@@ -47,20 +69,20 @@ case "$1" in
         # Espera o FIFO aparecer, que é o sinal de que ele desenhou o primeiro
         # quadro. Sem essa espera, o `PROGRESS` logo abaixo cairia no vazio.
         i=0
-        while [ ! -e /tmp/psplash_fifo ] && [ "$i" -lt 30 ]; do
+        while ! psplash_fifo >/dev/null && [ "$i" -lt 30 ]; do
             sleep 0.1
             i=$((i + 1))
         done
-        if [ -e /tmp/psplash_fifo ]; then
-            echo "splash: psplash rodando (pid $SPLASH_PID)"
+        if FIFO="$(psplash_fifo)"; then
+            echo "splash: psplash rodando (pid $SPLASH_PID, fifo $FIFO)"
         else
-            echo "splash: psplash não criou o FIFO — seguindo"
+            echo "splash: psplash rodando (pid $SPLASH_PID) mas sem fifo — QUIT cairá no kill"
         fi
         ;;
     stop)
         # `QUIT` é o caminho normal; o kill é a rede de segurança para o caso de
-        # o FIFO ter sumido (ex.: alguém limpou /tmp).
-        if [ -p /tmp/psplash_fifo ] && command -v psplash-write >/dev/null 2>&1; then
+        # o FIFO ter sumido (ex.: alguém limpou /run).
+        if psplash_fifo >/dev/null && command -v psplash-write >/dev/null 2>&1; then
             psplash-write "QUIT" 2>/dev/null
         fi
         for p in $(pidof psplash 2>/dev/null); do

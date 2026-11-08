@@ -1,14 +1,19 @@
 # AGENTS.md — Giochi System
 
 > Handoff técnico do repositório. Leia antes de continuar o trabalho.
-> Atualizado em: 08/11/2026 (revisão 7 — **auditoria em duas passadas**: quinze
-> defeitos encontrados, todos do tipo "verde e errado", e todos com teste que os
-> prende. Os mais graves: o gate do harfbuzz **nunca disparou** (dependia de
-> variável `BR2_*` que o Buildroot não exporta ao post-build); um patch de kernel
-> ausente matava o build **sem imprimir nada**; e **dois dos três Kconfigs da
-> árvore não tinham verificação nenhuma** — o do busybox e o `defconfig` do
-> aparelho, onde um símbolo cuja dependência vem de fragmento é descartado em
-> silêncio. Ver §12.59 e §12.60.)
+> Atualizado em: 08/11/2026 (revisão 8 — **auditoria em três passadas + uma no
+> aparelho**. Vinte defeitos encontrados, todos do tipo "verde e errado", e todos
+> com teste que os prende. Os mais graves: o gate do harfbuzz **nunca disparou**
+> (dependia de variável `BR2_*` que o Buildroot não exporta ao post-build); um
+> patch de kernel ausente matava o build **sem imprimir nada**; **dois dos três
+> Kconfigs da árvore não tinham verificação nenhuma** (busybox e o `defconfig`
+> do aparelho); e o **`tar gzip` e o `depmod` estavam fora da imagem** — o que a
+> leitura de `Kconfig` previu e o X55 ligado por SSH confirmou. Ver §12.59 a
+> §12.62. A quarta passada foi medida **no X55**, com a imagem anterior a todas
+> as correções: o splash ficava na tela para sempre (`/tmp/psplash_fifo` nunca
+> existiu — o real é `/run/`), o console de texto nunca aparecia
+> (`DEFERRED_TAKEOVER` sem gatilho), e **1203 das 1260 linhas do `dmesg`** eram
+> ruído de carregador, o que tornava inútil o log de bring-up. Ver §12.62.)
 
 ---
 
@@ -79,7 +84,7 @@ Repositório: `https://github.com/xtrempkch-droid/GIOCHI-SYSTEM` — branch `mai
 
 | Verificação | Resultado |
 | --- | --- |
-| `node tests/run-all.mjs` | **474/474** (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, devices 13, assert-config 12, fdt 11, …) |
+| `node tests/run-all.mjs` | **486/486** (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, devices 13, assert-config 12, fdt 11, …) |
 | `node scripts/validate-devices.mjs` | OK — 7 devices, 1 habilitado |
 | `node scripts/list-devices.mjs --github-matrix` | matriz com `qemu-aarch64` |
 | matriz com `--device powkiddy-x55 --allow-draft` | devolve **só** o X55 |
@@ -441,7 +446,7 @@ si (§12.4), mas provavelmente **não** era a causa dos 3 s.
 
 ```bash
 node scripts/validate-devices.mjs
-node tests/run-all.mjs                          # 474 testes
+node tests/run-all.mjs                          # 486 testes
 node scripts/list-devices.mjs
 node scripts/list-devices.mjs --github-matrix
 node scripts/list-devices.mjs --github-matrix --device powkiddy-x55 --allow-draft
@@ -483,12 +488,18 @@ absoluto** do host — §12.40).
 
 ## 10. Testes
 
-`node tests/run-all.mjs` → **474/474**:
+`node tests/run-all.mjs` → **486/486**, em **53 arquivos**. A tabela abaixo é uma
+seleção dos que prendem contratos de projeto; a lista completa é `ls tests/` e
+`tests/runner-coverage.test.mjs` **falha** se algum arquivo existir sem estar
+importado no `run-all.mjs` — foi assim que dois testes desta revisão quase
+ficaram fora da contagem.
 
 | Arquivo | Testes | Cobre |
 | --- | --- | --- |
 | `tests/devices.test.mjs` | 13 | índice, schema, pastas com espaço, matriz, draft habilitado, `allowDraft` por id vs `all`, mensagem de recusa |
 | `tests/assert-config.test.mjs` | 12 | símbolo que sobrevive, desaparece, cai `=y`→`=m`, pedido-desligado-veio-ligado, `allow-drop`, aspas |
+| `tests/busybox-config.test.mjs` | 7 | o terceiro Kconfig da árvore, que não tinha gate nenhum: applet que existe, applet renomeado (§12.16) e applet impossível (`depends on`) |
+| `tests/defconfig-gate.test.mjs` | 4 | o `defconfig` do aparelho passa pelo `assert-config`: símbolo pedido não pode sumir em silêncio, e pacote que depende de fragmento não pode morar no defconfig |
 | `tests/fdt.test.mjs` | 11 | parse de DTB, gpio-keys, adc-joystick, `buttons.map`, truncado/ inválido |
 | `tests/cmdline.test.mjs` | 12 | cmdline da X55 idêntica à que bootou, console sem baud, `fbconRotate:0` ≠ ausente, `video=`, recusa de campo desconhecido |
 | `tests/device-x35h.test.mjs` | 10 | identidade do aparelho: DTS próprio, ST7703 e não HX8394, sem rádio, patches existem, DTS herda o da X55, 16 botões sem `BTN_MODE` |
@@ -502,6 +513,10 @@ absoluto** do host — §12.40).
 | `tests/flash-guards.test.mjs` | 4 | a classe inteira: `flash-sd.sh` **e** `flash-dd.sh` recusam o disco de `/` e `/boot`, antes do `dd` |
 | `tests/ci-cache-e-sd-image.test.mjs` | 6 | cache do CI salva o `BR2_DL_DIR` que o script usa (`.cache/dl`), docs batem, e `make-sd-image.sh` não tem DTB de reserva de outro aparelho |
 | `tests/build-device-vars.test.mjs` | 7 | variável não atribuída aborta o build; o estado de patches/fragmento roda de verdade, inclusive com patch ausente (falha alto, não em silêncio) |
+| `tests/serial-login-path.test.mjs` | 3 | o caminho de recuperação de login do `serial-push-blob.py` (`str`/`bytes`), executado com um `serial` falso — o caminho que só roda quando o console NÃO está no shell |
+| `tests/help-sentinels.test.mjs` | 4 | nenhum script fatia `--help` por número de linha (a classe que quebrou em 2 de 13) |
+| `tests/bootlog-dmesg-spam.test.mjs` | 4 | o `awk` REAL do `giochi-bootlog` sobre 300 repetições do charger: agrupa, conta, e **preserva** as duas linhas de `fbcon` que estavam no meio |
+| `tests/hardware-x55.test.mjs` | 5 | o que o X55 desmentiu: `model`×`compatible` normalizados, `present=0` ≠ 0%, fbcon ausente ≠ `CONFIG_ROTATION` desligado, sem `dropbear` no status, `giochi-usb` sem role-switch |
 
 ## 10-A. O sistema base — acesso antes de interface
 
@@ -3299,6 +3314,233 @@ já estavam lá; o relatório mediu imagem velha").
   REGISTRO da época em que dropbear estava na imagem, e por isso fica como
   estava — bringup é documento histórico, não verdade atual.
 
+### 12.62 Quarta passada: com o X55 ligado por SSH, o que o aparelho desmentiu
+
+As três passadas anteriores foram de leitura e execução local. Esta foi feita
+**no aparelho**, por SSH em `10.55.0.2`, com a imagem `commit=60e326f`
+(`built_at 2026-11-07T17:49:22Z`) — ou seja, **anterior a todas as correções
+acima**. Isso tem uma consequência de método que é o ponto desta seção: cada
+defeito encontrado nas passadas 1–3 pôde ser **reproduzido em hardware**, e cada
+correção pôde ser **medida antes e depois no mesmo aparelho**.
+
+O hábito que fez a diferença: **medir antes de afirmar**. Três das coisas que eu
+ia reportar como defeito não eram (a lista está no fim), e a única forma de
+separar as duas categorias foi rodar o comando.
+
+#### O que a passada 2 tinha previsto, e o aparelho confirmou
+
+| Correção da passada 2 | Comando no aparelho | Resultado na imagem `60e326f` |
+| --- | --- | --- |
+| `FEATURE_TAR_GZIP` → `SEAMLESS_GZ` | `tar czf /tmp/x.tgz /etc` | `tar: invalid option -- 'z'` |
+| `BR2_PACKAGE_KMOD_TOOLS` | `command -v modprobe depmod modinfo` | só `/bin/busybox`; `depmod`/`modinfo` ausentes |
+
+Ou seja: as duas não eram hipótese de leitura de `Kconfig`. O `tar` sem gzip e
+o kernel **sem `depmod`** estavam na imagem que bootou, e `modprobe` resolvendo
+para o applet do busybox é a diferença entre "carrega o módulo" e "carrega e não
+sabe das dependências".
+
+#### Defeito A — o splash nunca saía, e o caminho estava errado em três arquivos
+
+`psplash.c` faz:
+
+```c
+rundir = getenv("PSPLASH_FIFO_DIR");
+if (!rundir) rundir = "/run";
+chdir(rundir);
+mkfifo(PSPLASH_FIFO);        /* #define PSPLASH_FIFO "psplash_fifo" — RELATIVO */
+```
+
+O FIFO real é **`/run/psplash_fifo`**. O nosso código testava
+`/tmp/psplash_fifo` em três lugares (`S01splash` na espera e no `stop`,
+`giochi-init`), e `/tmp` **nunca** tem o arquivo. Consequência medida:
+
+```text
+$ ps  (via /proc, §12.46)
+psplash  starttime 1.68s   uptime 12017s   fds em /dev/fb0: 1
+```
+
+O `stop_splash` do `giochi-init` começava com `[ -p /tmp/psplash_fifo ] || return 0`
+e **retornava sempre** — o splash ficou 3h20 na tela, segurando `/dev/fb0`, ao
+lado do launcher. E o `S01splash` imprimia a cada boot um aviso sobre a
+ferramenta ("psplash não criou o FIFO"), não sobre o splash.
+
+Verificado no aparelho depois da correção, com o `S01splash` novo:
+
+```text
+splash: psplash rodando (pid 8887, fifo /run/psplash_fifo)
+prw-------  1 root root 0 /run/psplash_fifo        ← /tmp/psplash_fifo: No such file
+... sh S01splash stop  →  psplash morto, FIFO removido
+```
+
+**O detalhe que torna isso um §12** e não um commit: `psplash-write` faz o mesmo
+`chdir`, então o `QUIT` sempre funcionou — o que nunca funcionou foi *decidir* se
+havia um FIFO. Um `[ -p ]` no caminho errado não falha, não avisa e não deixa
+rastro; ele só faz o `if` tomar o ramo errado para sempre.
+
+#### Defeito B — o console de texto nunca existia, e o Kconfig estava certo
+
+Três avisos do selftest na imagem velha apontavam para `CONFIG_`:
+
+```text
+[WARN] console sem rotação (rotate=0) — painel é retrato, texto sai deitado
+```
+
+com `fbcon=rotate:3` **na linha de comando** e
+`CONFIG_FRAMEBUFFER_CONSOLE_ROTATION=y` no kernel. Medido:
+
+```text
+/sys/class/vtconsole/vtcon*/name   ->  (S) dummy device      ← só isso
+stty size < /dev/tty0              ->  25 80                 ← geometria default
+/sys/class/graphics/fbcon/rotate   ->  0
+```
+
+e depois de **uma** linha escrita em `/dev/tty0`:
+
+```text
+vtcon1 -> (M) frame buffer device ; stty size -> 45 160 ; fbcon/rotate -> 3
+fbcon: Taking over console
+Console: switching to colour frame buffer device 160x45
+```
+
+A causa é o `CONFIG_FRAMEBUFFER_CONSOLE_DEFERRED_TAKEOVER=y` — ligado de
+propósito em `c04747d` para não haver janela preta antes do splash. Com ele, o
+fbcon **não assume** até alguém escrever no VT; e o getty deste sistema está em
+`console` = `ttyS2` (serial), então ninguém escreve. O `giochi-init` passou a
+fazer o empurrão (`assumir_console`), e **só quando não há launcher** — que é
+exatamente o caso em que o console é a interface.
+
+**A verificação de segurança que importa** (feita no aparelho, não deduzida):
+depois do takeover, `/sys/kernel/debug/dri/0/clients` continua
+`giochi-launcher 3386 0 y y`, e o launcher continuou desenhando. O console de
+texto **não rouba o DRM master** de quem já o tem; a tela dividida que o §11-A
+temia não acontece nesta ordem (launcher primeiro, fbcon depois).
+
+#### Defeito C — o log de boot era 99,8% ruído de carregador
+
+`giochi-bootlog` existe para gravar o diagnóstico do boot na FAT do cartão, para
+quando o aparelho não sobe. Medido no aparelho **sem bateria**:
+
+```text
+$ dmesg | wc -l
+1260
+$ dmesg | grep -c "below minimum voltage"
+1203
+```
+
+O `rk817-charger` imprime `Battery voltage NNNN below minimum voltage 3400000` a
+cada ~8 s, e o buffer inteiro do `dmesg` havia rotacionado para fora. Sobraram
+duas linhas — e as duas eram o `fbcon` que **eu** tinha acabado de provocar. O
+log de bring-up seria 100% ruído, no aparelho onde ele é a única saída.
+
+Correção: agrupar por **assinatura** — timestamp removido e dígitos trocados por
+`N` — e só comprimir a partir de 3 repetições. Por que assinatura e não
+igualdade: cada linha traz timestamp **e tensão** diferentes, então `$0` nunca
+agrupa. Por que o limite 3: duas linhas de mesma forma com números diferentes
+(`mmc0`/`mmc1` com endereços distintos) são informação, não laço.
+
+Medido no aparelho, com o `awk` real extraído do script:
+
+```text
+linhas reais: 1260
+--- agrupado:
+[ 2859.756756] rk817-charger ... Battery voltage 18540 below minimum voltage 3400000
+    ... 1127 linha(s) no mesmo padrao ...
+[12094.546881] fbcon: Taking over console
+[12094.547878] Console: switching to colour frame buffer device 160x45
+    ... 129 linha(s) no mesmo padrao ...
+```
+
+**1260 → 8 linhas, e as duas de `fbcon` sobreviveram.** É o ponto: comprimir
+ruído só vale se o sinal que estava espremido nele aparecer.
+
+#### Defeito D — "bateria 0%" num aparelho sem bateria
+
+```text
+[PASS] bateria: 0% (Not charging)
+```
+
+`present=0` significa **não há célula**; `capacity=0` com a célula presente
+significa descarregada. São diagnósticos opostos — "procurar o chicote" contra
+"carregar" — e o texto era o mesmo. Agora:
+
+```text
+[WARN] bateria AUSENTE (present=0) — sem célula neste aparelho;
+       'capacidade 0%' aqui não é bateria vazia
+```
+
+Este aparelho é o caso do §12.58 (P3): `rk817-charger online = 0` e o cabo USB
+não carrega. A consequência prática continua valendo — sessão longa nele é
+aposta, e hub alimentado resolve sem tocar em software.
+
+#### Defeito E — o status do USB mandava consular um nó que não falta
+
+```text
+$ giochi-usb --status          (imagem velha)
+papel da porta USB: indisponivel
+papel desconhecido: o DTS deste aparelho tem `usb-role-switch`?
+```
+
+Num aparelho cujo USB **é** o canal por onde o comando chegou. A X55 tem
+`dr_mode = "otg"` no DT, nenhum `/sys/class/usb_role/*`, e
+`/sys/class/udc/fcc00000.usb` com `state=configured`. O papel não é
+"desconhecido": é **fixo no DT**. Agora:
+
+```text
+papel da porta USB: DEVICE (fixo no DT, sem role-switch)
+  UDC fcc00000.usb: configured — gadget no ar
+  o papel não é alternável neste aparelho (--host/--device não se aplicam)
+  usb0: 10.55.0.2/24
+```
+
+Vale a regra do §12.30: perguntar pela **consequência** (o UDC existe e está
+`configured`?) em vez de pelo indireto (existe role-switch?).
+
+#### Os falsos avisos que eu quase reportei
+
+Ficam registrados porque a próxima sessão vai passar por eles:
+
+| Suspeita | Medição | Veredito |
+| --- | --- | --- |
+| `hci0` com `address`/`bus` vazios no sysfs | `bluetoothctl show` → `Controller A8:4F:A4:C9:98:4C`, `Powered: yes` | **funciona**; sysfs incompleto, não defeito |
+| `udhcpd.leases` "binário" | é o formato binário de lease do busybox | normal |
+| `wlan0` "Not connected" | não há `wpa_supplicant.conf` provisionado (§12.14) | esperado |
+| `[WARN] model` | `"Powkiddy x55"` vs `"powkiddy,x55"` — mesma coisa, convenções diferentes | **falso positivo**, corrigido |
+| "dois launchers rodando" | o segundo PID era **o meu próprio `sh`**, cuja cmdline continha `giochi-launcher` | armadilha do §12.46 do lado do teste |
+
+O último virou correção de código: o `giochi-selftest` conta processos lendo
+`/proc/*/cmdline`, e agora **pula `$$` e `$PPID`**. Sem isso, rodar o teste de
+um shell cuja linha de comando cite `giochi-launcher` faria um launcher **morto**
+passar por vivo — falso negativo, que é pior que o falso positivo do §12.34.
+
+#### Antes e depois, no mesmo aparelho
+
+| | imagem `60e326f` | scripts corrigidos |
+| --- | --- | --- |
+| `giochi-selftest` | PASS 41 · WARN 3 · FAIL 0 · SKIP 1 | **PASS 42 · WARN 1 · FAIL 0 · SKIP 1** |
+| aviso de `model` | presente (falso) | ausente |
+| bateria | `[PASS] bateria: 0% (Not charging)` | `[WARN] bateria AUSENTE (present=0)` |
+| `giochi-usb --status` | "papel desconhecido: o DTS tem usb-role-switch?" | `DEVICE (fixo no DT)`, UDC `configured`, `usb0: 10.55.0.2/24` |
+| `giochi-usbnet --status` | `dropbear NÃO está rodando` (com `ssh root@10.55.0.2` na linha de baixo) | `sshd rodando (OpenSSH)` |
+| `S01splash start` | "psplash rodando mas sem fifo" | `fifo /run/psplash_fifo` |
+| `S01splash stop` | não matava (FIFO "inexistente") | psplash morto, FIFO removido |
+| `giochi-bootlog` (dmesg) | 1260 linhas de ruído | 8 linhas, `fbcon` preservado |
+
+O único `WARN` que sobra é o da bateria, e ele é **verdadeiro** — o aparelho não
+tem célula. Um selftest que não tem nada a dizer precisa dizer isso; um que
+reporta 0% está inventando.
+
+#### O que esta passada NÃO prova
+
+- **A imagem no aparelho é anterior a todas as correções.** Medir aqui exigiu
+  copiar cada script para `/tmp` e rodá-lo de lá; o que está instalado continua
+  velho. Levar isso ao aparelho é rebuild + regravação, não `scp`.
+- `giochi-init` **não** foi substituído em execução (§12.25): as funções
+  (`psplash_fifo`, `stop_splash`, `assumir_console`) foram extraídas e chamadas
+  isoladamente. O caminho completo `wait_for_launcher → assumir_console` só roda
+  num aparelho **sem** launcher, e a X55 tem launcher.
+- O `assumir_console` foi verificado com o launcher **já** rodando; a ordem
+  inversa (console primeiro, launcher depois) não foi medida.
+
 ## 13. Aparelhos
 
 | ID | Pasta | SoC | Arch | Status | Falta |
@@ -3661,7 +3903,7 @@ o cartão — não só no `target/`.
 
 | Item | Estado |
 | --- | --- |
-| Código e configuração | **pronto** — 474/474 testes |
+| Código e configuração | **pronto** — 486/486 testes |
 | Imagem X55 (`Image` + `rootfs.ext4` + DTB + bootloader) | **existe** em `out/powkiddy-x55/`, `built_at_utc=2026-11-04T21:05:13Z` |
 | `/etc/inittab` na imagem | **linha 30: `::respawn:/usr/bin/giochi-init`** — conferida com `debugfs` no `rootfs.ext4` |
 | `work/` do X55 | preservado em `~/.cache/giochi-system/work/powkiddy-x55` (17 GB, já com `target/` finalizado) |
@@ -3802,7 +4044,7 @@ Ordem sugerida para a próxima sessão (nada aqui precisa da X55):
 
 ```bash
 node scripts/validate-devices.mjs      # 7 devices, 1 habilitado
-node tests/run-all.mjs                 # 474/474
+node tests/run-all.mjs                 # 486/486
 node scripts/list-devices.mjs --github-matrix
 ```
 
@@ -3868,7 +4110,7 @@ as duas correções (`uboot-patches/0001-…-adc-nao-fatal.patch` +
 
 ```bash
 cd /home/charles/Giochi/GIOCHI-SYSTEM
-node tests/run-all.mjs                                   # esperado: 474/474
+node tests/run-all.mjs                                   # esperado: 486/486
 git add device/r35s/README.md AGENTS.md
 git commit -m "r35s: o U-Boot mainline liga; a frase do README estava desatualizada
 

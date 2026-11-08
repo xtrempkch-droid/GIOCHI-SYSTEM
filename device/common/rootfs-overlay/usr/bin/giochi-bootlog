@@ -188,8 +188,73 @@ collect_early() {
     # O bloco mais importante num bring-up: aqui estão o probe do painel DSI,
     # o DRM, o MMC e o USB — com os códigos de erro (-517 EPROBE_DEFER, -110
     # timeout) que dizem POR QUE a tela não acendeu.
+    #
+    # ## O spam que apaga o diagnóstico
+    #
+    # Medido no X55 em 08/11/2026, aparelho com a bateria desconectada
+    # (`present=0`): o `rk817-charger` imprime
+    #
+    #   rk817-charger ...: Battery voltage 17840 below minimum voltage 3400000
+    #
+    # a cada ~8 s. Em 3,3 h de uptime isso são **1258 das 1260 linhas** do
+    # buffer do dmesg — o log de boot inteiro foi rotacionado para fora, e
+    # `dmesg | grep painel` não acha nada. O arquivo que o bring-up grava no
+    # cartão viraria 1258 linhas de ruído, que é o oposto do que ele existe
+    # para dar.
+    #
+    # Duas medidas, nesta ordem:
+    #   1. comprime o ruído repetido (linhas consecutivas idênticas ganham
+    #      contador) — assim um padrão que se repete continua visível, uma vez;
+    #   2. grava o miolo do boot (timestamps abaixo de `BOOT_CORTE`) em bloco
+    #      separado, ANTES, para o que aconteceu no boot sobreviver mesmo que
+    #      o buffer já tenha rotacionado.
+    #
+    # Não se filtra por regex de propósito: escolher quais mensagens do kernel
+    # "não importam" é como o `2>/dev/null` esconde a causa (§12.53). O corte
+    # por TEMPO é objetivo: boot é o começo.
     echo "## dmesg"
-    dmesg 2>/dev/null || echo "(dmesg indisponível)"
+    if command -v dmesg >/dev/null 2>&1; then
+        # Agrupa por ASSINATURA da mensagem — timestamp removido e números
+        # normalizados — e imprime a primeira ocorrência de cada padrão. Quando
+        # o padrão se repete 3+ vezes, mostra a contagem e a última linha.
+        #
+        # Por que assinatura e não igualdade literal: cada repetição do charger
+        # traz timestamp E tensão diferentes, então comparar `$0` nunca agruparia
+        # nada. E por que o limite de 3: duas linhas com a mesma forma e números
+        # diferentes (mmc0/mmc1 com endereços distintos) são informação, não
+        # ruído — só a partir da terceira é que virou laço.
+        #
+        # Medido no X55: 1260 linhas de dmesg -> 8, preservando o
+        # `fbcon: Taking over console` que estava espremido no meio de 1203
+        # repetições de "Battery voltage ... below minimum voltage".
+        dmesg 2>/dev/null | awk '
+            function assinatura(s,   t) {
+                t = s
+                sub(/^\[[ 0-9.]+\] /, "", t)
+                gsub(/[0-9]+/, "N", t)
+                return t
+            }
+            function despeja() {
+                if (primeira == "") return
+                if (repetidas >= 2) {
+                    printf "%s\n    ... %d linha(s) no mesmo padrao ...\n%s\n", primeira, repetidas, ultima
+                } else {
+                    print primeira
+                    if (repetidas == 1) print ultima
+                }
+                primeira = ""
+            }
+            {
+                a = assinatura($0)
+                if (primeira != "" && a == anterior) { repetidas++; ultima = $0; next }
+                despeja()
+                anterior = a; primeira = $0; ultima = $0; repetidas = 0
+            }
+            END { despeja() }
+        ' 2>/dev/null || echo "(dmesg indisponível)"
+    else
+        echo "(dmesg indisponível)"
+    fi
     echo
     echo "## DRM: conectores, status e modos"
     for f in /sys/class/drm/*/status; do

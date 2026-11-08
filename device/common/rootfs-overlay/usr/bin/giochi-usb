@@ -82,6 +82,57 @@ dispositivos_host() {
 
 mostrar_status() {
     papel="$(papel_atual)"
+
+    # Nem todo aparelho desta árvore tem `usb-role-switch`. A X55 tem
+    # `dr_mode = "otg"` no DTS e **nenhum** `/sys/class/usb_role/*`: o papel é
+    # fixo em tempo de device tree. Medido no X55 em 08/11/2026:
+    #
+    #   ls /sys/class/usb_role/          -> vazio
+    #   ls /sys/class/udc/               -> fcc00000.usb (state=configured)
+    #   giochi-usb --status              -> "papel desconhecido: o DTS tem
+    #                                         usb-role-switch?"
+    #
+    # num aparelho em que o USB funciona (é por ele que este SSH entra!). O
+    # aviso mandava procurar um nó de DTS que não falta: `role-switch` é
+    # recurso de quem ALTERNA o papel em runtime, não requisito.
+    #
+    # Quando não há role-switch, a resposta certa vem do UDC: se ele existe e
+    # está `configured`, o gadget está no ar e o modo é DEVICE — que é o canal
+    # de acesso padrão do sistema base.
+    if [ "$papel" = "indisponivel" ]; then
+        udc_encontrado=""
+        for u in /sys/class/udc/*; do
+            [ -d "$u" ] || continue
+            udc_encontrado="$(basename "$u")"
+            estado_udc="$(cat "$u/state" 2>/dev/null || echo '?')"
+            case "$estado_udc" in
+                configured)
+                    echo "papel da porta USB: DEVICE (fixo no DT, sem role-switch)"
+                    echo "  UDC $udc_encontrado: $estado_udc — gadget no ar"
+                    echo "  o papel não é alternável neste aparelho (--host/--device não se aplicam)"
+                    ;;
+                *)
+                    echo "papel da porta USB: DEVICE sem host conectado (fixo no DT)"
+                    echo "  UDC $udc_encontrado: $estado_udc"
+                    echo "  o papel não é alternável neste aparelho (sem usb-role-switch)"
+                    ;;
+            esac
+            break
+        done
+        if [ -z "$udc_encontrado" ]; then
+            echo "papel da porta USB: sem UDC e sem role-switch"
+            echo "  não há controlador de dispositivo: o gadget não pode subir"
+            echo "  (nem /sys/class/udc nem $ROLE_SWITCH_GLOB existem)"
+            return 0
+        fi
+        for i in /sys/class/net/usb0; do
+            [ -e "$i" ] || continue
+            addr="$(ip -o -4 addr show usb0 2>/dev/null | awk '{print $4}')"
+            echo "  usb0: ${addr:-(sem endereco)}"
+        done
+        return 0
+    fi
+
     echo "papel da porta USB: $papel"
 
     case "$papel" in
@@ -100,7 +151,7 @@ mostrar_status() {
             done
             ;;
         *)
-            echo "papel desconhecido: o DTS deste aparelho tem \`usb-role-switch\`?"
+            echo "papel desconhecido: $papel"
             echo "  procurando em $ROLE_SWITCH_GLOB"
             ;;
     esac

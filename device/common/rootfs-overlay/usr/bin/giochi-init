@@ -207,7 +207,7 @@ run_controller_setup() {
     fi
 }
 
-# O launcher NÃO nasce neste repositório: ele vem do Giochi app e entra na
+# O launcher NÃO nasce neste repositório: ele vem do Giochi App e entra na
 # imagem pelo Giochi os. Portanto existe uma janela — e talvez uma imagem
 # inteira — em que o giochi-init roda sem launcher.
 #
@@ -233,24 +233,89 @@ run_controller_setup() {
 # Se este script não estivesse aqui para decidir, o splash ficaria na tela para
 # sempre no caso sem launcher — que é o caso de TODA imagem desta árvore hoje.
 # ---------------------------------------------------------------
-stop_splash() {
-    [ -p /tmp/psplash_fifo ] || return 0
-    if command -v psplash-write >/dev/null 2>&1; then
-        psplash-write "QUIT" 2>/dev/null && log "splash encerrado"
-        return 0
-    fi
-    for p in $(pidof psplash 2>/dev/null); do
-        kill "$p" 2>/dev/null && log "splash encerrado (por sinal)"
+# Caminho do FIFO do psplash — e o defeito que custou 12017 segundos de splash.
+#
+# O `psplash` faz `chdir(rundir)` e cria `"psplash_fifo"`, RELATIVO
+# (`psplash.c`: `#define PSPLASH_FIFO "psplash_fifo"`). O `rundir` é
+# `$PSPLASH_FIFO_DIR` quando existe e **`/run`** quando não existe:
+#
+#     rundir = getenv("PSPLASH_FIFO_DIR");
+#     if (!rundir) rundir = "/run";
+#
+# A versão anterior testava `/tmp/psplash_fifo` e retornava 0 quando não
+# achava — então `stop_splash` NUNCA fez nada. Medido no X55 em 08/11/2026:
+# o psplash estava vivo desde 1,7 s de uptime e o `uptime` marcava 12017 s,
+# ainda segurando `/dev/fb0` aberto ao lado do launcher.
+psplash_fifo() {
+    for _f in "${PSPLASH_FIFO_DIR:-/run}/psplash_fifo" /run/psplash_fifo /tmp/psplash_fifo; do
+        [ -p "$_f" ] && { printf '%s' "$_f"; return 0; }
     done
+    return 1
+}
+
+stop_splash() {
+    # `psplash-write` acerta o caminho sozinho (faz o mesmo chdir), então a
+    # ordem é: tenta o QUIT; se não houver FIFO ou o QUIT falhar, mata pelo PID.
+    # O kill NÃO pode ser o caminho de exceção: um QUIT que "deu certo" num FIFO
+    # sem leitor deixa o processo vivo e o log dizendo "encerrado".
+    if psplash_fifo >/dev/null && command -v psplash-write >/dev/null 2>&1; then
+        psplash-write "QUIT" 2>/dev/null
+    fi
+    # Espera o processo sair antes de decidir que falhou: o QUIT é assíncrono.
+    i=0
+    while [ "$i" -lt 10 ] && pidof psplash >/dev/null 2>&1; do
+        sleep 0.1
+        i=$((i + 1))
+    done
+    if pidof psplash >/dev/null 2>&1; then
+        for p in $(pidof psplash 2>/dev/null); do
+            kill "$p" 2>/dev/null
+        done
+        log "splash encerrado por sinal (o QUIT não chegou)"
+    elif [ "$i" -gt 0 ]; then
+        log "splash encerrado (QUIT)"
+    fi
+    return 0
+}
+
+# O console de TEXTO do aparelho, e por que ele precisa de um empurrão.
+#
+# Os três aparelhos têm `CONFIG_FRAMEBUFFER_CONSOLE_DEFERRED_TAKEOVER=y`, que
+# existe por um motivo bom: sem ele o fbcon pinta a tela de preto assim que o
+# framebuffer aparece, apagando o que o U-Boot deixou, e o psplash só chega
+# segundos depois — a janela preta no meio do boot faz o usuário achar que
+# travou.
+#
+# O custo é que o fbcon NÃO assume o console virtual até alguém escrever nele.
+# E o getty deste sistema está em `console` = ttyS2 (serial), não em tty0:
+# ninguém escreve no tty0, então o console gráfico NUNCA existe. Medido no X55
+# em 08/11/2026:
+#
+#   /sys/class/vtconsole/vtcon0/name -> (S) dummy device     (só isso)
+#   stty size < /dev/tty0            -> 25 80                (geometria default)
+#   /sys/class/graphics/fbcon/rotate -> 0                    (o WARN do selftest)
+#
+# E depois de UMA linha escrita em /dev/tty0:
+#
+#   vtcon1 -> (M) frame buffer device ; stty size -> 45 160 ; fbcon/rotate -> 3
+#
+# Ou seja: a configuração do kernel está certa (`ROTATION=y`, `fbcon=rotate:3`);
+# faltava o gatilho. Sem ele, um aparelho sem launcher fica com a tela parada no
+# último quadro — indistinguível de "não ligou" (§12.45).
+assumir_console() {
+    for _t in /dev/tty0 /dev/tty1; do
+        [ -w "$_t" ] || continue
+        printf '\n' >"$_t" 2>/dev/null && { log "console de texto assumido em $_t"; return 0; }
+    done
+    log "AVISO: nenhum tty0/tty1 gravável — console de texto na tela fica sem o fbcon"
     return 0
 }
 
 wait_for_launcher() {
-    # Sem launcher, o console É a interface: tira o splash para o getty aparecer.
-    # Sem isto, a imagem fica com o logo na tela e ninguém vê o login — e como o
-    # getty escreve no ttyS2, quem está na serial vê tudo e quem olha a tela não
-    # vê nada. Assimetria que custa tempo para diagnosticar.
+    # Sem launcher, o console É a interface: tira o splash e força o fbcon a
+    # assumir, senão a tela fica no último quadro do splash para sempre.
     stop_splash
+    assumir_console
     log "launcher ausente ainda: $LAUNCHER"
     log "esperando aparecer; verifico a cada ${LAUNCHER_WAIT}s (sem inundar o console)"
     while [ ! -x "$LAUNCHER" ]; do
@@ -276,6 +341,11 @@ main() {
             if [ "$dev_aviso" != "1" ]; then
                 log "console livre para desenvolvimento ($DEV_FREE_FILE) — launcher NÃO será iniciado"
                 log "remova o arquivo para voltar ao normal"
+                # Aqui o console É a interface: sem o fbcon assumir, a flag de
+                # desenvolvimento entrega uma tela parada — o oposto do que ela
+                # existe para dar. Uma vez só, não a cada volta.
+                stop_splash
+                assumir_console
                 dev_aviso=1
             fi
             sleep 5
