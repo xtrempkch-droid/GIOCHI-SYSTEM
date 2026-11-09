@@ -371,6 +371,19 @@ framebuffer[46]:
 
 `/sys/kernel/debug/dri/0/clients` lista `master: y` durante a execução.
 
+> **Monte o debugfs antes, senão a prova "não existe".** Medido no R35S em
+> 08/11/2026: a imagem **não** monta `/sys/kernel/debug`. Sem ele,
+> `/sys/kernel/debug/dri/*/clients` não devolve nada e `ls` responde
+> `No such file or directory` — e a conclusão errada é "o launcher não é master"
+> num aparelho onde ele é. Ferramenta ausente lida como dado ausente é o §12.30.
+>
+> ```sh
+> mount -t debugfs none /sys/kernel/debug
+> ```
+>
+> Depois de medir, `umount /sys/kernel/debug`. Isto é procedimento de bancada,
+> não algo que a imagem faça no boot.
+
 **Confirmado a olho, pelo dono do aparelho:** o exemplo `hello_rect` ficou na
 tela como **fundo azul com um quadrado se movendo** — que é exatamente o que ele
 desenha (`clear(28,72,150)` + retângulo vermelho em órbita). Sem essa confirmação

@@ -3389,13 +3389,33 @@ uptime 3571 s ; psplash pid 105 starttime 176 (= 1,76 s depois do boot)
   fds em /dev/fb0: 1
 /run/psplash_fifo : prw-r-----  (existe)
 /tmp/psplash_fifo : No such file or directory
-launcher DRM master: nenhum      <- a sessão inteira rodou com o splash na frente
 ```
 
-Ou seja: o splash ficou ~59 min na tela e o launcher, quando subiu, não era o
-master do `card0`. É o mesmo defeito, com outro SoC (RK3326) e outro painel
-(640x480) — o que se espera de código comum, e é a razão de a correção estar em
-`S01splash`/`giochi-init` e não no aparelho.
+**E a correção de uma afirmação errada que eu tinha escrito aqui**, porque é o
+mesmo defeito que esta seção investiga: eu relatei "o launcher não era DRM
+master". Era falso. O `debugfs` **não está montado** neste aparelho, então
+`/sys/kernel/debug/dri/*/clients` devolvia vazio — ferramenta ausente lida como
+dado ausente, a armadilha do §12.30 e do §12.55. Com o debugfs montado:
+
+```text
+-- /sys/kernel/debug/dri/0/
+             command  tgid dev master a   uid      magic
+     giochi-launcher  4772   0   y    y     0          0
+```
+
+O launcher **é** master, com 6 fds em `/dev/dri`. O custo real do splash preso é
+menor e por isso ninguém notou, medido depois de ~2 h de uptime (7167 s):
+
+| Medida | Valor |
+| --- | --- |
+| psplash vivo | desde `starttime` 176 (= 1,76 s) até 7167 s |
+| RSS do psplash | **2040 kB** (2 MB de 1 GB) |
+| fd em `/dev/fb0` aberto | 1, a sessão inteira |
+| launcher | `master y`, 6 fds em `/dev/dri`, desenhando |
+
+Ou seja: não é tela preta — é um processo e um fd vazando por sessão, num
+aparelho de 1 GB. Continua valendo corrigir (é lixo que não sai), mas o texto
+tem de dizer o que foi medido, não o que eu supus.
 
 #### Defeito B — o console de texto nunca existia, e o Kconfig estava certo
 
