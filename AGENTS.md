@@ -3342,7 +3342,7 @@ o kernel **sem `depmod`** estavam na imagem que bootou, e `modprobe` resolvendo
 para o applet do busybox é a diferença entre "carrega o módulo" e "carrega e não
 sabe das dependências".
 
-#### Defeito A — o splash nunca saía, e o caminho estava errado em três arquivos
+#### Defeito A — o splash nunca saía: o caminho errado era inofensivo onde havia `kill`, e fatal onde era a única porta
 
 `psplash.c` faz:
 
@@ -3358,14 +3358,31 @@ O FIFO real é **`/run/psplash_fifo`**. O nosso código testava
 `giochi-init`), e `/tmp` **nunca** tem o arquivo. Consequência medida:
 
 ```text
-$ ps  (via /proc, §12.46)
 psplash  starttime 1.68s   uptime 12017s   fds em /dev/fb0: 1
 ```
 
-O `stop_splash` do `giochi-init` começava com `[ -p /tmp/psplash_fifo ] || return 0`
-e **retornava sempre** — o splash ficou 3h20 na tela, segurando `/dev/fb0`, ao
-lado do launcher. E o `S01splash` imprimia a cada boot um aviso sobre a
-ferramenta ("psplash não criou o FIFO"), não sobre o splash.
+**A atribuição, medida com cuidado no R35S (imagem `12b431d`) porque a diferença
+muda onde está a correção:** o `stop` do `S01splash` **funcionava** — o
+`[ -p /tmp/psplash_fifo ]` guardava só o `QUIT`, e o `kill` vinha incondicional
+depois. Rodando-o no aparelho com o splash vivo há 2 h, ele mata o processo. O
+problema é que **ninguém o chama no boot**: `/etc/init.d/S01splash stop` só é
+executado no **desligamento**, pelo laço genérico do `rcK` (`ls -r S??*` →
+`$i stop`). Durante a sessão inteira, ninguém o invoca.
+
+Quem deveria encerrar o splash é o `stop_splash()` do `giochi-init`, antes do
+launcher — e esse sim era um no-op puro:
+
+```sh
+stop_splash() {
+    [ -p /tmp/psplash_fifo ] || return 0     # <- retorna SEMPRE, antes do QUIT e do kill
+    ...
+}
+```
+
+Ou seja: o `[ -p ]` no caminho errado existia em dois lugares com consequências
+diferentes — inofensivo onde havia `kill` de reserva, e fatal onde era a única
+porta de entrada. O aviso do `S01splash` ("psplash rodando mas sem fifo") também
+apontava para a ferramenta, não para o splash.
 
 Verificado no aparelho depois da correção, com o `S01splash` novo:
 
