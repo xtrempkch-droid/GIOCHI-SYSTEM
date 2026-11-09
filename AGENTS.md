@@ -1,7 +1,7 @@
 # AGENTS.md — Giochi System
 
 > Handoff técnico do repositório. Leia antes de continuar o trabalho.
-> Atualizado em: 08/11/2026 (revisão 8 — **auditoria em três passadas + uma no aparelho**. Vinte e um defeitos encontrados, todos do tipo "verde e errado", e todos
+> Atualizado em: 08/11/2026 (revisão 8 — **auditoria em três passadas + uma no aparelho**. Vinte e três defeitos encontrados, todos do tipo "verde e errado", e todos
 > com teste que os prende. Os mais graves: o gate do harfbuzz **nunca disparou**
 > (dependia de variável `BR2_*` que o Buildroot não exporta ao post-build); um
 > patch de kernel ausente matava o build **sem imprimir nada**; **dois dos três
@@ -83,7 +83,7 @@ Repositório: `https://github.com/xtrempkch-droid/GIOCHI-SYSTEM` — branch `mai
 
 | Verificação | Resultado |
 | --- | --- |
-| `node tests/run-all.mjs` | **509/509** (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, devices 13, assert-config 12, fdt 11, gpu-bench 16, …) |
+| `node tests/run-all.mjs` | **510/510** (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, devices 13, assert-config 12, fdt 11, gpu-bench 16, …) |
 | `node scripts/validate-devices.mjs` | OK — 7 devices, 1 habilitado |
 | `node scripts/list-devices.mjs --github-matrix` | matriz com `qemu-aarch64` |
 | matriz com `--device powkiddy-x55 --allow-draft` | devolve **só** o X55 |
@@ -445,7 +445,7 @@ si (§12.4), mas provavelmente **não** era a causa dos 3 s.
 
 ```bash
 node scripts/validate-devices.mjs
-node tests/run-all.mjs                          # 509 testes
+node tests/run-all.mjs                          # 510 testes
 node scripts/list-devices.mjs
 node scripts/list-devices.mjs --github-matrix
 node scripts/list-devices.mjs --github-matrix --device powkiddy-x55 --allow-draft
@@ -489,7 +489,7 @@ absoluto** do host — §12.40).
 
 ## 10. Testes
 
-`node tests/run-all.mjs` → **509/509**, em **56 arquivos**. A tabela abaixo é uma
+`node tests/run-all.mjs` → **510/510**, em **56 arquivos**. A tabela abaixo é uma
 seleção dos que prendem contratos de projeto; a lista completa é `ls tests/` e
 `tests/runner-coverage.test.mjs` **falha** se algum arquivo existir sem estar
 importado no `run-all.mjs` — foi assim que dois testes desta revisão quase
@@ -3847,6 +3847,94 @@ vez do que fez. O script *dizia* 350 ms; o binário tocava 1500. E o `r35s`
 cravalo fazia o script compilar "com sucesso" para o aparelho errado. Nenhum dos
 dois produzia mensagem de erro.
 
+### 12.62-C O segundo aparelho: dois avisos que estavam certos no fato e errados no veredito
+
+Depois da quarta passada, o endereço `10.55.0.2` passou a servir um **R35S** com
+imagem construída por outra sessão (`12b431d`, 07/11/2026). Rodar o selftest
+corrigido nele deu `PASS 39 · WARN 2`, e os dois WARNs eram falsos — os dois pelo
+mesmo defeito de método: **o teste perguntou pela existência, e a pergunta que
+importa é pela consequência** (§12.30, §12.34, §12.46, §12.51).
+
+#### O `model` — confirmado como falso positivo em outro SoC
+
+```text
+[WARN] model "Game Console R36S" não corresponde ao compatible
+compatible -> gameconsole,r35s gameconsole,r36s rockchip,rk3326
+model      -> Game Console R36S
+```
+
+Normalizado, `gameconsoler36s` **está** dentro do `compatible`: são o mesmo
+aparelho escrito em duas convenções. Com o `_norm` da quarta passada, o aviso
+sumiu — e o R35S é outro SoC (RK3326), outra família de DTS e outro painel, o
+que fecha a correção como sendo da regra, não do aparelho.
+
+#### `sem hwrng` — o nó que o SoC não tem
+
+```text
+[WARN] sem hwrng — crng pode demorar; ver nó &rng no DTS
+dmesg:   [    1.758725] random: crng init done
+entropy_avail: 256
+```
+
+O aviso estava factual (não há `/dev/hwrng`) e a recomendação era **impossível de
+seguir**: `rk3326.dtsi` é literalmente um `#include "px30.dtsi"`, e **nenhum dos
+dois declara nó de rng ou crypto** no mainline (conferido no fonte do v6.12). O
+`&rng` que nasce `disabled` e precisa de patch é o do `rk356x.dtsi` da **X55** —
+o aviso mandava procurar o defeito de outro aparelho, num aparelho que não tem o
+nó. E enquanto isso a entropia estava pronta em **1,76 s**.
+
+A medida passou a ser a consequência: quando o `crng` ficou pronto, lido do
+dmesg. O `hwrng` virou informação de apoio (`crng init em 1s, hwrng nenhum`).
+
+| Estado | Veredito |
+| --- | --- |
+| `crng init` ≤ 5 s | **PASS** — é o que importa; o `sshd` não espera |
+| `crng init` tarde | **WARN** — com o tempo, porque é acionável (§3: 11,7 s no primeiro boot) |
+| nó de rng no DT, sem `/dev/hwrng` | **WARN** — falta `CONFIG_HW_RANDOM` ou o driver do SoC |
+| sem dmesg e sem nó | **WARN** dizendo "este SoC não declara TRNG" — não dá para afirmar que está ruim |
+| hwrng ativo, dmesg rotacionado | **PASS** — o registro positivo ainda vale |
+
+#### `console de texto NÃO está na tela` — o estado correto tratado como defeito
+
+Este aviso nasceu na quarta passada, para separar "fbcon não assumiu" de
+"`CONFIG_ROTATION` desligado". No R35S ele apareceu com o **launcher rodando e
+desenhando**:
+
+```text
+pidof giochi-launcher -> 4772
+/sys/class/vtconsole/vtcon*/name -> (S) dummy device     (só)
+```
+
+Com o launcher dono do DRM master, **um console de texto por cima seria o
+defeito**. A pergunta certa não é "o fbcon assumiu?", é "há algo desenhando na
+tela?" — e a resposta depende de quem deveria estar lá:
+
+| Quem é a interface | fbcon fora da tela | Veredito |
+| --- | --- | --- |
+| launcher rodando | esperado | **PASS** (com o motivo escrito) |
+| launcher instalado, parado | nada desenha | **WARN** — tela parada, §12.45 |
+| sem launcher | o console É a interface | **WARN** — é o caso que o `assumir_console` do `giochi-init` corrige |
+
+Antes/depois no mesmo aparelho, mesma imagem (`12b431d`), rodando o script a
+partir de `/tmp`:
+
+```text
+imagem:            PASS 39 · WARN 2 · FAIL 0 · SKIP 4
+corrigido:         PASS 41 · WARN 0 · FAIL 0 · SKIP 3
+```
+
+O `SKIP` que virou `PASS` é o do `evtest`, por diferença de contagem entre as
+duas versões do script; o que interessa é `WARN 2 → 0` com os dois motivos
+nomeados.
+
+#### O padrão, escrito de novo porque já é a quinta vez
+
+Um WARN que não pode ser seguido é pior que nenhum: ele ensina o operador a
+ignorar o bloco inteiro (§12.22, §12.34). Antes de escrever o aviso, a pergunta
+é sempre a mesma — **qual é a consequência, e ela pode ser medida agora?** Aqui:
+"o crng ficou pronto a tempo?" e "há algo desenhando na tela?". As duas cabiam no
+`/proc` e no `dmesg` deste aparelho.
+
 ## 13. Aparelhos
 
 | ID | Pasta | SoC | Arch | Status | Falta |
@@ -4209,7 +4297,7 @@ o cartão — não só no `target/`.
 
 | Item | Estado |
 | --- | --- |
-| Código e configuração | **pronto** — 509/509 testes |
+| Código e configuração | **pronto** — 510/510 testes |
 | Imagem X55 (`Image` + `rootfs.ext4` + DTB + bootloader) | **existe** em `out/powkiddy-x55/`, `built_at_utc=2026-11-04T21:05:13Z` |
 | `/etc/inittab` na imagem | **linha 30: `::respawn:/usr/bin/giochi-init`** — conferida com `debugfs` no `rootfs.ext4` |
 | `work/` do X55 | preservado em `~/.cache/giochi-system/work/powkiddy-x55` (17 GB, já com `target/` finalizado) |
@@ -4350,7 +4438,7 @@ Ordem sugerida para a próxima sessão (nada aqui precisa da X55):
 
 ```bash
 node scripts/validate-devices.mjs      # 7 devices, 1 habilitado
-node tests/run-all.mjs                 # 509/509
+node tests/run-all.mjs                 # 510/510
 node scripts/list-devices.mjs --github-matrix
 ```
 
@@ -4416,7 +4504,7 @@ as duas correções (`uboot-patches/0001-…-adc-nao-fatal.patch` +
 
 ```bash
 cd /home/charles/Giochi/GIOCHI-SYSTEM
-node tests/run-all.mjs                                   # esperado: 509/509
+node tests/run-all.mjs                                   # esperado: 510/510
 git add device/r35s/README.md AGENTS.md
 git commit -m "r35s: o U-Boot mainline liga; a frase do README estava desatualizada
 

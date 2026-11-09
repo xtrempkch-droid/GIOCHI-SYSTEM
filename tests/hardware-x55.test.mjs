@@ -125,7 +125,7 @@ test("o aviso de rotação distingue fbcon ausente de rotação desligada", () =
   const bloco = texto.slice(ini, fim);
   assert.match(bloco, /FBCON_ATIVO/, "o selftest tem de olhar o vtconsole");
 
-  const rodar = ({ vtcons, rotate, modo }) => {
+  const rodar = ({ vtcons, rotate, modo, launcherRodando = false }) => {
     const dir = mkdtempSync(path.join(tmpdir(), "rot-"));
     mkdirSync(path.join(dir, "vtconsole"), { recursive: true });
     vtcons.forEach((nome, i) => {
@@ -150,6 +150,7 @@ test("o aviso de rotação distingue fbcon ausente de rotação desligada", () =
 dmesg() { echo "[    1.1] Console: switching to colour frame buffer device 160x45"; }
 pass() { echo "PASS $*"; }
 warn() { echo "WARN $*"; }
+pidof() { ${launcherRodando ? "return 0" : "return 1"}; }
 ${b}
 `;
     const saida = run(script);
@@ -159,9 +160,27 @@ ${b}
 
   // 1) O estado medido na X55 antes do gatilho: fbcon/rotate existe (=0), o
   //    vtconsole só tem o dummy, e o painel é retrato. A causa NÃO é o Kconfig.
+  //    Sem launcher, isso é defeito de verdade: nada desenha na tela.
   const antes = rodar({ vtcons: ["(S) dummy device"], rotate: 0, modo: "720x1280" });
   assert.match(antes, /WARN .*NÃO está na tela/, `saída inesperada: ${antes}`);
+  assert.match(antes, /NÃO há launcher rodando/, "o aviso tem de dizer por que é defeito");
   assert.ok(!/CONFIG_FRAMEBUFFER_CONSOLE/.test(antes), "não pode culpar o Kconfig, que está certo");
+
+  // 1b) O caso medido no R35S: MESMO sysfs, launcher rodando e desenhando. Aqui
+  //     o console fora da tela é o estado correto — um console por cima do
+  //     launcher é que seria o defeito. Era este que saía como WARN.
+  const comLauncher = rodar({
+    vtcons: ["(S) dummy device"],
+    rotate: 0,
+    modo: "640x480",
+    launcherRodando: true,
+  });
+  assert.match(
+    comLauncher,
+    /PASS console de texto fora da tela — o launcher é a interface/,
+    `saída inesperada: ${comLauncher}`,
+  );
+  assert.ok(!/WARN/.test(comLauncher), "com launcher desenhando não pode avisar");
 
   // 2) Depois do `echo >/dev/tty0`: fbcon assumiu (M) e a rotação aparece.
   const depois = rodar({
@@ -204,4 +223,72 @@ test("giochi-usb sabe responder sem usb-role-switch", () => {
   assert.match(usb, /\/sys\/class\/udc/, "sem role-switch, a resposta vem do UDC");
   assert.match(usb, /fixo no DT, sem role-switch/, "e o texto tem de dizer isso");
   assert.match(usb, /--host\/--device não se aplicam/, "inclusive que não é alternável");
+});
+
+// ── o que o SEGUNDO aparelho desmentiu (R35S, 08/11/2026) ──────────────────
+//
+// Com o `_norm` e o `present` corrigidos, o selftest no R35S ainda dava
+// `PASS 39 · WARN 2` — e os dois WARNs eram falsos. Um deles apontava para um
+// nó de DT que a família não tem; o outro tratava como defeito o estado correto.
+
+test("o aviso de entropia pergunta pelo crng, não pela existência de hwrng", () => {
+  // Medido no R35S com a imagem 12b431d:
+  //
+  //   [WARN] sem hwrng — crng pode demorar; ver nó &rng no DTS
+  //   dmesg: [1.758725] random: crng init done
+  //   entropy_avail = 256
+  //
+  // O RK3326 não tem TRNG no mainline: `rk3326.dtsi` é include de `px30.dtsi`,
+  // e nenhum dos dois declara rng/crypto (fonte do v6.12). O aviso mandava
+  // procurar o `&rng` do `rk356x.dtsi` da X55 num aparelho que não tem o nó.
+  const ini = texto.indexOf('head2 "entropia"');
+  assert.ok(ini > 0, "a seção de entropia sumiu");
+  const fim = texto.indexOf("# ── ", texto.indexOf("este SoC não declara TRNG"));
+  const bloco = texto.slice(ini, fim);
+
+  const rodar = ({ dmesg, rng = "", temNoRng = false }) => {
+    const dir = mkdtempSync(path.join(tmpdir(), "ent-"));
+    mkdirSync(path.join(dir, "device-tree"), { recursive: true });
+    if (temNoRng) mkdirSync(path.join(dir, "device-tree", "rng@ff0f0000"), { recursive: true });
+    const script = `
+dmesg() { ${dmesg ? `printf '%s\\n' "${dmesg}"` : ":"}; }
+head2() { :; }
+pass() { echo "PASS $*"; }
+warn() { echo "WARN $*"; }
+skip() { echo "SKIP $*"; }
+read_or() { if [ -r "$1" ]; then cat "$1" 2>/dev/null; fi; }
+${bloco
+  .replaceAll("/sys/class/misc/hw_random/rng_current", path.join(dir, "rng_current"))
+  .replaceAll("/proc/device-tree", path.join(dir, "device-tree"))}
+`;
+    if (rng) writeFileSync(path.join(dir, "rng_current"), `${rng}\n`);
+    const saida = run(script);
+    rmSync(dir, { recursive: true, force: true });
+    return saida;
+  };
+
+  // 1) O estado real do R35S: sem hwrng e com crng pronto em 1,7 s. Era isto que
+  //    saía como WARN, mandando procurar um nó inexistente.
+  const r35s = rodar({ dmesg: "[    1.758725] random: crng init done" });
+  assert.match(r35s, /PASS entropia pronta: crng init em 1s/, `saída inesperada: ${r35s}`);
+  assert.ok(!/WARN/.test(r35s), "aparelho com crng pronto não pode avisar");
+
+  // 2) O caso que o aviso existe para pegar: crng tarde. O sshd espera, e no
+  //    relato do §3 a primeira conexão levou ~11,7 s.
+  const tarde = rodar({ dmesg: "[   11.702771] random: crng init done" });
+  assert.match(tarde, /WARN .*crng init só em 11s/, `saída inesperada: ${tarde}`);
+
+  // 3) Nó de rng no DT sem dispositivo: aqui o WARN é acionável de verdade —
+  //    falta CONFIG_HW_RANDOM ou o driver do SoC.
+  const semDriver = rodar({ dmesg: "", temNoRng: true });
+  assert.match(semDriver, /WARN .*CONFIG_HW_RANDOM/, `saída inesperada: ${semDriver}`);
+
+  // 4) Sem dmesg e sem nó: não dá para afirmar que está ruim — e o texto tem de
+  //    dizer isso, em vez de culpar um DTS que não tem o que corrigir.
+  const naoMedido = rodar({ dmesg: "" });
+  assert.match(naoMedido, /WARN .*este SoC não declara TRNG/, `saída inesperada: ${naoMedido}`);
+
+  // 5) Com hwrng ativo e dmesg rotacionado, o registro positivo ainda vale.
+  const comRng = rodar({ dmesg: "", rng: "rk-crypto-rng" });
+  assert.match(comRng, /PASS hwrng.*rk-crypto-rng/, `saída inesperada: ${comRng}`);
 });

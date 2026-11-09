@@ -95,14 +95,48 @@ else
 fi
 
 # ── entropia ─────────────────────────────────────────────────
-# Sem TRNG o crng inicializa tarde e getrandom() bloqueia. Já medido em 11 s
-# num boot e 1024 s em outro.
+# A pergunta é "o crng ficou pronto a tempo?", não "existe /dev/hwrng?". Medido
+# no R35S em 08/11/2026, com a imagem 12b431d:
+#
+#   [WARN] sem hwrng — crng pode demorar; ver nó &rng no DTS
+#   dmesg: [1.758725] random: crng init done
+#   /proc/sys/kernel/random/entropy_avail -> 256
+#
+# Ou seja: o aviso estava ERRADO e era inacionável. O RK3326 não tem TRNG na
+# descrição mainline — `rk3326.dtsi` é um include de `px30.dtsi`, e nenhum dos
+# dois declara nó de rng/crypto (conferido no fonte do v6.12). "Ver nó &rng no
+# DTS" mandava procurar em outro aparelho: o `&rng` existe no `rk356x.dtsi` da
+# X55, e lá sim ele nasce `disabled` e precisa do patch.
+#
+# Então a medida passou a ser a CONSEQUÊNCIA (quando o crng ficou pronto, lida do
+# dmesg), com o hwrng como informação de apoio. Aviso só quando o crng demora —
+# que é a única situação em que o operador tem o que fazer (ligar o driver do
+# TRNG que existe, ou esperar mais no boot).
 head2 "entropia"
+CRNG_SEG=$(dmesg 2>/dev/null | sed -n 's/^\[[[:space:]]*\([0-9][0-9]*\)\..*random: crng init done.*/\1/p' | head -n 1)
 RNG="$(read_or /sys/class/misc/hw_random/rng_current)"
-if [ -n "$RNG" ] && [ "$RNG" != "none" ]; then
-    pass "hwrng: $RNG"
+RNG_OK=""
+[ -n "$RNG" ] && [ "$RNG" != "none" ] && RNG_OK=", hwrng $RNG"
+if [ -n "$CRNG_SEG" ]; then
+    # 5 s é generoso: o sshd é o primeiro a pedir getrandom() e ele espera o crng.
+    # Medido: X55 0,53 s (com o patch de &rng), R35S 1,76 s (sem TRNG nenhum).
+    if [ "$CRNG_SEG" -le 5 ]; then
+        pass "entropia pronta: crng init em ${CRNG_SEG}s${RNG_OK}"
+    else
+        warn "crng init só em ${CRNG_SEG}s${RNG_OK:- e sem hwrng} — getrandom() bloqueia até lá (sshd espera)"
+    fi
+elif [ -n "$RNG_OK" ]; then
+    # Sem a linha do dmesg (buffer rotacionado) mas com TRNG ativo: o registro
+    # positivo ainda vale.
+    pass "hwrng${RNG_OK}"
 else
-    warn "sem hwrng — crng pode demorar; ver nó &rng no DTS"
+    # Nenhuma das duas provas. Aqui o aviso é diferente do de cima de propósito:
+    # não dá para afirmar que a entropia está ruim, só que não foi medida.
+    if ls /proc/device-tree/*rng* >/dev/null 2>&1; then
+        warn "nó de rng no DT mas nenhum /dev/hwrng — falta CONFIG_HW_RANDOM ou o driver do SoC"
+    else
+        warn "entropia não medida (dmesg sem 'crng init done') e sem hwrng — este SoC não declara TRNG"
+    fi
 fi
 
 # ── armazenamento ────────────────────────────────────────────
@@ -237,11 +271,26 @@ for _v in /sys/class/vtconsole/vtcon*/name; do
     esac
 done
 
+# Quem DEVE estar na tela. MEDIDO NO R35S (08/11/2026, imagem 12b431d), com o
+# launcher rodando e desenhando: vtconsole só com `(S) dummy device`, e o
+# selftest avisava "console de texto NÃO está na tela". O aviso estava factual e
+# o veredito errado — com o launcher dono do DRM master, um console de texto por
+# cima seria o DEFEITO. A pergunta certa é "há algo desenhando na tela?", não
+# "o fbcon assumiu?":
+#
+#   launcher rodando        -> fbcon fora da tela é o esperado
+#   launcher ausente/parado -> o console É a interface; fbcon fora é defeito
+#                              (tela parada, §12.45)
+LAUNCHER_RODANDO=0
+pidof giochi-launcher >/dev/null 2>&1 && LAUNCHER_RODANDO=1
+
 if [ -n "$FBCON_ROT" ]; then
     # 90x80 = 720/8 por 1280/16: retrato nativo, rotação não aplicada.
     GEOM=$(dmesg 2>/dev/null | sed -n 's/.*frame buffer device \([0-9]*x[0-9]*\).*/\1/p' | head -n 1)
-    if [ "$FBCON_ATIVO" -eq 0 ]; then
-        warn "console de texto NÃO está na tela — o fbcon não assumiu (DEFERRED_TAKEOVER espera alguém escrever em /dev/tty0); rotação não se aplica a um console que não aparece"
+    if [ "$FBCON_ATIVO" -eq 0 ] && [ "$LAUNCHER_RODANDO" -eq 1 ]; then
+        pass "console de texto fora da tela — o launcher é a interface (esperado)"
+    elif [ "$FBCON_ATIVO" -eq 0 ]; then
+        warn "console de texto NÃO está na tela e NÃO há launcher rodando — nada desenha: o fbcon não assumiu (DEFERRED_TAKEOVER espera alguém escrever em /dev/tty0), e o giochi-init faz esse empurrão quando não há launcher"
     else
         case "$DRM_MODE" in
             720x1280)
