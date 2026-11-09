@@ -376,3 +376,25 @@ test("o build não apaga o artefato anterior antes de compilar", () => {
     "a limpeza de out/ voltou para antes do make: um build que falha apaga a imagem boa",
   );
 });
+
+test("o commit do build é capturado UMA vez, e vale para os dois arquivos", () => {
+  // Defeito medido em 09/11/2026, no R35S: o `out/<device>/build-info.txt`
+  // refazia `git rev-parse HEAD` no FIM do build. Num build de 90 minutos o
+  // repositório mudou no meio, e o resultado foi imagem dizendo
+  // `commit=3fcba15` (as fontes) e artefato dizendo `commit=c72644b` (o HEAD
+  // do fim). O artefato é justamente o que responde "de onde veio esta imagem".
+  const src = readFileSync(new URL("../scripts/build-device.sh", import.meta.url), "utf8");
+
+  assert.match(src, /BUILD_COMMIT="\$\{GITHUB_SHA:-\$\(git/, "commit tem de ser capturado uma vez");
+  assert.match(src, /BUILD_AT_UTC=/);
+
+  // E os dois usos têm de apontar para as variáveis, não refazer a consulta.
+  const ocorrencias = src.match(/git -C "\$ROOT" rev-parse HEAD/g) || [];
+  assert.equal(ocorrencias.length, 2,
+    "só duas chamadas a rev-parse: a do início e a do aviso de mudança no meio");
+
+  // O aviso existe porque imagem híbrida não pode sair em silêncio.
+  assert.match(src, /mudou DURANTE o build|mudou DURANTE o build/);
+  assert.ok(/AVISO: o reposit.rio mudou DURANTE o build/.test(src),
+    "tem de avisar quando a árvore muda no meio do build");
+});

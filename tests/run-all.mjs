@@ -37,6 +37,7 @@ import "./gpu-bench.test.mjs";
 import "./audio-alerta.test.mjs";
 import "./device-r35s-port.test.mjs";
 import "./build-device-vars.test.mjs";
+import "./sha256sums.test.mjs";
 import "./rk3326-legacy-boot.test.mjs";
 import "./joypad-driver.test.mjs";
 import "./bootsplash.test.mjs";

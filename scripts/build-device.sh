@@ -870,6 +870,16 @@ fi
 # O piso tem de vir do build, não de um número escrito à mão que envelhece.
 # Exportado (não argumento) porque é o Buildroot quem chama o post-build, com só
 # TARGET_DIR e BINARIES_DIR.
+#
+# O commit e o instante são capturados UMA VEZ, aqui, e reaproveitados tanto no
+# arquivo que vai para dentro da imagem quanto no `out/<device>/build-info.txt`.
+# Antes, o de `out/` refazia `git rev-parse HEAD` no FIM do build — e num build
+# de 90 minutos o repositório pode mudar no meio. Medido em 09/11/2026 no R35S:
+# a imagem dizia `commit=3fcba15` (as fontes usadas) e o artefato dizia
+# `commit=c72644b` (o HEAD de quando o build terminou). O artefato é justamente
+# o que se usa para saber de onde a imagem veio — ele não pode ser o que muda.
+BUILD_COMMIT="${GITHUB_SHA:-$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo local)}"
+BUILD_AT_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 GIOCHI_BUILD_INFO_LINHAS="$(printf '%s\n' \
   "name=Giochi System" \
   "device=$DEVICE_ID" \
@@ -877,8 +887,8 @@ GIOCHI_BUILD_INFO_LINHAS="$(printf '%s\n' \
   "arch=$DEVICE_ARCH" \
   "buildroot=$BUILDROOT_VERSION" \
   "version=${GIOCHI_SYSTEM_VERSION:-local}" \
-  "commit=${GITHUB_SHA:-$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo local)}" \
-  "built_at_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)")"
+  "commit=$BUILD_COMMIT" \
+  "built_at_utc=$BUILD_AT_UTC")"
 export GIOCHI_BUILD_INFO_LINHAS
 
 echo "Compilando com $JOBS job(s). O log fica em $LOG_FILE..."
@@ -1276,19 +1286,50 @@ cp -a "$DEVICE_DOCS" "$OUT_DIR/DEVICE.md"
   echo "arch=$DEVICE_ARCH"
   echo "buildroot=$BUILDROOT_VERSION"
   echo "version=${GIOCHI_SYSTEM_VERSION:-local}"
-  echo "commit=${GITHUB_SHA:-$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo "local")}"
-  echo "built_at_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  echo "commit=$BUILD_COMMIT"
+  echo "built_at_utc=$BUILD_AT_UTC"
   echo "runner=$(uname -a)"
   echo "hostname=$HOSTNAME_VALUE"
   echo "root_password=definida no build (não registrada)"
 } >"$OUT_DIR/build-info.txt"
 
+# A árvore mudou no meio do build? O carimbo gravado é o do INÍCIO (é o das
+# fontes que geraram a imagem), mas parte do processo — patches de kernel,
+# `post-build.sh`, overlay — é lida em momentos diferentes. Um commit no meio
+# produz imagem híbrida, e isso não pode sair em silêncio: foi assim que o R35S
+# de 09/11/2026 ficou com overlay de `3fcba15` e `post-build.sh` de `c72644b`.
+AGORA="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo local)"
+if [ "$AGORA" != "$BUILD_COMMIT" ] && [ -z "${GITHUB_SHA:-}" ]; then
+  echo
+  echo "AVISO: o repositório mudou DURANTE o build."
+  echo "  commit no início: $BUILD_COMMIT"
+  echo "  commit no fim:    $AGORA"
+  echo "  A imagem é híbrida: overlay e DTS vêm do início, patches e"
+  echo "  post-build podem ter vindo do fim. Refaça com a árvore parada"
+  echo "  antes de publicar. O carimbo gravado é o do início (o das fontes)."
+fi
+
 # `sha256sum *` quebra em diretório (`dtbs/`) e se inclui no próprio arquivo.
 # A lista precisa ser só de arquivos regulares, sem o SHA256SUMS.
+#
+# O `rm -f` antes NÃO bastava, e o defeito era medido: o shell cria (trunca) o
+# `SHA256SUMS` do redirect ANTES de rodar o `find`, então o arquivo existia — vazio
+# — quando o `find` o listava. O manifesto saía com a entrada "SHA256SUMS =
+# hash de arquivo vazio", e `sha256sum -c SHA256SUMS` falhava em TODA imagem
+# publicada (`SHA256SUMS: FAILED`), que é o oposto do que um manifesto serve.
+#
+# Gerar num temporário DENTRO do diretório também não serve: qualquer arquivo
+# criado ali é visto pelo `find` (medido — o `.tmp` entrou na lista e o
+# `sha256sum -c` reprovou por "could not be read"). A solução é capturar a lista
+# ANTES de criar arquivo nenhum, e só então escrever o manifesto por último.
 (
   cd "$OUT_DIR"
-  rm -f SHA256SUMS
-  find . -maxdepth 1 -type f -printf '%P\n' | sort | xargs -r sha256sum >SHA256SUMS
+  rm -f SHA256SUMS SHA256SUMS.tmp
+  LISTA="$(find . -maxdepth 1 -type f -printf '%P\n' | sort)"
+  # `$LISTA` sem aspas de propósito: é uma lista de nomes, um por linha, e o
+  # `xargs` é quem separa. Nomes com espaço não acontecem em `out/` (os artefatos
+  # são gerados pelo script), e `-d '\n'` garante isso mesmo assim.
+  printf '%s\n' "$LISTA" | xargs -r -d '\n' sha256sum >SHA256SUMS
 )
 
 echo
