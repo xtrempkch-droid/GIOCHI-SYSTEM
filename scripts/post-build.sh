@@ -248,6 +248,30 @@ if [ -d "$INIT_DIR" ]; then
     echo "post-build: todos os scripts de init estão executáveis"
 fi
 
+# O launcher com modo errado é o MESMO defeito, uma camada acima, e foi medido
+# num aparelho em 08/11/2026:
+#
+#   /opt/giochi/apps/launcher/bin/giochi-launcher -> -rw-r--r--  (644)
+#   giochi-init pid 178 -> hrtimer_nanosleep, sem filhos, sem marcador
+#
+# O `giochi-init` testa `[ -x "$LAUNCHER" ]` antes de executar; sem +x ele entra
+# em `wait_for_launcher` e dorme em intervalos de 30 s PARA SEMPRE. O aparelho
+# liga, a tela não mostra nada, e não há erro em lugar nenhum — nem no console,
+# nem no marcador de desistência (que só existe para quedas, não para "nunca
+# começou"). É o §12.50 na forma mais silenciosa: arquivo presente, serviço que
+# não sobe.
+#
+# O launcher não vem desta árvore (é overlay da equipe do app), então esta guarda
+# só dispara quando ele JÁ está no target — e nesse caso o build tem de parar,
+# porque a imagem que sairia daqui é a que liga sem nada na tela.
+LAUNCHER_BIN="$TARGET_DIR/opt/giochi/apps/launcher/bin/giochi-launcher"
+if [ -e "$LAUNCHER_BIN" ] && [ ! -x "$LAUNCHER_BIN" ]; then
+    echo "post-build: o launcher está na imagem SEM bit de execução: $LAUNCHER_BIN" >&2
+    echo "post-build: o giochi-init testa [ -x ] e ficaria esperando para sempre — tela parada, sem erro" >&2
+    echo "post-build: corrija o modo no overlay de origem (chmod +x) e confira com 'git ls-files -s'" >&2
+    exit 1
+fi
+
 INITTAB="$TARGET_DIR/etc/inittab"
 INIT_BIN="$TARGET_DIR/usr/bin/giochi-init"
 

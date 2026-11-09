@@ -1,7 +1,7 @@
 # AGENTS.md — Giochi System
 
 > Handoff técnico do repositório. Leia antes de continuar o trabalho.
-> Atualizado em: 08/11/2026 (revisão 8 — **auditoria em três passadas + uma no aparelho**. Vinte e três defeitos encontrados, todos do tipo "verde e errado", e todos
+> Atualizado em: 08/11/2026 (revisão 8 — **auditoria em três passadas + uma no aparelho**. Vinte e cinco defeitos encontrados, todos do tipo "verde e errado", e todos
 > com teste que os prende. Os mais graves: o gate do harfbuzz **nunca disparou**
 > (dependia de variável `BR2_*` que o Buildroot não exporta ao post-build); um
 > patch de kernel ausente matava o build **sem imprimir nada**; **dois dos três
@@ -83,7 +83,7 @@ Repositório: `https://github.com/xtrempkch-droid/GIOCHI-SYSTEM` — branch `mai
 
 | Verificação | Resultado |
 | --- | --- |
-| `node tests/run-all.mjs` | **510/510** (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, devices 13, assert-config 12, fdt 11, gpu-bench 16, …) |
+| `node tests/run-all.mjs` | **512/512** (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, devices 13, assert-config 12, fdt 11, gpu-bench 16, …) |
 | `node scripts/validate-devices.mjs` | OK — 7 devices, 1 habilitado |
 | `node scripts/list-devices.mjs --github-matrix` | matriz com `qemu-aarch64` |
 | matriz com `--device powkiddy-x55 --allow-draft` | devolve **só** o X55 |
@@ -445,7 +445,7 @@ si (§12.4), mas provavelmente **não** era a causa dos 3 s.
 
 ```bash
 node scripts/validate-devices.mjs
-node tests/run-all.mjs                          # 510 testes
+node tests/run-all.mjs                          # 512 testes
 node scripts/list-devices.mjs
 node scripts/list-devices.mjs --github-matrix
 node scripts/list-devices.mjs --github-matrix --device powkiddy-x55 --allow-draft
@@ -489,7 +489,7 @@ absoluto** do host — §12.40).
 
 ## 10. Testes
 
-`node tests/run-all.mjs` → **510/510**, em **56 arquivos**. A tabela abaixo é uma
+`node tests/run-all.mjs` → **512/512**, em **56 arquivos**. A tabela abaixo é uma
 seleção dos que prendem contratos de projeto; a lista completa é `ls tests/` e
 `tests/runner-coverage.test.mjs` **falha** se algum arquivo existir sem estar
 importado no `run-all.mjs` — foi assim que dois testes desta revisão quase
@@ -3972,6 +3972,58 @@ ignorar o bloco inteiro (§12.22, §12.34). Antes de escrever o aviso, a pergunt
 "o crng ficou pronto a tempo?" e "há algo desenhando na tela?". As duas cabiam no
 `/proc` e no `dmesg` deste aparelho.
 
+### 12.62-D O launcher com modo 644: a tela parada que não deixa rastro
+
+Encontrado ao **conferir o estado do aparelho depois dos meus próprios testes** —
+e o susto valeu o achado. O launcher tinha sumido, e a primeira suspeita foi que
+eu o tivesse derrubado. Não: o binário estava lá, com o modo errado.
+
+```text
+/opt/giochi/apps/launcher/bin/giochi-launcher  ->  -rw-r--r--   (644)
+giochi-init (pid 178)  ->  hrtimer_nanosleep, sem filhos, sem marcador
+```
+
+O `giochi-init` testa `[ -x "$LAUNCHER" ]` antes de executar. Sem `+x` ele entra
+em `wait_for_launcher`, que dorme em intervalos de `GIOCHI_LAUNCHER_WAIT` (30 s)
+**para sempre**. O aparelho liga, a tela não mostra nada, e não há erro em lugar
+nenhum:
+
+- o console não fala (o `wait_for_launcher` é silencioso por desenho, §11);
+- o marcador `/run/giochi/launcher-parado` **não existe** — ele é escrito para
+  *quedas*, e "nunca começou" não é queda (§12.45);
+- o build fica **verde**: o launcher não vem desta árvore, é overlay da equipe do
+  app, então o `post-build` nem olhava para ele.
+
+É o §12.50 na forma mais silenciosa, e a mesma lição de escopo do §12.34: a
+guarda de `+x` que existe desde então cobria `giochi-init` e **todos** os
+`S??*` — a classe "arquivo do overlay precisa de `+x`" — mas o launcher não é
+`S??*` e ficou de fora justamente por não se parecer com o resto.
+
+**Correção:** o `post-build` passa a falhar o build quando o launcher está no
+`target/` e não é executável, com a consequência escrita na mensagem. A guarda só
+dispara quando ele já está lá (com o overlay deles), e nesse caso a imagem que
+sairia daqui é exatamente a que liga sem nada na tela.
+
+`tests/boot-layer.test.mjs` cobre os dois lados — 644 falha o build, 755 segue
+normal — porque uma guarda que recusa **todo** build com launcher seria o defeito
+espelhado.
+
+#### Duas armadilhas de diagnóstico medidas no caminho
+
+| Ferramenta | Resultado | Fato |
+| --- | --- | --- |
+| `pidof giochi-init` | "ausente" com o init vivo (pid 178) | o processo é `/bin/sh /usr/bin/giochi-init`, nome `sh`; `pidof` casa pelo **nome**, não pela linha de comando |
+| `pidof giochi-launcher` | funciona | é binário ELF, nome próprio |
+
+Nada na árvore usa `pidof giochi-init` (conferido com `grep`), então isto fica
+como aviso de bancada: para o init, leia `/proc/*/cmdline`; `pidof` serve para
+binário com nome próprio.
+
+E a nota de convivência: no meio destas medições o **endereço da placa mudou de
+dono** — `10.55.0.2` passou da X55 para o R35S e depois para a equipe do app
+(`profiler_demo16` como DRM master). Testar ali sem combinar interrompe quem
+está usando; a regra do §18 vale para qualquer aparelho, não só para a X55.
+
 ## 13. Aparelhos
 
 | ID | Pasta | SoC | Arch | Status | Falta |
@@ -4334,7 +4386,7 @@ o cartão — não só no `target/`.
 
 | Item | Estado |
 | --- | --- |
-| Código e configuração | **pronto** — 510/510 testes |
+| Código e configuração | **pronto** — 512/512 testes |
 | Imagem X55 (`Image` + `rootfs.ext4` + DTB + bootloader) | **existe** em `out/powkiddy-x55/`, `built_at_utc=2026-11-04T21:05:13Z` |
 | `/etc/inittab` na imagem | **linha 30: `::respawn:/usr/bin/giochi-init`** — conferida com `debugfs` no `rootfs.ext4` |
 | `work/` do X55 | preservado em `~/.cache/giochi-system/work/powkiddy-x55` (17 GB, já com `target/` finalizado) |
@@ -4475,7 +4527,7 @@ Ordem sugerida para a próxima sessão (nada aqui precisa da X55):
 
 ```bash
 node scripts/validate-devices.mjs      # 7 devices, 1 habilitado
-node tests/run-all.mjs                 # 510/510
+node tests/run-all.mjs                 # 512/512
 node scripts/list-devices.mjs --github-matrix
 ```
 
@@ -4541,7 +4593,7 @@ as duas correções (`uboot-patches/0001-…-adc-nao-fatal.patch` +
 
 ```bash
 cd /home/charles/Giochi/GIOCHI-SYSTEM
-node tests/run-all.mjs                                   # esperado: 510/510
+node tests/run-all.mjs                                   # esperado: 512/512
 git add device/r35s/README.md AGENTS.md
 git commit -m "r35s: o U-Boot mainline liga; a frase do README estava desatualizada
 

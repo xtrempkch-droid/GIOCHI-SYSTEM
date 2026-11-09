@@ -191,3 +191,48 @@ test("o selftest falha quando há launcher e a camada de boot está desligada", 
   assert.match(texto, /inittab NÃO chama giochi-init/);
   assert.match(texto, /LAUNCHER="?\/opt\/giochi\/apps\/launcher\/bin\/giochi-launcher/);
 });
+
+test("launcher sem bit de execução FALHA o build, em vez de ligar com a tela parada", async () => {
+  // Medido num aparelho em 08/11/2026, com o launcher em modo 644:
+  //
+  //   giochi-init pid 178 -> hrtimer_nanosleep, sem filhos, sem marcador
+  //
+  // O `giochi-init` testa `[ -x "$LAUNCHER" ]`; sem +x ele entra em
+  // `wait_for_launcher` e dorme para sempre. O aparelho liga, a tela fica sem
+  // nada, e não há erro em lugar nenhum — nem no console, nem no marcador de
+  // desistência, que só existe para QUEDAS. É o §12.50 na forma mais silenciosa.
+  //
+  // O launcher é overlay da equipe do app, então a guarda só dispara quando ele
+  // já está no target — e nesse caso a imagem que sairia daqui é justamente a
+  // que liga sem nada na tela.
+  const dir = await fakeRoot();
+  try {
+    const bin = path.join(dir, "opt/giochi/apps/launcher/bin/giochi-launcher");
+    await mkdir(path.dirname(bin), { recursive: true });
+    await writeFile(bin, "#!/bin/sh\n", { mode: 0o644 });
+    await assert.rejects(
+      () => runPostBuild(dir),
+      (e) => {
+        assert.match(String(e.stderr), /launcher está na imagem SEM bit de execução/);
+        assert.match(String(e.stderr), /esperando para sempre/);
+        return true;
+      },
+      "post-build tem de falhar com o launcher não executável",
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("launcher executável passa, e a imagem segue", async () => {
+  // O outro lado: com +x nada muda. Sem este caso, a guarda poderia estar
+  // recusando todo build que trouxesse o launcher.
+  const dir = await fakeRoot({ launcher: true });
+  try {
+    await runPostBuild(dir);
+    const texto = await readFile(path.join(dir, "etc/inittab"), "utf8");
+    assert.match(texto, /^::respawn:\/usr\/bin\/giochi-init$/m);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
