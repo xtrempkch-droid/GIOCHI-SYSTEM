@@ -1,0 +1,70 @@
+# S05input — permissões de /dev/input para os apps rodarem sem root
+#
+# ## Por que existe
+#
+# O relatório do consultor externo (item 2, "Permissões de dispositivo") levanta o
+# ponto certo: em Linux ARM64 com KMSDRM, ler `/dev/input/event*` exige que o
+# usuário pertença ao grupo `input`. Hoje o launcher e os jogos rodam como **root**,
+# e por isso não sentem — mas isso é um fato do momento, não uma garantia.
+#
+# ## O que o buildroot faz e o que ele NÃO faz
+#
+# O Buildroot cria `/dev/input/event*` pelo `devtmpfs` do kernel, com modo herdado
+# do driver. O udev do Buildroot (`eudev`) só ajusta permissão se existir regra;
+# a regra padrão do projeto upstream é `KERNEL=="event*", GROUP="input", MODE="0640"`,
+# mas ela mora em `/lib/udev/rules.d/` — **empacotamento**, não `/etc`. Uma imagem
+# que não instale o pacote de regras fica com `root:root 0644`, e o sintoma é o
+# pior: o app abre o dispositivo no PC (onde o usuário está no grupo `input`) e
+# recebe `EACCES` no aparelho — sem mensagem que aponte a permissão.
+#
+# ## Por que um script de init e não só a regra de udev
+#
+# Ordem de boot: o `S30usbnet` e o launcher podem abrir o dispositivo antes de o
+# udev terminar de aplicar regras. Aplicar aqui é idempotente, roda cedo, e não
+# depende de o pacote de regras estar na imagem.
+
+case "$1" in
+    start)
+        # Grupo `input`: se o rootfs não o tiver, cria com GID fixo. O GID varia
+        # entre distros; 1001 evita colidir com os grupos numerados do Buildroot
+        # (que começam em 1000 para `adm` e seguem em ordem).
+        if ! grep -q '^input:' /etc/group 2>/dev/null; then
+            if command -v addgroup >/dev/null 2>&1; then
+                addgroup -g 1001 input 2>/dev/null || true
+            else
+                printf 'input:x:1001:\n' >> /etc/group
+            fi
+        fi
+
+        # O grupo `input` é um grupo do SISTEMA: nenhum humano precisa estar nele.
+        # Quem precisa são os processos de interface, e eles rodam como root.
+        # Deixar a mensagem explícita evita que alguém "resolva" o problema
+        # adicionando o usuário do launcher a um grupo que não existe no aparelho.
+        tipo=$(stat -c '%a' /dev/input/event0 2>/dev/null || echo "ausente")
+        dono=$(stat -c '%U:%G' /dev/input/event0 2>/dev/null || echo "?")
+
+        if [ "$tipo" = "ausente" ]; then
+            echo "input: /dev/input/event0 ainda não existe — controle não registrado"
+            echo "input: se o controle funciona, ignore; senão veja buttons.map e o driver"
+            exit 0
+        fi
+
+        # `chown input` + `chmod 0640` só quando necessário, para não reescrever
+        # o inode a cada boot sem motivo.
+        for dev in /dev/input/event*; do
+            [ -e "$dev" ] || continue
+            atual_modo=$(stat -c '%a' "$dev" 2>/dev/null)
+            atual_grupo=$(stat -c '%G' "$dev" 2>/dev/null)
+            if [ "$atual_grupo" != "input" ] || [ "$atual_modo" != "640" ]; then
+                chgrp input "$dev" 2>/dev/null || true
+                chmod 0640 "$dev" 2>/dev/null || true
+            fi
+        done
+
+        echo "input: /dev/input/event* com grupo input (era $dono $tipo)"
+        ;;
+    *)
+        echo "Uso: $0 {start}"
+        exit 1
+        ;;
+esac
