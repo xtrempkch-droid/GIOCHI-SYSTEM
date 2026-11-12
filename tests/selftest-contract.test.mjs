@@ -245,7 +245,7 @@ test("a lógica conta os bits do gamepad e ignora o nó de volume", () => {
 
     const sh = readFileSync(SELFTEST, "utf8");
     const bloco = sh.slice(sh.indexOf("PAD_BUTTONS=0"), sh.indexOf("MAP_FILE="))
-      .replaceAll("/sys/class/input", path.join(tmp, "sys/class/input"));
+      .replaceAll("/sys/class/input", path.join(tmp, "sys/class/input").replaceAll("\\", "/"));
 
     const script = `
 count_bits() {

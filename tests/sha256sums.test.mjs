@@ -27,6 +27,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 const BUILD = readFileSync(new URL("../scripts/build-device.sh", import.meta.url), "utf8");
 
@@ -99,7 +100,7 @@ test("o manifesto gerado pelo bloco real verifica com sha256sum -c", () => {
 test("as imagens em out/ que existirem verificam", () => {
   // Vale para o que está no disco agora: se uma imagem antiga já foi publicada
   // com o manifesto quebrado, este teste a acusa em vez de deixar passar.
-  const raiz = new URL("../out/", import.meta.url).pathname;
+  const raiz = fileURLToPath(new URL("../out/", import.meta.url));
   const dirs = ["r35s", "powkiddy-x55", "powkiddy-x35h"];
   for (const d of dirs) {
     const sums = join(raiz, d, "SHA256SUMS");

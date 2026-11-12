@@ -15,8 +15,9 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
-const ROOT = new URL("..", import.meta.url).pathname;
+const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const DIR_CHAVES = `${ROOT}device/common/rootfs-overlay/etc/giochi`;
 const PUBLICA = `${DIR_CHAVES}/loja-publica.pem`;
 const PUBLICA_LICENCA = `${DIR_CHAVES}/licenca-publica.pem`;

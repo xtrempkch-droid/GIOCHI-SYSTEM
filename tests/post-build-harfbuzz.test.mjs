@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 
 const run = promisify(execFile);
 
@@ -31,7 +32,7 @@ const run = promisify(execFile);
 // ambiente real. Um teste que exportasse `BR2_PACKAGE_HARFBUZZ=y` passaria
 // mesmo com o bug.
 
-const POST_BUILD = path.join(new URL("..", import.meta.url).pathname, "scripts", "post-build.sh");
+const POST_BUILD = path.join(fileURLToPath(new URL("..", import.meta.url)), "scripts", "post-build.sh");
 
 // Reproduz o `EXTRA_ENV` do Buildroot: nada de BR2_*.
 function ambienteDoBuildroot(extra = {}) {

@@ -22,8 +22,9 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import * as path from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
-const ROOT = new URL("..", import.meta.url).pathname;
+const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const SRC = `${ROOT}device/r35s/kernel-modules/rocknix-joypad`;
 const PATCH = `${ROOT}device/r35s/patches/0002-giochi-joypad-singleadc.patch`;
 const GERADOR = `${ROOT}scripts/gerar-patch-modulos.mjs`;

@@ -7,6 +7,11 @@ import path from "node:path";
 
 import { ROOT } from "../scripts/lib/devices.mjs";
 
+// O script roda em `sh`, onde `\` e escape: caminho do Windows tem de virar
+// POSIX antes de entrar no template. Sem isto, `C:\Users\...` chega como
+// `C:Users...` e o teste falha por um motivo que nao tem a ver com o codigo.
+const p = (caminho) => caminho.replaceAll("\\", "/");
+
 function run(script) {
   return execFileSync("sh", ["-c", script], { encoding: "utf8" });
 }
@@ -83,7 +88,7 @@ test("bateria com present=0 não é reportada como 0%", () => {
 read_or() { cat "$1" 2>/dev/null || true; }
 pass() { echo "PASS $*"; }
 warn() { echo "WARN $*"; }
-${bloco.replaceAll("/sys/class/power_supply", dir)}
+${bloco.replaceAll("/sys/class/power_supply", p(dir))}
 `;
     const saida = run(script);
     rmSync(dir, { recursive: true, force: true });
@@ -142,10 +147,10 @@ test("o aviso de rotação distingue fbcon ausente de rotação desligada", () =
     writeFileSync(path.join(dir, "drm", "card0-DSI-1", "modes"), `${modo}\n`);
 
     let b = bloco
-      .replaceAll("/sys/class/vtconsole", path.join(dir, "vtconsole"))
-      .replaceAll("/sys/class/graphics/fb0", path.join(dir, "graphics", "fb0"))
-      .replaceAll("/sys/class/graphics/fbcon", path.join(dir, "graphics", "fbcon"))
-      .replaceAll("/sys/class/drm", path.join(dir, "drm"));
+      .replaceAll("/sys/class/vtconsole", p(path.join(dir, "vtconsole")))
+      .replaceAll("/sys/class/graphics/fb0", p(path.join(dir, "graphics", "fb0")))
+      .replaceAll("/sys/class/graphics/fbcon", p(path.join(dir, "graphics", "fbcon")))
+      .replaceAll("/sys/class/drm", p(path.join(dir, "drm")));
     const script = `
 dmesg() { echo "[    1.1] Console: switching to colour frame buffer device 160x45"; }
 pass() { echo "PASS $*"; }
@@ -258,8 +263,8 @@ warn() { echo "WARN $*"; }
 skip() { echo "SKIP $*"; }
 read_or() { if [ -r "$1" ]; then cat "$1" 2>/dev/null; fi; }
 ${bloco
-  .replaceAll("/sys/class/misc/hw_random/rng_current", path.join(dir, "rng_current"))
-  .replaceAll("/proc/device-tree", path.join(dir, "device-tree"))}
+  .replaceAll("/sys/class/misc/hw_random/rng_current", p(path.join(dir, "rng_current")))
+  .replaceAll("/proc/device-tree", p(path.join(dir, "device-tree")))}
 `;
     if (rng) writeFileSync(path.join(dir, "rng_current"), `${rng}\n`);
     const saida = run(script);

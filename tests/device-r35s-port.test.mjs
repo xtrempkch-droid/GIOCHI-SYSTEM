@@ -11,8 +11,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 import { createHash } from "node:crypto";
 import { gunzipSync } from "node:zlib";
+import { fileURLToPath } from "node:url";
 
-const ROOT = new URL("..", import.meta.url).pathname;
+const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const DEVICE = `${ROOT}device/r35s`;
 const device = JSON.parse(readFileSync(`${DEVICE}/device.json`, "utf8"));
 

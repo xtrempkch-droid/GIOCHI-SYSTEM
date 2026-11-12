@@ -11,8 +11,9 @@
 import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
-const ROOT = new URL("..", import.meta.url).pathname;
+const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const SCRIPT = `${ROOT}scripts/make-rk3326-bootloader.sh`;
 const IMAGE_SD = `${ROOT}scripts/make-sd-image.sh`;
 const device = JSON.parse(readFileSync(`${ROOT}device/r35s/device.json`, "utf8"));

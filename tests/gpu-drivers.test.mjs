@@ -10,6 +10,7 @@
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 const DOC = readFileSync(new URL("../docs/gpu-drivers.md", import.meta.url), "utf8");
 
@@ -30,7 +31,7 @@ test("nenhum fragmento de buildroot pede o blob da ARM", () => {
   // `libmali` não é pacote do Buildroot: entrar na imagem exigiria um pacote
   // customizado. Se alguém criar um, tem de ser na loja (item 4.2 do doc), e
   // este teste obriga a decisão a ser explícita.
-  const root = new URL("../device/", import.meta.url).pathname;
+  const root = fileURLToPath(new URL("../device/", import.meta.url));
   const offenders = listFiles(root).filter((file) => {
     if (!/\.(fragment|json|mk)$/.test(file)) return false;
     const text = readFileSync(file, "utf8");
@@ -128,7 +129,7 @@ test("o gles-probe.py continua sendo o instrumento da medicao pendente", () => {
 // presente em TODO boot, então `=y`. Módulo é para hardware que pode não estar
 // lá (dongle Wi-Fi), não para o que sustenta a tela.
 test("nenhum aparelho pede o panfrost como módulo", () => {
-  const root = new URL("../device/", import.meta.url).pathname;
+  const root = fileURLToPath(new URL("../device/", import.meta.url));
   const offenders = [];
 
   for (const file of listFiles(root)) {
@@ -154,7 +155,7 @@ test("os aparelhos com GPU no device tree exigem o panfrost no kernel", () => {
   // O fragmento é delta: um `allow-drop` acidental, ou o patch do DTS parando de
   // aplicar, tiraria o símbolo e a imagem sairia igual (verde) e sem GPU. A
   // `kernel-required.txt` é o gate — mas só vale para quem a declara.
-  const root = new URL("../device/", import.meta.url).pathname;
+  const root = fileURLToPath(new URL("../device/", import.meta.url));
   const withGpu = ["r35s", "powkiddy x55", "powkiddy x35h"];
 
   for (const device of withGpu) {

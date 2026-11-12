@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 
 const run = promisify(execFile);
 
@@ -24,7 +25,7 @@ const run = promisify(execFile);
 // responde "PNG images are not supported" — erro que aparece no app, não no
 // build, e parece bug de quem chamou.
 
-const POST_BUILD = path.join(new URL("..", import.meta.url).pathname, "scripts", "post-build.sh");
+const POST_BUILD = path.join(fileURLToPath(new URL("..", import.meta.url)), "scripts", "post-build.sh");
 
 async function alvo({ libs = [], sdlimgRefs = [] }) {
   const dir = await mkdtemp(path.join(tmpdir(), "giochi-img-"));

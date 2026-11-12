@@ -27,8 +27,9 @@
 import assert from "node:assert/strict";
 import { readFileSync, statSync } from "node:fs";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
-const DEVICE = new URL("../device/", import.meta.url).pathname;
+const DEVICE = fileURLToPath(new URL("../device/", import.meta.url));
 
 function read(device, file) {
   try {

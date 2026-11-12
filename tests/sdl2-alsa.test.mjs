@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 
 const run = promisify(execFile);
 
@@ -31,7 +32,7 @@ const run = promisify(execFile);
 // O gate no post-build pergunta pela CONSEQUÊNCIA: alsa-lib está na imagem e o
 // SDL2 não menciona ALSA? Então foi configurado sem ela.
 
-const POST_BUILD = path.join(new URL("..", import.meta.url).pathname, "scripts", "post-build.sh");
+const POST_BUILD = path.join(fileURLToPath(new URL("..", import.meta.url)), "scripts", "post-build.sh");
 
 async function fakeTarget({ libasound, sdl2MentionsAlsa }) {
   const dir = await mkdtemp(path.join(tmpdir(), "giochi-sdl2-"));

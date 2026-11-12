@@ -21,8 +21,9 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
-const ROOT = new URL("..", import.meta.url).pathname;
+const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const GODOT_FRAGMENT = join(ROOT, "config/godot.fragment");
 const COMMON = readFileSync(join(ROOT, "config/common.fragment"), "utf8");
 const BUILD = readFileSync(join(ROOT, "scripts/build-device.sh"), "utf8");

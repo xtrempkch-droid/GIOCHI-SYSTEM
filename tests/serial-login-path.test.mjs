@@ -34,6 +34,26 @@ function esperadoBase64(payload) {
   return { encoded, tamanhoNoDisco: encoded.length + linhas };
 }
 
+// `python3` e o nome no Linux/macOS; no Windows o interpretador costuma ser
+// apenas `python`. Sem esta resolucao, o teste falha por NOME DE EXECUTAVEL e
+// nao por comportamento -- foi o que aconteceu no Windows, onde o `python3` do
+// PATH e o atalho da Microsoft Store respondendo "Python nao foi encontrado".
+function acharPython() {
+  for (const nome of ["python3", "python"]) {
+    try {
+      execFileSync(nome, ["-c", "import sys"], { stdio: "ignore" });
+      return nome;
+    } catch {
+      // tenta o proximo nome
+    }
+  }
+  return null;
+}
+
+// `-X utf8` + `PYTHONIOENCODING`: no Windows o stdout do Python usa a code page
+// ANSI, entao "nao" com til sai em cp1252 e chega corrompido do lado de ca. O
+// teste compara texto acentuado e falharia por encoding, nao por comportamento.
+const PYTHON = acharPython();
 const HARNESS = String.raw`
 import sys, types
 
@@ -111,7 +131,7 @@ test("o caminho de login recupera e completa a transferência", () => {
     .replaceAll("SCRIPT", JSON.stringify(SCRIPT));
 
   try {
-    const saida = execFileSync("python3", ["-c", codigo], { encoding: "utf8" });
+    const saida = execFileSync(PYTHON, ["-X", "utf8", "-c", codigo], { encoding: "utf8", env: { ...process.env, PYTHONIOENCODING: "utf-8" } });
     assert.match(saida, /md5 local: [0-9a-f]{32}/);
     assert.match(saida, /md5 remoto: [0-9a-f]{32}/);
     assert.match(saida, /OK: md5 confere dos dois lados/);
@@ -137,7 +157,7 @@ test("sem shell nenhum, o script diz o motivo em vez de morrer de TypeError", ()
 
   try {
     assert.throws(
-      () => execFileSync("python3", ["-c", codigo], { encoding: "utf8", stdio: "pipe" }),
+      () => execFileSync(PYTHON, ["-X", "utf8", "-c", codigo], { encoding: "utf8", stdio: "pipe", env: { ...process.env, PYTHONIOENCODING: "utf-8" } }),
       (erro) => {
         const junto = `${erro.stdout ?? ""}${erro.stderr ?? ""}`;
         assert.match(junto, /não cheguei a um shell/, "tem de dizer o motivo");

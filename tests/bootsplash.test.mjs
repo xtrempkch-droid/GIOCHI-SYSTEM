@@ -31,8 +31,9 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { test } from "node:test";
 import { inflateSync } from "node:zlib";
+import { fileURLToPath } from "node:url";
 
-const ROOT = new URL("..", import.meta.url).pathname;
+const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const COMMON = readFileSync(`${ROOT}config/common.fragment`, "utf8");
 const OVERRIDES = readFileSync(`${ROOT}config/package-overrides.mk`, "utf8");
 const GERADOR = `${ROOT}scripts/gerar-splash.mjs`;

@@ -5,9 +5,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 
 const run = promisify(execFile);
-const INIT = path.join(new URL("..", import.meta.url).pathname,
+const INIT = path.join(fileURLToPath(new URL("..", import.meta.url)),
   "device/common/rootfs-overlay/usr/bin/giochi-init");
 
 // CONSOLE LIVRE — `touch /run/giochi/dev-free-console` impede o giochi-init de
