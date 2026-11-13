@@ -56,7 +56,7 @@
 - `generic-x64`: PC comum x86_64, **desabilitado** — rascunho com
   `pc_x86_64_efi_defconfig`, nunca compilado. Serve para separar defeito do
   sistema de defeito do aparelho.
-- Buildroot fixado em `2024.02` no arquivo [`buildroot.version`](../buildroot.version).
+- Buildroot fixado em `2025.02` (LTS) no arquivo [`buildroot.version`](../buildroot.version).
 - O workflow principal gera imagens por device e publica artefatos no GitHub Actions.
 
 O estado detalhado — o que está verificado, o que só o CI pode provar e o que

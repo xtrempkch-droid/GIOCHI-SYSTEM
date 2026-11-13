@@ -574,6 +574,37 @@ for overlay in "${OVERLAYS[@]}"; do
   index=$((index + 1))
 done
 
+# ---------------------------------------------------------------
+# Overlay de fora do repositório (opcional).
+#
+# É o ponto de entrada do **Giochi os** (repositório que junta sistema + apps):
+# a fase `apps` de lá monta `rootfs-overlay/opt/giochi/apps/` e passa o caminho
+# aqui. Sem esta variável, o único jeito de embutir app seria copiar arquivos
+# para dentro de `device/` — acoplando os dois repositórios, que o contrato
+# proíbe.
+#
+# Entra DEPOIS dos overlays do aparelho, então um app do Giochi os não
+# sobrescreve configuração de hardware. Entra antes do build, que é o que
+# mantém a decisão de arquitetura: apps já estão no rootfs quando o ext4 é
+# gerado, sem remontar imagem assinada depois.
+#
+# Caminho relativo é resolvido a partir do diretório do repositório.
+# ---------------------------------------------------------------
+if [[ -n "${GIOCHI_SYSTEM_EXTRA_OVERLAY:-}" ]]; then
+  EXTRA_OVERLAY="$GIOCHI_SYSTEM_EXTRA_OVERLAY"
+  [[ "$EXTRA_OVERLAY" = /* ]] || EXTRA_OVERLAY="$ROOT/$EXTRA_OVERLAY"
+  if [[ ! -d "$EXTRA_OVERLAY" ]]; then
+    echo "ERRO: GIOCHI_SYSTEM_EXTRA_OVERLAY aponta para pasta inexistente:" >&2
+    echo "      $EXTRA_OVERLAY" >&2
+    exit 2
+  fi
+  destination="$OVERLAY_STAGE/$(printf '%02d-extra' "$index")"
+  stage_overlay "$EXTRA_OVERLAY" "$destination"
+  OVERLAY_ARGS+=(--overlay "$destination")
+  index=$((index + 1))
+  echo "  overlay extra: $EXTRA_OVERLAY"
+fi
+
 # O mapa de botões mora em device/<pasta>/buttons.map, mas o launcher lê
 # /etc/giochi/buttons.map. Sem esta cópia o mapa existe no repositório e NÃO
 # existe na imagem: o launcher cai no mapa embutido e os botões erram sem

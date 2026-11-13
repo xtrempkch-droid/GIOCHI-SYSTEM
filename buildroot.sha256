@@ -8,3 +8,4 @@
 # `scripts/build-device.sh` recusa o tarball quando o hash não confere, e
 # `tests/buildroot-hash.test.mjs` falha se a versão não tiver hash.
 26d428bc697bf01f72173807e4f60836d249b1bfd7952c120deeb6b5d2fc7e2f  buildroot-2024.02.tar.gz
+f9444c2e3054e0b3d0f555ab8130520bd08cdb95196233672b52b9569d14c97f  buildroot-2025.02.tar.gz

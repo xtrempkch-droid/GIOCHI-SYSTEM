@@ -9,7 +9,7 @@ O repositório foi desenhado para receber os dispositivos depois: cada alvo vive
 ## O que está incluído
 
 - Estrutura `device/` com `device.json`, fragmentos Buildroot, overlays e documentação por dispositivo.
-- Buildroot fixado em [`buildroot.version`](./buildroot.version) (`2024.02`).
+- Buildroot fixado em [`buildroot.version`](./buildroot.version) (`2025.02`, LTS).
 - Script de build que aplica defconfig, mescla configuração comum + device, preserva scripts de pós-build do Buildroot e empacota artefatos com SHA256.
 - Validador de devices e testes em Node.js puro.
 - Workflow GitHub Actions com validação, matriz de devices, cache de downloads e artefatos.

@@ -165,6 +165,33 @@ A regra da mesclagem continua sendo "a última definição vence". O build aplic
 
 O campo `buildrootFragments` no `device.json` lista os fragmentos na ordem desejada e substitui `buildrootFragment` (que continua aceito para compatibilidade com os devices existentes).
 
+### Quando o fragmento não basta: `buildroot-external/`
+
+Fragmento só muda **símbolo de Kconfig**. Há ajustes que precisam mexer nas
+opções de configuração de um pacote, e para esses existem dois mecanismos, com
+uma diferença que decide onde cada coisa mora:
+
+| Mecanismo | Quando entra no Makefile | `VAR +=` na receita |
+| --- | --- | --- |
+| `config/package-overrides.mk` | **antes** das receitas (`:528`) | sobrescrito (`=`) |
+| `buildroot-external/external.mk` | **depois** das receitas (`:545`) | **soma** |
+
+Regra que decorre: ajuste que **acrescenta** opção, aproveitando o que o
+`.config` do aparelho já decidiu, mora no `external.mk`. Ajuste que
+**substitui** variável inteira mora no `package-overrides.mk`, com `override`.
+
+Hoje a árvore externa tem **uma** linha — `--enable-video-dummy` no SDL2, porque
+a receita do Buildroot desliga o driver em opção fixa e não há símbolo de
+Kconfig. Dependências de pacote entram no `Config.in` dela, não no
+`common.fragment`.
+
+> **`BR2_EXTERNAL` tem de ser exportado em toda invocação do `make`.** O
+> Buildroot regenera `$(O)/.br2-external.mk` a partir da variável; sem ela o
+> arquivo é zerado em silêncio e os pacotes são construídos **sem** os ajustes.
+> O `build-device.sh` exporta; quem depurar à mão dentro de
+> `work/<device>/build` precisa repetir, com caminho absoluto.
+
+
 ### Driver de painel
 
 O painel é o caso mais crítico, porque combina quatro peças independentes:

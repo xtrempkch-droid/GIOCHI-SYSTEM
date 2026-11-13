@@ -52,7 +52,9 @@ Repositório: `https://github.com/xtrempkch-droid/GIOCHI-SYSTEM` — branch `mai
 - `device/devices.json` como fonte da verdade da lista **e** da matriz de CI.
 - `device.json` por aparelho, validado por schema em `scripts/lib/devices.mjs`.
 - 7 aparelhos registrados: `qemu-aarch64` (único habilitado) + 6 drafts.
-- Buildroot fixado em **2024.02** (`buildroot.version`).
+- Buildroot fixado em **2025.02** (`buildroot.version`, LTS). Subiu de 2024.02 em
+  13/11/2026 para ter glibc 2.41 — ver §12.66, que também registra as duas
+  armadilhas silenciosas que o upgrade trouxe.
 - Pipeline: `build-device.sh` → `prepare-config.mjs` → `olddefconfig` →
   `assert-config.mjs` → `make` → artefatos + `SHA256SUMS`.
 - `assert-config` fechando a falha silenciosa do `olddefconfig` (§12.1).
@@ -249,7 +251,7 @@ Chamadas úteis:
 
 ```text
 Giochi system/
-├── buildroot.version                  # 2024.02
+├── buildroot.version                  # 2025.02
 ├── buildroot.sha256                   # hash do tarball, conferido no build
 ├── config/common.fragment             # pacotes e opções comuns a todos os aparelhos
 ├── device/
@@ -4242,6 +4244,38 @@ Sem tratar, o sintoma é o §12.1 clássico: `olddefconfig` descarta o panfrost
 **Decisão: 2025.02.** É LTS, entrega glibc 2.41 (resolve o item 4 — o
 `pidfd_spawnp@GLIBC_2.39` existe), mantém o panfrost sem LLVM, e os quatro
 aparelhos passam no `assert-config` com **uma linha cada** — nada mais muda.
+
+##### A decisão foi executada, e a evidência é do build, não da config
+
+`buildroot.version` passou a `2025.02`, o hash entrou em `buildroot.sha256`, e os
+três defconfigs de handheld ganharam a linha da série. O que foi medido:
+
+| Verificação | Resultado |
+| --- | --- |
+| `assert-config`, 4 aparelhos | qemu 28 · r35s 87 · x55 100 · x35h 97 — todos exit 0 |
+| build completo `qemu-aarch64` | **exit 0**, 667 alvos, ~1 h 50 com 12 jobs |
+| artefatos | `Image` (12 MB), `rootfs.ext2/.ext4` (512 MB) |
+| `sha256sum -c SHA256SUMS` | **todos OK** |
+| `ldd` no rootfs final (`debugfs`) | 5 344 B, modo `100755` |
+| `ldconfig` / `getconf` | 745 816 B / 22 456 B |
+| `libc.so.6` | `GNU C Library (Buildroot) stable release version 2.41` |
+| patches do R35S contra o kernel **6.12.9** | os três aplicam com `patch --dry-run`, sem reject nem fuzz |
+
+Duas notas do build que valem para quem repetir:
+
+- o kernel **muda de versão**: 2024.02 resolve `6.12` (release exata), 2025.02
+  resolve `6.12.9`. Os patches de DTS/joypad/painel do R35S foram conferidos
+  contra o 6.12.9 justamente por isso — aplicam, mas é um fato a lembrar;
+- o workaround do §12.32 continua necessário: o build imprimiu
+  `CMake do host é 4.2 — exportando CMAKE_POLICY_VERSION_MINIMUM=3.5`, e as
+  flags `-std=gnu17 -Wno-error=implicit-function-declaration` do
+  `package-overrides.mk` apareceram nas linhas de compilação do `host-openssl`.
+
+**O que NÃO foi provado:** o build completo dos três handhelds (mesa/panfrost,
+SDL2, U-Boot) em 2025.02. Não bloqueia a virada porque só o `qemu-aarch64` está
+`enabled` — o CI constrói apenas ele —, mas **a primeira imagem de handheld com
+2025.02 é uma rodada de validação**, e o aparelho continua sendo a única prova
+final.
 
 ##### Os gates, para o dia do upgrade
 

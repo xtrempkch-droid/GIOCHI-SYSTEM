@@ -87,13 +87,30 @@ test("o estudo registra a consequência sobre o gate da pilha gráfica", async (
 });
 
 test("o Python do Buildroot atende o arcade", async () => {
-  // arcade exige >= 3.11. Isto é um fato do Buildroot 2024.02 que precisa
-  // continuar verdadeiro se a versão for atualizada: subir o Buildroot e cair
-  // para 3.10 quebraria o caminho inteiro, sem aviso.
+  // arcade exige >= 3.11. Isto é um fato do Buildroot que precisa continuar
+  // verdadeiro se a versão for atualizada: subir o Buildroot e cair para 3.10
+  // quebraria o caminho inteiro, sem aviso.
+  //
+  // A versão era CRAVADA em "2024.02" e o teste servia de tripwire: subir a
+  // versão fazia falhar e forçava revalidar. Em 13/11/2026 isso aconteceu de
+  // propósito (2024.02 -> 2025.02) e a revalidação foi feita: o 2025.02 traz
+  // Python 3.12, pillow 11.1.0 e numpy 1.25.0 — todos >= o que o arcade pede.
+  // A lista abaixo é o registro das versões JÁ revalidadas; versão fora dela
+  // continua falhando até alguém medir.
   const version = (
     await readFile(path.join(ROOT, "buildroot.version"), "utf8")
   ).trim();
-  assert.equal(version, "2024.02", "revalidar Python e pillow/numpy ao atualizar");
+  const revalidadas = {
+    "2024.02": { python: "3.11", pillow: "10.2.0", numpy: "1.25.0" },
+    "2025.02": { python: "3.12", pillow: "11.1.0", numpy: "1.25.0" },
+  };
+  assert.ok(
+    Object.hasOwn(revalidadas, version),
+    `buildroot ${version} ainda não foi revalidado para o arcade.\n` +
+      `  Confira package/python3/python3.mk, python-pillow e python-numpy em\n` +
+      `  ${version}, confirme Python >= 3.11, e acrescente a versão em\n` +
+      `  tests/python-libs-study.test.mjs (revalidadas).`,
+  );
 
   const mk = path.join(
     process.env.GIOCHI_SYSTEM_WORK_DIR ?? path.join(process.env.HOME ?? "", ".cache/giochi-system/work"),

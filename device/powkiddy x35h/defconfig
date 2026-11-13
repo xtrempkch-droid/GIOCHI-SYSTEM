@@ -47,6 +47,21 @@ BR2_TARGET_ROOTFS_EXT2_SIZE="1024M"
 BR2_LINUX_KERNEL=y
 BR2_LINUX_KERNEL_CUSTOM_VERSION=y
 BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE="6.12"
+
+# ── headers do toolchain: a SÉRIE tem de ser declarada ─────
+# `BR2_KERNEL_HEADERS_AS_KERNEL=y` NÃO seleciona
+# `BR2_TOOLCHAIN_HEADERS_AT_LEAST_*`: com versão de kernel customizada o Kconfig
+# não tem como saber a capacidade dos headers, e o próprio help do Buildroot
+# manda declarar a série. Em 2024.02 o `.config` saía com `AT_LEAST="6.6"`; no
+# 2025.02 em diante sai `"2.6"`, e aí:
+#
+#   BR2_PACKAGE_GLIBC_SUPPORTS = n  → a libc cai para uCLIBC
+#   BR2_USE_WCHAR             = n  → sem freetype, SEM TEXTO no SDL2_ttf
+#   sem glibc-utils (ldd), sem binutils (readelf), sem psplash, sem dosfstools…
+#
+# Medido em 13/11/2026: 9 símbolos do common.fragment desaparecem de uma vez e o
+# build fica VERDE até o assert-config. Ver AGENTS §12.66.
+BR2_PACKAGE_HOST_LINUX_HEADERS_CUSTOM_6_12=y
 # arm64 tem UM defconfig no kernel (arch/arm64/configs/defconfig). NÃO usar
 # BR2_LINUX_KERNEL_USE_DEFCONFIG: o Buildroot acrescenta "_defconfig" ao valor
 # e "defconfig" vira "defconfig_defconfig" → "Can't find default configuration".
