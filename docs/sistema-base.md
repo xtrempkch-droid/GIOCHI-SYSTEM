@@ -52,6 +52,37 @@ PC (Windows/Linux/macOS)          aparelho
    ssh root@10.55.0.2              sshd atende na 22
 ```
 
+**O lease NÃO anuncia gateway nem DNS — de propósito.**
+
+Até 13/11/2026 o `/etc/udhcpd.conf` gerado dizia `option router 10.55.0.2` e
+`option dns 10.55.0.2`. O aparelho não encaminha pacote (`ip_forward=0`), não
+tem NAT (nem `nft` nem `iptables` na imagem) e não tem servidor DNS (a porta 53
+recusa). Ou seja: anunciava um porteiro que não existe. Medido pela equipe da
+engine no R35S — num PC cujo único adaptador fosse aquele cabo, **a internet do
+PC inteira para**, e o culpado parece o console.
+
+| Antes | Depois |
+| --- | --- |
+| `option router 10.55.0.2` | (ausente) |
+| `option dns 10.55.0.2` | (ausente) |
+| `option subnet 255.255.255.0` | mantido |
+
+O `ssh root@10.55.0.2` não depende de gateway: o PC recebe `10.55.0.1/24` no
+mesmo lease, então `10.55.0.2` está **on-link**. O mDNS também não — é
+multicast no segmento.
+
+**A invariante que fica:** anúncio e implementação andam juntos. Se um dia
+houver uplink de verdade (o Wi-Fi, que só a X55 tem), as duas linhas voltam
+**juntas** com `ip_forward=1` + NAT + um resolver (`dnsmasq`, que faz DNS e DHCP
+no mesmo processo). `tests/requisitos-engine.test.mjs` falha se alguém devolver
+o `option router` sem trazer o encaminhamento junto.
+
+**Rota default no aparelho: nenhuma, e é o desenho.** Sem uplink não há para
+onde ir, e rota morta é pior que rota nenhuma — esconde o erro até o primeiro
+`connect()`, que é exatamente como a engine perdeu uma sessão (`ENETUNREACH` no
+`ip_anunciavel()`). Com o Wi-Fi conectado, a rota aparece sozinha pelo `udhcpc`
+do `S40wifi`, que aplica o lease inteiro.
+
 ### 2-A. Dois aparelhos no mesmo PC: IP e MAC fixos não distinguem
 
 O `giochi-usbnet` usa **um endereço e um MAC fixos** em todo aparelho

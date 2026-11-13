@@ -93,6 +93,31 @@ BR2_PACKAGE_STRACE=y
 # funcionando. O `readelf` é a primeira opção quando existe.
 BR2_PACKAGE_BINUTILS=y
 BR2_PACKAGE_BINUTILS_TARGET=y
+# `ldd` no alvo — o `readelf` do binutils responde "quais bibliotecas este ELF
+# pede", mas o `ldd` responde a pergunta que o operador faz de verdade: "o que
+# falta para ESTE binário abrir?". A mensagem `version 'GLIBC_2.39' not found`
+# ou uma `libfoo.so` ausente viram tentativa e erro sem ele.
+#
+# Pedido da equipe da engine (13/11/2026, item 3). Medido no Buildroot 2024.02:
+#   package/glibc/Config.in:67   config BR2_PACKAGE_GLIBC_UTILS
+#   package/glibc/glibc.mk:218   GLIBC_TARGET_UTILS_USR_BIN = posix/getconf elf/ldd
+#   package/glibc/glibc.mk:224   GLIBC_TARGET_UTILS_SBIN  = elf/ldconfig
+#
+# Vem junto `ldconfig` (hoje ausente, e é ele quem atualiza o cache de soname) e
+# `getconf`. Custo: o `ldd` do glibc é um SCRIPT de shell (`elf/ldd.bash.in`),
+# não um binário — e o Buildroot já fixa `ac_cv_path_BASH_SHELL=/bin/bash`
+# porque `BR2_PACKAGE_BASH=y` está aqui em cima. Quem tirar o bash tem de saber
+# que o `ldd` cai para `sh` (o `GLIBC_LDD_NO_BASH` do glibc.mk reescreve o
+# script).
+#
+# Não é opção de aparelho: todo device desta árvore usa a glibc do próprio
+# Buildroot (o `choice` de libc tem `default BR2_TOOLCHAIN_BUILDROOT_GLIBC`, e
+# nenhum defconfig escolhe uclibc/musl), então o símbolo existe em todos.
+#
+# ARMADILHA do build retomado (§12.29): num `work/` já construído o glibc NÃO
+# reinstala — o build fica verde e sem `ldd`. Este símbolo exige build do zero
+# (ou `rm -rf work/<device>/build/glibc-*/`).
+BR2_PACKAGE_GLIBC_UTILS=y
 BR2_PACKAGE_UTIL_LINUX=y
 
 # kmscube NÃO entra aqui.

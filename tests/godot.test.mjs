@@ -74,7 +74,12 @@ test("o build recusa combinar GIOCHI_WITH_GODOT com build retomado", () => {
   // Trocar mdev por eudev num `target/` já construído deixa a imagem com os
   // dois gerenciadores e nenhum funcionando — a família do §12.27.
   assert.match(BUILD, /GIOCHI_WITH_GODOT[\s\S]{0,900}?GIOCHI_SYSTEM_KEEP_WORK|KEEP_WORK[\s\S]{0,400}?GIOCHI_WITH_GODOT/);
-  const trecho = BUILD.slice(BUILD.indexOf("WITH_GODOT"));
+  // A âncora é a ATRIBUIÇÃO, não a primeira menção: o nome da variável aparece
+  // antes no cabeçalho de "Variáveis úteis", e ancorar na primeira ocorrência
+  // fazia a janela começar na documentação em vez do bloco.
+  const inicioBloco = BUILD.indexOf('WITH_GODOT="${GIOCHI_WITH_GODOT');
+  assert.ok(inicioBloco > 0, "o parsing de GIOCHI_WITH_GODOT sumiu do build");
+  const trecho = BUILD.slice(inicioBloco);
   assert.match(trecho.slice(0, 1200), /exit 2/,
     "não há saída explícita quando a combinação é inválida");
 });

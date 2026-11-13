@@ -4024,6 +4024,240 @@ dono** — `10.55.0.2` passou da X55 para o R35S e depois para a equipe do app
 (`profiler_demo16` como DRM master). Testar ali sem combinar interrompe quem
 está usando; a regra do §18 vale para qualquer aparelho, não só para a X55.
 
+### 12.66 Os nove requisitos de imagem da engine, e a fronteira do upgrade do Buildroot
+
+Relatório da equipe da engine de 13/11/2026, medido no R35S: nove itens de "o
+que a imagem precisa acrescentar". Três eram nossos e baratos, três não eram
+possíveis, e dois deles estavam errados na premissa. O que a conferência
+produziu de mais valioso, porém, foi a **fronteira de versão do Buildroot** —
+que não estava no relatório e é o maior risco da árvore hoje.
+
+#### Os nove, um por um
+
+| # | Item | Veredito | O que ficou |
+| --- | --- | --- | --- |
+| 1 | DHCP anuncia gateway/DNS inexistente | **procedia** | `option router` e `option dns` removidos do `udhcpd.conf` |
+| 2 | Sem rota default no aparelho | **é o desenho** | nada a fazer; teste impede que alguém "resolva" |
+| 3 | `ldd` ausente | **procedia** | `BR2_PACKAGE_GLIBC_UTILS=y` no comum |
+| 4 | glibc ≥ 2.39 | **impossível em 2024.02** | resolve no upgrade (§ abaixo) |
+| 5 | Driver `dummy` do SDL2 | **procedia** | `buildroot-external/` + `SDL_VIDEODRIVER=kmsdrm` no init |
+| 6 | `/dev/*` para grupos | **possível, sem ganho hoje** | não feito: tudo roda como root |
+| 7 | Cabeçalhos e `.pc` na imagem | **caminho errado** | `make sdk` opcional (`GIOCHI_SYSTEM_SDK=1`) |
+| 8 | `libudev` | **premissa errada** | desnecessário: o SDL2 já usa inotify |
+| 9 | Térmica | **hardware** | nada |
+
+#### Item 1 — o lease anunciava um porteiro que não existe
+
+`giochi-usbnet` gerava `option router 10.55.0.2` e `option dns 10.55.0.2`. No
+aparelho: `ip_forward=0`, nenhum `nft`/`iptables`, porta 53 recusando. Medido
+pela engine com `nslookup example.com 10.55.0.2` → `connection refused`.
+
+Numa máquina cujo **único adaptador é o cabo**, o PC perde a internet inteira e
+o culpado parece o console. Aqui não doeu porque a Wi-Fi tem métrica 600 e a USB
+20100 — o que é a definição de defeito latente.
+
+Correção: as duas linhas saem. O `ssh root@10.55.0.2` continua porque o PC recebe
+`10.55.0.1/24` no mesmo lease, então `10.55.0.2` é **on-link**; mDNS é multicast
+no segmento e também não precisa. A invariante que fica em teste: **se alguém
+devolver o `option router`, tem de trazer `ip_forward` e NAT junto**.
+
+#### Item 3 — `ldd` são três símbolos, e o bash é dependência real
+
+`package/glibc/Config.in:67` → `BR2_PACKAGE_GLIBC_UTILS`, que instala
+`posix/getconf`, `elf/ldd` e `elf/ldconfig` (`glibc.mk:218-224`). O `ldd` do
+glibc é **script de shell**: com `BR2_PACKAGE_BASH=y` o Buildroot fixa
+`ac_cv_path_BASH_SHELL=/bin/bash`; sem ele, `GLIBC_LDD_NO_BASH` reescreve o
+script para POSIX. Não é erro — é mudança silenciosa de comportamento num
+utilitário de diagnóstico, então o par ficou preso em teste.
+
+Armadilha: build retomado **não** reinstala o glibc (§12.29). O build fica verde
+e sem `ldd`. Exige build do zero.
+
+#### Item 5 — o `dummy` do SDL2 não é uma linha, e o `override file` não alcança
+
+A receita do Buildroot **desliga** o driver em opção fixa (`sdl2.mk:26-27`), e
+isso continua verdade em 2025.02, 2026.02 e 2026.08:
+
+```sh
+--disable-video-dummy \
+--disable-video-offscreen \
+```
+
+Não existe símbolo de Kconfig. E o `config/package-overrides.mk` é incluído
+**antes** das receitas (`Makefile:528` vs `:531`), então:
+
+| Tentativa | Resultado |
+| --- | --- |
+| `SDL2_CONF_OPTS += ...` no override | apagado pela receita |
+| `override SDL2_CONF_OPTS += ...` | **bloqueia** o `+=` da receita — perde kmsdrm/alsa/opengles |
+| `override SDL2_CONF_OPTS = <lista inteira>` | funciona, mas repete ~40 flags condicionais |
+| **`buildroot-external/external.mk`** | **correto**: incluído em `Makefile:545`, depois das receitas |
+
+Daí a árvore `buildroot-external/` (a primeira do repositório, e ela existe por
+um motivo só). E a lição que ela carrega:
+
+**`+=` deixava as duas flags na linha de comando.** A primeira versão usou
+`+=`, e o `make --eval` mostrou:
+
+```text
+... --disable-video-dummy ... --enable-video-kmsdrm --enable-video-dummy
+```
+
+O autoconf do SDL2 percorre `$ac_configure_args` em ordem e a **última vence**
+(`configure.ac:2441`, `AC_ARG_ENABLE(..., , enable_video_dummy=yes)`), então
+funcionava. É exatamente a classe de coisa que não se deixa no repositório: o
+`config.log` registra as duas, a **ordem** é o único sustentáculo do
+comportamento, e um reordenamento futuro desliga o dummy sem erro. Ficou
+`filter-out --disable-video-dummy` — uma flag só.
+
+E o risco que vem junto, este real: no `SDL_video.c` o `DUMMY_bootstrap` é o
+**ÚLTIMO** da lista. Se o KMSDRM falhar ao iniciar, o SDL cai nele **em
+silêncio** — processo vivo, zero pixel na tela, a mesma forma do §12.62-D.
+Por isso o `giochi-init` passou a exportar `SDL_VIDEODRIVER=kmsdrm` (com `:-`,
+para o teste headless poder escolher `dummy`): a falha vira
+`kmsdrm not available` no stderr, que é o texto que a engine já documenta.
+
+**`BR2_EXTERNAL` tem de ser exportado em toda invocação do make.** O
+`Makefile:188` reconstrói `$(O)/.br2-external.mk` a partir da variável; sem ela
+o arquivo é zerado em silêncio e o pacote é construído **sem** o ajuste. Quem
+depurar à mão dentro de `work/<device>/build` precisa repetir a variável, com
+caminho **absoluto** (o `support/scripts/br2-external` recusa relativo).
+
+#### Item 7 — o SDK já estava configurado, faltava rodar
+
+`BR2_PACKAGE_HOST_ENVIRONMENT_SETUP=y` estava no comum desde o P1 de 07/11, e o
+`build-device.sh` reforça o `environment-setup` com `PKG_CONFIG_SYSROOT_DIR` e
+`PKG_CONFIG_LIBDIR`. O que nunca existiu foi o tarball: o sysroot só morava em
+`work/<device>/build/staging`, que não sai da máquina.
+
+Agora `GIOCHI_SYSTEM_SDK=1` roda `make sdk` e copia `*sdk-buildroot.tar.gz` para
+`out/<device>/`. **Opt-in**, porque o tarball passa de ~400 MB e o artefato de CI
+vive 14 dias. Detalhe medido: `sdk` depende de `world`, então ele **re-executa**
+`target-finalize` e o `post-build` — idempotente (§12.49), mas o
+`built_at_utc` do `/etc/giochi/build-info.txt` na imagem fica alguns minutos
+depois do de `out/`. O `commit=` é o mesmo, e é ele que identifica a imagem.
+
+#### Item 8 — `libudev` era premissa errada, e no R35S é fisicamente impossível
+
+O relatório diz "sem `libudev` não há hotplug; controle USB plugado depois do
+boot não aparece". Duas medições derrubam isso:
+
+**(a) o SDL2 desta imagem já tem hotplug sem libudev.** No `SDL_config.h` do
+build real: `HAVE_INOTIFY=1`, `SDL_USE_LIBUDEV` indefinido. O backend linux de
+joystick usa `LINUX_InotifyJoystickDetect()`, que observa `/dev/input` com
+`IN_CREATE|IN_DELETE|IN_MOVE|IN_ATTRIB`, e o kernel tem `CONFIG_INOTIFY_USER=y`.
+O caminho é disparado por `SDL_PumpEvents → SDL_JoystickUpdate → driver->Detect()`.
+
+O detalhe que explica o sintoma: **`SDL_NumJoysticks()` não dispara detecção**
+(só soma contadores). Quem enumera uma vez no boot com `SDL_NumJoysticks()` e não
+trata `SDL_CONTROLLERDEVICEADDED` não vê controle novo — **com ou sem libudev**.
+O que faltava era pump de evento, não biblioteca.
+
+**(b) no R35S não existe porta host.** A única porta é `dr_mode = "peripheral"`
+(§12.42): controle USB **nunca** pode ser plugado nessa placa. O item foi medido
+onde ele é inalcançável.
+
+Nas X55/X35H o teste é possível (têm `usb@fd000000`, `dr_mode=host`) e deve
+passar sem mudança — mas isso ainda **não foi medido**.
+
+#### A fronteira de versão: 2025.02 é o alvo, e o motivo não é o glibc
+
+O item 4 (glibc ≥ 2.39, para o `libtest` do Rust) é o único que **exige** trocar
+de Buildroot: em 2024.02 não há escolha de versão de glibc, e as toolchains
+externas que ela oferece são Bootlin 2023.11 — também 2.38.
+
+Medido com o **mesmo** defconfig e o **mesmo** `common.fragment`, trocando só a
+árvore:
+
+| Versão | glibc | mesa | panfrost sem LLVM? | `assert-config` |
+| --- | --- | --- | --- | --- |
+| **2024.02** (atual) | 2.38 | 23.x | sim | OK |
+| **2025.02** (LTS) | **2.41** | 24.0.9 | **sim** | **OK** |
+| 2025.05 | 2.41 | 25.0.6 | sim | — |
+| 2025.08 | 2.41 | 25.1.8 | **NÃO** | — |
+| 2025.11 | 2.42 | 25.2.7 | **NÃO** | — |
+| 2026.02 (LTS) | 2.42 | 26.0.1 | **NÃO** | falha no panfrost |
+
+**Duas armadilhas silenciosas, e a primeira é grave.**
+
+##### (1) `BR2_KERNEL_HEADERS_AS_KERNEL` não infere mais a série — e a libc cai para uClibc
+
+De 2025.02 em diante, o mesmo defconfig produz:
+
+```text
+2024.02:  BR2_TOOLCHAIN_HEADERS_AT_LEAST="6.6"   BR2_TOOLCHAIN_USES_GLIBC=y
+2025.02:  BR2_TOOLCHAIN_HEADERS_AT_LEAST="2.6"   BR2_TOOLCHAIN_USES_UCLIBC=y
+2026.02:  BR2_TOOLCHAIN_HEADERS_AT_LEAST="2.6"   BR2_TOOLCHAIN_USES_UCLIBC=y
+```
+
+`AS_KERNEL` nunca selecionou `BR2_TOOLCHAIN_HEADERS_AT_LEAST_*` — com versão de
+kernel customizada o Kconfig não tem como saber a capacidade dos headers, e o
+próprio help do Buildroot manda declarar a série. Em 2024.02 o `.config` saía
+com a cadeia `AT_LEAST_3_0..6_6` preenchida; de 2025.02 em diante sai **vazia**.
+Com `AT_LEAST="2.6"`, `BR2_PACKAGE_GLIBC_SUPPORTS` fica falso, a dependência do
+membro `glibc` do choice falha, e o default cai para **uClibc**.
+
+A cascata medida, 9 símbolos do `common.fragment` de uma vez:
+
+| Símbolo | Efeito na imagem |
+| --- | --- |
+| `BR2_USE_WCHAR` | freetype/psplash/`SDL2_ttf` desligados — **sem texto** |
+| `BR2_PACKAGE_GLIBC_UTILS` | sem `ldd` (item 3 desfeito) |
+| `BR2_PACKAGE_BINUTILS` | sem `readelf` |
+| `BR2_PACKAGE_PSPLASH` | sem splash |
+| `BR2_PACKAGE_DOSFSTOOLS`, `IPROUTE2`, `NANO`, `PROCPS_NG` | sem mkfs.vfat, sem `ip` do iproute2, sem editor, sem `ps` do procps-ng |
+| `BR2_PACKAGE_MESA3D_GALLIUM_DRIVER_PANFROST` | **sem GPU** (em 2026.02) |
+
+O build **passa** até o `assert-config`, e o que ele imprime é uma lista longa
+demais para ser coincidência — foi só isso que denunciou. Correção: **uma linha
+por defconfig**, com a série do kernel:
+
+```make
+BR2_PACKAGE_HOST_LINUX_HEADERS_CUSTOM_6_12=y
+```
+
+Verificado nos quatro aparelhos em 2025.02: `qemu-aarch64` 28 símbolos (não
+precisa — usa o defconfig do Buildroot, que já declara `CUSTOM_6_1`), `r35s` 87,
+`x55` 100, `x35h` 97 — todos exit 0.
+
+##### (2) Mesa 25.1+ exige LLVM no target para o panfrost
+
+A partir do 2025.08:
+
+```kconfig
+config BR2_PACKAGE_MESA3D_GALLIUM_DRIVER_PANFROST
+	depends on BR2_PACKAGE_MESA3D_LLVM
+	select BR2_PACKAGE_MESA3D_NEEDS_PRECOMP_COMPILER
+```
+
+e `MESA3D_LLVM` faz `select BR2_PACKAGE_LLVM` — **LLVM 21 no aparelho**, mais
+OpenCL + SPIRV-LLVM-Translator + SPIRV-Tools (`NEEDS_PRECOMP_COMPILER`) e o
+`panfrost_compile` no host. Num handheld de 1 GB isso é a maior biblioteca do
+catálogo, para um driver que em 2025.02 não precisava de nada disso.
+
+Sem tratar, o sintoma é o §12.1 clássico: `olddefconfig` descarta o panfrost
+(dependência não satisfeita), `assert-config` reprova e o build para. Quem
+"resolver" ligando só o LLVM decide, sem perceber, o tamanho da imagem.
+
+**Decisão: 2025.02.** É LTS, entrega glibc 2.41 (resolve o item 4 — o
+`pidfd_spawnp@GLIBC_2.39` existe), mantém o panfrost sem LLVM, e os quatro
+aparelhos passam no `assert-config` com **uma linha cada** — nada mais muda.
+
+##### Os gates, para o dia do upgrade
+
+`tests/buildroot-upgrade.test.mjs` (3 testes) lê `buildroot.version` e **só age
+quando a versão alcança a fronteira**:
+
+| Versão ≥ | O teste exige |
+| --- | --- |
+| 2025.02 | todo defconfig com kernel customizado declara `BR2_PACKAGE_HOST_LINUX_HEADERS_CUSTOM_<série>` |
+| 2025.08 | quem pede panfrost também pede `BR2_PACKAGE_MESA3D_LLVM=y` — a decisão de tamanho fica **visível no diff**, não escondida num `select` |
+| sempre | `buildroot.sha256` tem a linha do tarball da versão em uso |
+
+Hoje os dois primeiros saem `skip` com o motivo escrito; verificado que os dois
+**disparam** com `buildroot.version=2025.08`, nomeando os três aparelhos e a
+linha exata a acrescentar.
+
 ## 13. Aparelhos
 
 | ID | Pasta | SoC | Arch | Status | Falta |

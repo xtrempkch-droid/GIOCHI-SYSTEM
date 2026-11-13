@@ -13,12 +13,49 @@
 #   GIOCHI_SYSTEM_OUT_DIR     saída (padrão: <repo>/out/<device>)
 #   JOBS                   paralelismo do make (padrão: nproc)
 #   ALLOW_DRAFT=1          permite tentar um device draft
+#   GIOCHI_SYSTEM_KEEP_WORK=1     retoma um build existente em vez de apagar
+#   GIOCHI_WITH_GODOT=1           compositor Wayland + eudev (não incremental)
+#   GIOCHI_SYSTEM_SDK=1           gera o tarball do SDK e o põe em out/<device>/
+#
+# A árvore `buildroot-external/` é sempre passada ao Buildroot por `BR2_EXTERNAL`
+# (ver o comentário no topo do script: mora lá o `--enable-video-dummy` do SDL2).
 # ============================================================
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEVICE_ID="${1:-}"
+
+# ---------------------------------------------------------------
+# Árvore br2-external — incluída DEPOIS das receitas de pacote.
+#
+# O `config/package-overrides.mk` (BR2_PACKAGE_OVERRIDE_FILE) é incluído ANTES
+# (`Makefile:528` vs `:531`), então nele `VAR += opção` é apagado pela receita e
+# `override VAR += opção` bloqueia os `+=` condicionais dela. O que ACRESCENTA
+# opção às decisões do `.config` de cada aparelho precisa do `external.mk`,
+# incluído em `Makefile:545`.
+#
+# Hoje mora lá UMA coisa: `SDL2_CONF_OPTS += --enable-video-dummy` (a receita
+# desliga o dummy em opção fixa e não há símbolo de Kconfig para religar).
+#
+# O export é obrigatório em TODA invocação do make: o `Makefile:188` reconstrói
+# `$(O)/.br2-external.mk` a partir desta variável, e sem ela o arquivo é zerado
+# em silêncio — o pacote passa a ser construído sem o ajuste, e nada avisa.
+#
+# A checagem é aqui, cedo, e não na primeira compilação: faltar `external.desc`
+# faz o Buildroot abortar com mensagem sobre o diretório, 40 minutos depois de o
+# build começar.
+# ---------------------------------------------------------------
+BR2_EXTERNAL_DIR="$ROOT/buildroot-external"
+for arquivo in external.desc external.mk Config.in; do
+  if [[ ! -f "$BR2_EXTERNAL_DIR/$arquivo" ]]; then
+    echo "ERRO: árvore br2-external incompleta: falta $BR2_EXTERNAL_DIR/$arquivo." >&2
+    echo "Sem ela o SDL2 é construído sem o driver de vídeo dummy, e o build" >&2
+    echo "fica verde — o defeito só aparece no teste headless da engine." >&2
+    exit 2
+  fi
+done
+export BR2_EXTERNAL="$BR2_EXTERNAL_DIR"
 
 if [[ -z "$DEVICE_ID" ]]; then
   echo "Uso: bash scripts/build-device.sh <device-id>" >&2
@@ -133,6 +170,7 @@ echo "  buildroot: $BUILDROOT_VERSION"
 echo "  work:      $WORK_DIR"
 echo "  cache:     $CACHE_ROOT"
 echo "  out:       $OUT_DIR"
+echo "  external:  $BR2_EXTERNAL"
 echo
 
 # O `out/<device>/` NÃO é apagado aqui: ele é limpo só na hora de coletar os
@@ -331,6 +369,24 @@ if ((WITH_GODOT)); then
     exit 2
   fi
   echo "  godot:     suporte Wayland (cage) — /dev via eudev, ~15-25 MB"
+fi
+# SDK do Buildroot (sysroot + toolchain num tarball auto-contido). NÃO é o
+# padrão, de propósito: o tarball de um aparelho com mesa+SDL2 passa de ~400 MB,
+# e o artefato de CI fica publicado por 14 dias. Para o fluxo normal — compilar
+# no PC com `scripts/engine-build.sh`, que lê `work/<device>/build/staging` —
+# ele não serve para nada.
+#
+# Serve para quem NÃO tem o `work/`: um terceiro que quer compilar contra este
+# sysroot, ou a própria equipe da engine noutra máquina. Pedido do item 7 do
+# relatório de 13/11/2026 ("cabeçalhos e .pc na imagem"), cuja resposta certa é
+# esta e não encher o rootfs de `include/`.
+WITH_SDK="${GIOCHI_SYSTEM_SDK:-0}"
+case "${WITH_SDK,,}" in
+  1|true|yes|on) WITH_SDK=1 ;;
+  *) WITH_SDK=0 ;;
+esac
+if ((WITH_SDK)); then
+  echo "  sdk:       tarball do SDK será gerado (GIOCHI_SYSTEM_SDK=1)"
 fi
 
 if ((KEEP_WORK)); then
@@ -1197,6 +1253,36 @@ if [[ -f "$ROOT/config/common.busybox.fragment" ]]; then
   fi
 fi
 
+# ---------------------------------------------------------------
+# SDK do Buildroot (opcional, GIOCHI_SYSTEM_SDK=1).
+#
+# `make sdk` empacota `host/` inteiro (toolchain + sysroot + os `.pc`) num
+# tarball auto-contido, com `relocate-sdk.sh` e `environment-setup` já com
+# `PKG_CONFIG_SYSROOT_DIR`/`LIBDIR` apontados pelo bloco acima. É a resposta
+# certa ao item 7 do relatório da engine: compilar contra ESTE sysroot sem ter
+# este `work/`.
+#
+# Por que não no rootfs: copiar `include/` e `lib/` para a imagem multiplica o
+# tamanho e CONTINUA sem os headers de libc — medido, o `/usr/include` da imagem
+# tem zero entradas por decisão de projeto. O SDK resolve as duas coisas de uma
+# vez, do lado de quem compila.
+#
+# Custo: `prepare-sdk` depende de `world`, então o alvo `sdk` RE-EXECUTA as
+# partes phony (`target-finalize` → post-build → rootfs). É idempotente por
+# desenho — o `post-build.sh` foi escrito assim (§12.49) —, mas o
+# `built_at_utc` do `/etc/giochi/build-info.txt` na imagem passa a ser o desta
+# segunda passagem, alguns minutos depois do de `out/`. O `commit=` é o mesmo, e
+# é ele que identifica a imagem.
+if ((WITH_SDK)); then
+  echo "Gerando o SDK (sysroot + toolchain)..."
+  if ! make -C "$BR2_DIR" O="$BUILD_DIR" sdk >>"$LOG_FILE" 2>&1; then
+    echo "ERRO: 'make sdk' falhou. Log completo em $LOG_FILE." >&2
+    echo "Últimas linhas:" >&2
+    tail -20 "$LOG_FILE" >&2 || true
+    exit 1
+  fi
+fi
+
 # Limpeza do `out/` SÓ agora, com o build já compilado e os gates aprovados.
 # Antes de coletar, apagar os artefatos antigos evita que um arquivo que não é
 # mais produzido (um DTB renomeado, um `u-boot.itb` que deixou de existir)
@@ -1221,6 +1307,24 @@ for pattern in "${ARTIFACTS[@]}"; do
   done
 done
 shopt -u nullglob
+
+# SDK: o nome do tarball vem do tuple (`aarch64-buildroot-linux-gnu_sdk-buildroot
+# .tar.gz`), então não dá para declarar em `artifacts` do device.json — que é
+# por aparelho e por padrão de imagem. Aqui é por glob, e só quando pedido.
+if ((WITH_SDK)); then
+  shopt -s nullglob
+  for file in "$BUILD_DIR"/images/*sdk-buildroot.tar.gz; do
+    cp -aL "$file" "$OUT_DIR/"
+    echo "  + $(basename "$file") (SDK)"
+    copied=$((copied + 1))
+  done
+  shopt -u nullglob
+  if ! compgen -G "$OUT_DIR/*sdk-buildroot.tar.gz" >/dev/null; then
+    echo "ERRO: 'make sdk' rodou mas nenhum *sdk-buildroot.tar.gz apareceu em" >&2
+    echo "$BUILD_DIR/images. O artefato sairia sem o SDK prometido." >&2
+    exit 1
+  fi
+fi
 
 # U-Boot: o Buildroot 2024.02 publica em `images/` apenas `u-boot.bin` e
 # `u-boot-rockchip.bin`. `idbloader.img` e `u-boot.itb` ficam no diretório de

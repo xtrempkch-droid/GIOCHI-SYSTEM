@@ -46,6 +46,26 @@ set -u
 LAUNCHER="${GIOCHI_LAUNCHER:-/opt/giochi/apps/launcher/bin/giochi-launcher}"
 CONTROLLERS="${GIOCHI_CONTROLLERS:-/opt/giochi/apps/controllers/bin/giochi-controllers}"
 
+# ## Driver de vídeo FIXO: `kmsdrm`
+#
+# O SDL2 desta imagem agora compila o driver `dummy` (buildroot-external/
+# external.mk — pedido da engine para rodar teste sem tomar o console). No
+# `SDL_video.c` o `DUMMY_bootstrap` é o ÚLTIMO da lista de bootstrap: se o
+# KMSDRM falhar ao inicializar, o SDL **cai nele em silêncio**, abre janela de
+# mentira e o aparelho fica com a tela preta e o processo vivo — a pior classe
+# de falha deste projeto (§12.62-D).
+#
+# Fixar aqui faz a falha ser explícita: sem KMSDRM, a engine morre com
+# "kmsdrm not available" no stderr, que é a mensagem que já está documentada em
+# `docs/ferramentas.md` do lado deles.
+#
+# `:-` e não `=`: quem quiser rodar headless de propósito define
+# `SDL_VIDEODRIVER=dummy` no ambiente do launcher/teste, e a escolha sobrevive.
+# E o padrão vale só para o que este script inicia — o getty do console e um
+# shell por SSH continuam sem a variável.
+SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-kmsdrm}"
+export SDL_VIDEODRIVER
+
 CONFIG_DIR="${GIOCHI_CONFIG_DIR:-/user/.config/giochi}"
 SETUP_FLAG="$CONFIG_DIR/controller-setup"
 BRIGHTNESS_FILE="$CONFIG_DIR/brightness"

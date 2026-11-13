@@ -156,6 +156,38 @@ falta para texto fora do Godot. Vale confirmar contra o `forge.json` do app
 | log do boot | `giochi-boot.log` na partição FAT (aparelhos com marcador) |
 | estado do mixer do aparelho | `/etc/giochi/asound.state` (só onde o roteamento exige) |
 
+### Driver de vídeo: o `giochi-init` fixa `kmsdrm`
+
+A imagem passou a compilar também o driver `dummy` do SDL2, para a engine poder
+rodar teste headless sem tomar o console (`buildroot-external/external.mk` — a
+receita do Buildroot desliga o dummy em opção fixa e não há símbolo de Kconfig).
+
+O efeito colateral é o que importa para quem escreve o launcher: no
+`SDL_video.c` o `DUMMY_bootstrap` é o **ÚLTIMO** da lista de bootstrap. Se o
+KMSDRM falhar ao abrir, o SDL cai no dummy **em silêncio** — o processo roda, o
+log diz que o vídeo inicializou, e a tela fica preta. É a mesma classe de falha
+do §12.62-D do AGENTS.
+
+Por isso o `giochi-init` exporta:
+
+```sh
+SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-kmsdrm}"
+export SDL_VIDEODRIVER
+```
+
+Duas consequências práticas:
+
+* **falha de KMSDRM agora é explícita** — a engine morre com
+  `kmsdrm not available` no stderr, que é a mensagem que o
+  `docs/ferramentas.md` deles já documenta;
+* **teste headless continua funcionando**: basta definir
+  `SDL_VIDEODRIVER=dummy` no ambiente; o `:-` respeita a escolha.
+
+O padrão só vale para o que o `giochi-init` inicia. Um shell por SSH, o getty do
+console e um binário rodado à mão **não** herdam a variável — ali o SDL2 escolhe
+sozinho, e num aparelho com painel DSI o resultado é `kmsdrm`. Quem quiser provar
+o caminho headless define a variável explicitamente.
+
 Caminho combinado para o binário (usado pelo `giochi-init` e pelo `post-build`):
 
 ```text

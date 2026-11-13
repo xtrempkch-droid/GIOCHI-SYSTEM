@@ -110,6 +110,29 @@ out/qemu-aarch64/
 | `GIOCHI_SYSTEM_OUT_DIR` | `<repo>/out/<device>` | Destino dos artefatos. |
 | `JOBS` | `nproc` | Paralelismo do `make`. |
 | `ALLOW_DRAFT` | `0` | `1` permite tentar um device draft. |
+| `GIOCHI_SYSTEM_SDK` | `0` | `1` roda `make sdk` e põe o tarball do SDK em `out/<device>/`. |
+
+### SDK (`GIOCHI_SYSTEM_SDK=1`)
+
+Por padrão o sysroot só existe em `work/<device>/build/staging`, que não sai da
+máquina — e é dele que o `scripts/engine-build.sh` compila a engine. Para quem
+**não tem** esse `work/` (outra máquina, um terceiro), o Buildroot gera um
+tarball auto-contido com toolchain + sysroot + `.pc`:
+
+```bash
+GIOCHI_SYSTEM_SDK=1 ALLOW_DRAFT=1 bash scripts/build-device.sh r35s
+```
+
+Sai `aarch64-buildroot-linux-gnu_sdk-buildroot.tar.gz` em `out/<device>/`. É
+opt-in porque passa de ~400 MB num aparelho com mesa + SDL2, e o artefato de CI
+fica publicado por 14 dias. **Não** é o caminho para ter headers no aparelho:
+copiar `include/` para o rootfs multiplica a imagem e continua sem os headers de
+libc (ver AGENTS §12.66, item 7).
+
+Detalhe medido: o alvo `sdk` depende de `world`, então ele re-executa
+`target-finalize` e o `post-build`. É idempotente, mas o `built_at_utc` do
+`/etc/giochi/build-info.txt` **dentro da imagem** passa a ser o da segunda
+passagem. O `commit=` não muda, e é ele que identifica a imagem.
 
 ### Espaço em disco e ccache
 

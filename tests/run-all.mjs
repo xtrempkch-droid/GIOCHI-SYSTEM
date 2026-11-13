@@ -62,3 +62,5 @@ import "./defconfig-gate.test.mjs";
 import "./help-sentinels.test.mjs";
 import "./bootlog-dmesg-spam.test.mjs";
 import "./hardware-x55.test.mjs";
+import "./requisitos-engine.test.mjs";
+import "./buildroot-upgrade.test.mjs";

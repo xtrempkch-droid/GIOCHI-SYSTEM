@@ -1,0 +1,5 @@
+comment "Giochi System — árvore externa"
+
+comment "Nenhuma opção de configuração mora aqui: esta árvore existe só para o"
+comment "external.mk, que é incluído DEPOIS das receitas de pacote. O ajuste de"
+comment "pacote que precisa somar às opções da receita mora lá, não no Config.in."

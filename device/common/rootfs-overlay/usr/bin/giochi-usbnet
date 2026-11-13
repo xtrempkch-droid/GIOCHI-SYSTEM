@@ -286,6 +286,25 @@ start_dhcp() {
 
     # Faixa de UM endereço: o cabo liga um PC por vez, e uma faixa maior só
     # aumenta a chance de o host pegar um IP que já foi de outra máquina.
+    #
+    # SEM `option router` E SEM `option dns`, de propósito.
+    #
+    # O lease anunciava `router 10.55.0.2` e `dns 10.55.0.2`, mas o aparelho não
+    # encaminha pacote (`net.ipv4.ip_forward=0`), não tem NAT (nem `nft` nem
+    # `iptables` na imagem) e não tem servidor DNS (porta 53 recusa). Medido
+    # pela equipe da engine em 13/11/2026 no R35S: o PC recebia uma rota default
+    # e um resolver apontando para um porteiro que não existe. Numa máquina cujo
+    # único adaptador é este cabo, a internet do PC inteira para — e o culpado
+    # parece o console.
+    #
+    # O `ssh root@10.55.0.2` continua funcionando sem as duas: o PC recebe
+    # 10.55.0.1/24 no mesmo lease, então 10.55.0.2 está ON-LINK e não precisa de
+    # gateway nenhum. O mDNS também, que é multicast no segmento.
+    #
+    # Se um dia houver uplink de verdade (Wi-Fi no X55), as duas linhas voltam
+    # JUNTAS com a implementação — `ip_forward=1` + NAT + um resolver. Anunciar
+    # sem implementar é pior que não anunciar: a rota morta esconde o erro até o
+    # primeiro `connect()`.
     mkdir -p "$(dirname "$LEASE_FILE")"
     cat >"$DHCP_CONF" <<EOF
 # Gerado por giochi-usbnet. Não edite: é reescrito a cada boot.
@@ -296,8 +315,6 @@ max_leases	1
 lease_file	$LEASE_FILE
 pidfile		$PIDFILE
 option	subnet	255.255.255.0
-option	router	$DEV_ADDR
-option	dns	$DEV_ADDR
 option	domain	giochi.local
 EOF
 
