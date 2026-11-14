@@ -1,0 +1,8 @@
+Alvo virtual sem tela: o console serial é a interface.
+
+O QEMU `virt` sem -device virtio-gpu-pci não tem /dev/dri/card0, e o launcher
+abriria com o driver dummy — sem onde desenhar, e com o diagnóstico dele saindo
+no mesmo console do getty.
+
+Para ver o launcher nesta VM: remova este arquivo da imagem e inicie com
+-device virtio-gpu-pci e -display.

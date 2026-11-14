@@ -63,7 +63,28 @@ CONTROLLERS="${GIOCHI_CONTROLLERS:-/opt/giochi/apps/controllers/bin/giochi-contr
 # `SDL_VIDEODRIVER=dummy` no ambiente do launcher/teste, e a escolha sobrevive.
 # E o padrão vale só para o que este script inicia — o getty do console e um
 # shell por SSH continuam sem a variável.
-SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-kmsdrm}"
+#
+# ## A exceção: aparelho sem DRM
+#
+# Alvo virtual (QEMU `virt` sem `virtio-gpu-pci`) não tem `/dev/dri/card0`, e
+# `kmsdrm` ali falha **sempre** — não é o defeito que a escolha fixa quer
+# denunciar, é a ausência esperada. Medido no boot da primeira imagem do Giochi
+# OS para QEMU (2026-11-13): o launcher saía com "kmsdrm not available" cinco
+# vezes e o `giochi-init` desistia.
+#
+# A regra fica binária e no lugar onde a informação existe:
+#
+#   existe /dev/dri/card0  → `kmsdrm` (padrão; falha ali é defeito real)
+#   não existe            → `dummy`  (headless de verdade, sem tela preta)
+#
+# Continua sendo uma decisão do init, não do SDL: nada de cair para `dummy` em
+# silêncio depois de o KMSDRM ter falhado num aparelho que TEM card.
+if [ -e /dev/dri/card0 ]; then
+  VIDEO_PADRAO=kmsdrm
+else
+  VIDEO_PADRAO=dummy
+fi
+SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-$VIDEO_PADRAO}"
 export SDL_VIDEODRIVER
 
 CONFIG_DIR="${GIOCHI_CONFIG_DIR:-/user/.config/giochi}"
@@ -121,6 +142,19 @@ PARADA_FILE="${GIOCHI_PARADA_FILE:-/run/giochi/launcher-parado}"
 # A flag é verificada ANTES de cada tentativa, então também funciona quando o
 # launcher já está rodando: ele sai, o giochi-init vê a flag e não reinicia.
 DEV_FREE_FILE="${GIOCHI_DEV_FREE_FILE:-/run/giochi/dev-free-console}"
+
+# ## Aparelho sem tela
+#
+# Arquivo no overlay do aparelho (`/etc/giochi/headless`) que declara "aqui não
+# há tela". Presente, o console é a interface e o launcher não sobe; ausente,
+# tudo funciona como em qualquer handheld.
+#
+# Por que um arquivo do device e não `[ -e /dev/dri/card0 ]`: o `giochi-init`
+# roda no CI e no teste de unidade, onde não existe DRM nenhum e o launcher
+# PRECISA ser exercitado. A condição por ausência de card fazia o teste de
+# `RESTART_MAX` esperar o launcher que nunca vinha (medido: 9 de 9 falhas por
+# timeout em 13/11/2026). Quem sabe se o aparelho tem tela é o device.
+HEADLESS_FILE="${GIOCHI_HEADLESS_FILE:-/etc/giochi/headless}"
 
 # Saída deliberada: 0 (o launcher pediu para sair) ou morte por sinal
 # "administrativo". 128+sinal é o que o shell devolve para filho morto por sinal.
@@ -361,8 +395,38 @@ main() {
     restarts=0
     window_start=0
     dev_aviso=0
+    headless_aviso=0
 
     while :; do
+        # Alvo sem tela — declarado pelo aparelho, não adivinhado.
+        #
+        # O QEMU `virt` sem `virtio-gpu-pci` não tem `/dev/dri/card0`, e o
+        # launcher abre com o driver `dummy`: roda de verdade e não tem onde
+        # desenhar. O diagnóstico dele sai no MESMO console do getty, uma linha
+        # por segundo. Medido no boot da primeira imagem do Giochi OS para QEMU
+        # (13/11/2026): o login aparecia e sumia embaixo de
+        # "energia: bateria sem medidor".
+        #
+        # O sinal é um ARQUIVO no overlay do aparelho (`/etc/giochi/headless`),
+        # não a ausência do card: o `giochi-init` também roda no CI e em teste,
+        # onde não existe DRM nenhum e o launcher TEM de ser exercitado. Quem
+        # declara "aqui não há tela" é o fragmento do device.
+        #
+        # Com tela, o launcher continua sendo a interface — e uma falha de
+        # KMSDRM num aparelho com card continua sendo defeito visível.
+        if [ -e "$HEADLESS_FILE" ]; then
+            if [ "$headless_aviso" != "1" ]; then
+                log "aparelho sem tela ($HEADLESS_FILE) — o console é a interface, launcher não inicia"
+                log "para ver o launcher, remova o arquivo e suba com -device virtio-gpu-pci -display"
+                stop_splash
+                assumir_console
+                headless_aviso=1
+            fi
+            sleep 5
+            continue
+        fi
+        headless_aviso=0
+
         # Flag de desenvolvimento: launcher não sobe enquanto o arquivo existir.
         # Verificada a cada volta, então `touch` no meio de uma sessão também
         # funciona — o launcher sai na próxima queda deliberada e não volta.

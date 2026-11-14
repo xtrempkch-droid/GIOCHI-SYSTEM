@@ -7,3 +7,44 @@ BR2_TARGET_ROOTFS_EXT2_SIZE="512M"
 # runner/local já é usado para inicializar a VM.
 # BR2_PACKAGE_HOST_QEMU is not set
 # BR2_PACKAGE_HOST_QEMU_SYSTEM_MODE is not set
+
+# ── stack SDL2 do launcher ───────────────────────────────────
+#
+# Este device nasceu como smoke test do pipeline e, por isso, sem SDL2 — o
+# `config/common.fragment` explica por que o stack de texto não mora lá. A
+# partir de 13/11/2026 ele também publica a primeira imagem do **Giochi OS**:
+# o launcher e os jogos entram no rootfs pelo overlay do repositório Giochi os,
+# e sem SDL2 eles não abrem.
+#
+# Medido no boot da primeira tentativa (2026-11-13):
+#
+#   /opt/giochi/apps/launcher/bin/giochi-launcher: error while loading shared
+#   libraries: libSDL2-2.0.so.0: cannot open shared object file
+#   giochi-init: launcher saiu com 127 (queda 1 de 5 na janela de 60s)
+#
+# Ou seja: o app está na imagem e não roda. Pior que não estar — o manifesto
+# diria "6 apps embutidos" e o console mostraria laço de queda.
+#
+# `SDL2_KMSDRM` NÃO entra: depende de libdrm + gbm + EGL, e o `virt` do QEMU
+# sem `-device virtio-gpu-pci` não tem `/dev/dri/card0`. Quem liga o vídeo é o
+# driver `dummy` (ver `buildroot-external/external.mk`), e o `giochi-init`
+# escolhe `dummy` quando não há card DRM — em hardware a escolha continua
+# `kmsdrm`, onde uma falha ali é defeito de verdade.
+#
+# Como não há tela, o próprio device declara isso no overlay
+# (`rootfs-overlay/etc/giochi/headless`): o `giochi-init` mantém o console como
+# interface em vez de subir o launcher para escrever diagnóstico num terminal
+# que ninguém está vendo.
+BR2_PACKAGE_SDL2=y
+# SDL2_TTF é PACOTE à parte e faz `select FREETYPE`.
+BR2_PACKAGE_SDL2_TTF=y
+# HARFBUZZ **não** entra, e o motivo é medido: `package/harfbuzz/Config.in:3`
+# tem `depends on BR2_INSTALL_LIBSTDCPP`, e o `qemu_aarch64_virt_defconfig` não
+# liga C++ no toolchain. O `assert-config` reprovou a primeira tentativa com
+# "DESAPARECEU: BR2_PACKAGE_HARFBUZZ". Sem ele o shaping de script complexo
+# fica errado e o texto latino sai certo — português não precisa, e um alvo
+# virtual não justifica arrastar libstdc++ para dentro da imagem.
+# DEJAVU sem a família instala ZERO fontes: `/usr/share/fonts/dejavu/` nasce
+# vazio e o TTF_OpenFont falha no aparelho, com o build verde.
+BR2_PACKAGE_DEJAVU=y
+BR2_PACKAGE_DEJAVU_SANS=y
