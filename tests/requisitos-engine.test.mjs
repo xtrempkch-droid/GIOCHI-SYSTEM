@@ -165,14 +165,52 @@ test("o build exporta BR2_EXTERNAL e recusa árvore incompleta", async () => {
   assert.match(texto, /external\.desc external\.mk Config\.in/);
 });
 
-test("o giochi-init fixa o driver de vídeo em kmsdrm", async () => {
+test("o giochi-init fixa o driver de vídeo, e a regra é binária", async () => {
   // O dummy é o ÚLTIMO bootstrap do SDL2 (`SDL_video.c`): se kmsdrm falhar, o
   // SDL cai nele em silêncio — janela de mentira, tela preta, processo vivo.
-  // Com a variável fixada, a falha aparece com o texto que a engine já
+  // Com a variável fixada pelo init, a falha vira o texto que a engine já
   // documenta ("kmsdrm not available").
+  //
+  // A regra é binária e mora onde a informação existe:
+  //
+  //   existe /dev/dri/card0  → kmsdrm  (falha ali é defeito REAL)
+  //   não existe             → dummy   (headless de verdade)
+  //
+  // O segundo ramo existe por medição, não por conveniência: no boot da
+  // primeira imagem do Giochi OS para QEMU (13/11/2026), sem `virtio-gpu-pci`
+  // não há card0, o `kmsdrm` falhava sempre e o `giochi-init` desistia depois de
+  // cinco quedas. Mas o ramo NÃO pode virar "cai para dummy quando o kmsdrm
+  // falha": num aparelho que TEM card, falha tem de continuar aparecendo.
   const texto = await read(INIT);
-  assert.match(texto, /^SDL_VIDEODRIVER="\$\{SDL_VIDEODRIVER:-kmsdrm\}"$/m);
+
+  // A decisão é condicionada à EXISTÊNCIA do card, nunca ao resultado de uma
+  // tentativa de abrir o vídeo.
+  const bloco = texto.match(
+    /if \[ -e \/dev\/dri\/card0 \]; then\s*\n\s*VIDEO_PADRAO=kmsdrm\s*\nelse\s*\n\s*VIDEO_PADRAO=dummy\s*\nfi/,
+  );
+  assert.ok(
+    bloco,
+    "o init não decide o driver por existência de /dev/dri/card0 " +
+      "(com card: kmsdrm; sem card: dummy)",
+  );
+
+  // A variável é exportada a partir do padrão, com `:-` para o override vencer.
+  assert.match(texto, /^SDL_VIDEODRIVER="\$\{SDL_VIDEODRIVER:-\$VIDEO_PADRAO\}"$/m);
   assert.match(texto, /^export SDL_VIDEODRIVER$/m);
+
+  // E nada de fallback depois de falhar: quem tem card e não abre kmsdrm tem de
+  // morrer, não virar dummy. A checagem é sobre ATRIBUIÇÕES (linha que começa
+  // com o nome), não sobre o texto: os comentários acima citam
+  // `SDL_VIDEODRIVER=dummy` como exemplo de override, e um `doesNotMatch` cru
+  // reprovaria a própria documentação.
+  const atribuicoes = [...texto.matchAll(/^SDL_VIDEODRIVER=(.*)$/gm)].map((m) => m[1].trim());
+  assert.deepEqual(
+    atribuicoes,
+    ['"${SDL_VIDEODRIVER:-$VIDEO_PADRAO}"'],
+    "há atribuição de SDL_VIDEODRIVER fora da decisão por /dev/dri/card0 — " +
+      "trocar para dummy depois de kmsdrm falhar é a tela preta silenciosa " +
+      "que o driver fixo existe para evitar",
+  );
 });
 
 test("o driver fixado respeita quem escolhe dummy de propósito", async () => {
