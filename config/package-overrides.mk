@@ -128,31 +128,55 @@ override STRACE_CONF_OPTS = --enable-mpers=no --enable-bundled=yes \
 	--without-libunwind --without-libiberty
 
 # ── linux-firmware: RTL8821CS (Bluetooth por UART) ───────────
-# O Buildroot 2024.02 lista, em BR2_PACKAGE_LINUX_FIRMWARE_RTL_88XX_BT, os
-# arquivos rtl8821a_* e rtl8821c_* — mas OMITE rtl8821cs_*, que estão no MESMO
-# tarball (linux-firmware-20240115):
+# `BR2_PACKAGE_LINUX_FIRMWARE_RTL_88XX_BT` instala só `rtl_bt/rtl88*.bin`, e a
+# X55 precisa dos dois arquivos do RTL8821CS. Sem eles o driver btrtl para em
 #
-#   linux-firmware-20240115/rtl_bt/rtl8821cs_fw.bin      56 KB
-#   linux-firmware-20240115/rtl_bt/rtl8821cs_config.bin  25 B
-#
-# Sem eles o driver btrtl para em
 #   "RTL: firmware file rtl_bt/rtl8821cs_fw not found"
+#
 # e o hci0 não nasce. O sintoma aparece como "Bluetooth não funciona", e o
 # pacote de firmware parece completo — nada diz que faltou arquivo.
 #
-# `LINUX_FIRMWARE_FILES` é montada com `+=` em linux-firmware.mk, e este arquivo
-# é incluído ANTES das receitas (Makefile, ~linha 530), então o acréscimo soma à
-# lista em vez de ser apagado. Conferir com:
+# NOME DO CHIP ≠ NOME DO ARQUIVO. O driver pede sempre `rtl8821cs_config.bin`,
+# mas o linux-firmware de-duplicou esse config (commit 5a017996, "rtl_bt:
+# de-dupe identical config.bin files", 2024-08-22): os 25 bytes do 8821CS são
+# idênticos aos do `rtl8761b_config.bin`, e o 8821CS virou LINK. O tarball de
+# release **não carrega os links** — medido no CI de 14/11/2026, build
+# `powkiddy-x55` com linux-firmware-20250211, uma hora depois de começar:
+#
+#   tar: rtl_bt/rtl8821cs_config.bin: Cannot stat: No such file or directory
+#   make: *** [.../linux-firmware-20250211/.stamp_built] Error 2
+#
+# (no tarball de 20240115 os dois existiam como arquivos — é por isso que a
+# linha antiga funcionava e parou de funcionar no upgrade para 2025.02.)
+#
+# Então a lista pede o ARQUIVO que existe (`rtl8761b_config.bin`, conteúdo
+# idêntico e oficial) e o nome que o driver pede é criado pelo hook abaixo, como
+# link. Um link pendurado seria o pior dos mundos: `ls` mostra o arquivo e o
+# request_firmware falha — por isso o hook FALHA o build se o alvo não estiver lá.
+#
+# `LINUX_FIRMWARE_FILES` e os hooks do pacote são lidos em `linux-firmware.mk`
+# quando ele é incluído, e este arquivo é incluído ANTES das receitas
+# (Makefile:531 vs :534 no 2025.02), então os dois acréscimos valem. Conferir com:
 #   make -p -n | grep '^LINUX_FIRMWARE_FILES'
 #
 # CONDICIONAL, e tem de continuar assim: este arquivo vale para TODOS os
 # aparelhos. A X35H não tem o RTL8821CS populado e o defconfig dela desliga
 # `BR2_PACKAGE_LINUX_FIRMWARE_RTL_88XX_BT` de propósito. Um `+=` incondicional
-# colocava os dois blobs no rootfs dela mesmo assim — 56 KB de firmware para um
-# chip que não existe, contradizendo o que o defconfig declara. Buildroot expõe
-# os símbolos `BR2_*` como variáveis de make, então a condição é a mesma do menu.
+# colocava os blobs no rootfs dela mesmo assim — firmware para um chip que não
+# existe, contradizendo o que o defconfig declara. Buildroot expõe os símbolos
+# `BR2_*` como variáveis de make, então a condição é a mesma do menu.
 ifeq ($(BR2_PACKAGE_LINUX_FIRMWARE_RTL_88XX_BT),y)
-LINUX_FIRMWARE_FILES += rtl_bt/rtl8821cs_fw.bin rtl_bt/rtl8821cs_config.bin
+LINUX_FIRMWARE_FILES += rtl_bt/rtl8821cs_fw.bin rtl_bt/rtl8761b_config.bin
+
+# Cada linha do hook roda num shell próprio: sem `\` no fim, um `if` de várias
+# linhas nunca fecha. Por isso o teste de existência é uma linha só, e a
+# mensagem diz a consequência (é o §12.15: link pendurado "existe" e o rádio
+# não sobe).
+define GIOCHI_RTL8821CS_CONFIG_ALIAS
+	[ -f "$(TARGET_DIR)/lib/firmware/rtl_bt/rtl8761b_config.bin" ] || { echo "ERRO: rtl_bt/rtl8761b_config.bin não chegou ao target — sem ele o RTL8821CS fica sem baudrate/flow control e o hci0 não sobe." >&2; exit 1; }
+	ln -sf rtl8761b_config.bin "$(TARGET_DIR)/lib/firmware/rtl_bt/rtl8821cs_config.bin"
+endef
+LINUX_FIRMWARE_POST_INSTALL_TARGET_HOOKS += GIOCHI_RTL8821CS_CONFIG_ALIAS
 endif
 
 # ── linux-firmware: firmware do dongle MT7601U ──────────────

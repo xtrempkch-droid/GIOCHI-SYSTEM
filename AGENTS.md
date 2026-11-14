@@ -985,8 +985,10 @@ A falha só aparece no dmesg do aparelho:
 `firmware file rtl_bt/rtl8821cs_fw not found`.
 
 Correção em `config/package-overrides.mk`:
-`LINUX_FIRMWARE_FILES += rtl_bt/rtl8821cs_fw.bin rtl_bt/rtl8821cs_config.bin`
+`LINUX_FIRMWARE_FILES += rtl_bt/rtl8821cs_fw.bin rtl_bt/rtl8761b_config.bin`
 (a variável é montada com `+=` e o override é incluído antes das receitas).
+O segundo nome **mudou** no upgrade para o Buildroot 2025.02 — o porquê está
+no §12.67, e pedir `rtl8821cs_config.bin` ao tarball derruba o build inteiro.
 
 **Armadilha ao investigar isso:** o arquivo oficial **não** é o mesmo que se
 gera à mão. O oficial tem baudrate `0x04928002` (1500000) e flow control
@@ -4313,6 +4315,88 @@ quando a versão alcança a fronteira**:
 Hoje os dois primeiros saem `skip` com o motivo escrito; verificado que os dois
 **disparam** com `buildroot.version=2025.08`, nomeando os três aparelhos e a
 linha exata a acrescentar.
+
+### 12.67 O nome do firmware que o driver pede não é o nome que o tarball tem
+
+Primeiro build de release do X55 (14/11/2026, run #128, commit `59c53a4`) morreu
+**1 h 04 min** depois de começar, em `linux-firmware`:
+
+```text
+>>> linux-firmware 20250211 Building
+cd .../build/linux-firmware-20250211 && tar cf br-firmware.tar ... \
+   rtl_bt/rtl8821cs_fw.bin rtl_bt/rtl8821cs_config.bin ...
+tar: rtl_bt/rtl8821cs_config.bin: Cannot stat: No such file or directory
+tar: Exiting with failure status due to previous errors
+make: *** [.../linux-firmware-20250211/.stamp_built] Error 2
+```
+
+A linha era a do §12.17, escrita quando o Buildroot era 2024.02 e o tarball era
+`linux-firmware-20240115`, onde os dois eram **arquivos**. Entre um e outro, o
+upstream fez (commit `5a017996`, "rtl_bt: de-dupe identical config.bin files",
+2024-08-22):
+
+```text
+File: rtl_bt/rtl8821c_config.bin
+File: rtl_bt/rtl8821cs_fw.bin
+-Link: rtl_bt/rtl8821cs_config.bin -> rtl8761b_config.bin
+```
+
+Ou seja: os 25 bytes do 8821CS são **idênticos** aos do `rtl8761b_config.bin`
+(conferido nos dois: md5 `783db7913e59ab81adb335684d5f83fb`, baudrate
+`0x04928002` = 1500000 e flow control ligado), então o arquivo virou link. E o
+tarball de release **não carrega links** — só arquivos regulares. O nome existe
+no `WHENCE` e na árvore git, não no `.tar.xz`. Medido no `cgit` do kernel.org:
+
+| Tag | `rtl8821cs_fw.bin` | `rtl8821cs_config.bin` | `rtl8761b_config.bin` |
+| --- | --- | --- | --- |
+| `20240115` | arquivo | **arquivo** | arquivo |
+| `20250211` | arquivo | **ausente** (só link no git) | **arquivo** |
+
+Correção, em duas partes, porque "incluir o arquivo" não basta — o driver pede o
+nome do **chip**:
+
+```make
+ifeq ($(BR2_PACKAGE_LINUX_FIRMWARE_RTL_88XX_BT),y)
+LINUX_FIRMWARE_FILES += rtl_bt/rtl8821cs_fw.bin rtl_bt/rtl8761b_config.bin
+
+define GIOCHI_RTL8821CS_CONFIG_ALIAS
+	[ -f "$(TARGET_DIR)/lib/firmware/rtl_bt/rtl8761b_config.bin" ] || { echo "ERRO: ..." >&2; exit 1; }
+	ln -sf rtl8761b_config.bin "$(TARGET_DIR)/lib/firmware/rtl_bt/rtl8821cs_config.bin"
+endef
+LINUX_FIRMWARE_POST_INSTALL_TARGET_HOOKS += GIOCHI_RTL8821CS_CONFIG_ALIAS
+endif
+```
+
+Três detalhes que fizeram diferença:
+
+1. **Hook, não overlay.** O link precisa nascer **depois** do pacote instalar;
+   `LINUX_FIRMWARE_POST_INSTALL_TARGET_HOOKS` é lido quando `linux-firmware.mk`
+   é incluído, e o `package-overrides.mk` é incluído antes dele (Makefile:531
+   vs :534 no 2025.02) — o mesmo motivo do `+=` em `LINUX_FIRMWARE_FILES`.
+2. **Cada linha do hook é um shell.** Um `if ... then ... fi` espalhado em
+   várias linhas de um `define` **não fecha** — cada linha vira uma invocação
+   separada. O teste de existência ficou numa linha só, com `|| { ...; exit 1; }`.
+3. **Falhar alto se o alvo não estiver lá.** Link pendurado é o pior caso do
+   §12.15: `ls` mostra o arquivo, `request_firmware` falha e o `hci0` não sobe.
+   Verificado à mão com `make` (o teste faz o mesmo): sem o alvo → exit ≠ 0 com
+   mensagem; com o alvo → link relativo `rtl8821cs_config.bin -> rtl8761b_config.bin`.
+
+A lição, e ela é mais velha que este bug: **o nome que o driver pede é do chip;
+o nome do arquivo é do tarball, e o tarball muda.** Já tinha acontecido com
+`amixer`/`aplay` (§12.16: "não existe" era "existe desligado"), com
+`FEATURE_TAR_GZIP` (§12.60: símbolo renomeado) e com o `depmod` (§12.62). A
+diferença aqui é que o **build falhou** em vez de gerar imagem errada — e essa é
+a única razão de este caso ser barato.
+
+#### O que o build de release também mostrou
+
+O run #128 (`qemu-aarch64` **sucesso**, 45 min; `powkiddy-x55` falhou em
+`linux-firmware`) foi o primeiro com os dois aparelhos na matriz. Ele passou por
+todos os gates antes de compilar e não reclamou de nada: `assert-config` OK com
+**100 símbolos de 3 fragmentos**, `busybox` com os dois fragmentos, os dois
+patches de DTS aplicados, `overrides: config/package-overrides.mk` presente. Ou
+seja, o `enabled: true` e o `status: ready` do X55 estavam corretos — o que
+faltava era o firmware do rádio sobreviver ao upgrade do Buildroot.
 
 ## 13. Aparelhos
 

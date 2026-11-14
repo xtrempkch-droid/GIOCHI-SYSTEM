@@ -90,12 +90,15 @@ Nenhum item é configuração de símbolo — são código e layout:
    `rk356x.dtsi` (quem liga é o `rk3568.dtsi`). Sem entropia o `crng` inicializa
    tarde e o `getrandom()` bloqueia — medido em 11 s num boot e **1024 s** em
    outro.
-4. **Firmware do RTL8821CS** — **RESOLVIDO**. O `linux-firmware-20240115`
-   traz `rtl_bt/rtl8821cs_fw.bin` e `rtl8821cs_config.bin`, mas o Buildroot
-   2024.02 não os instala (`RTL_88XX_BT` esquece a variante `cs`). Acrescentados
-   por `LINUX_FIRMWARE_FILES` em `config/package-overrides.mk` e garantidos por
-   `firmware-required.txt`. Medido no aparelho: `fw version 0x75b8f098`,
-   `Controller A8:4F:A4:C9:98:4C`, scan funcionando.
+4. **Firmware do RTL8821CS** — **RESOLVIDO**. O `linux-firmware` traz
+   `rtl_bt/rtl8821cs_fw.bin`, mas o Buildroot não instala a variante `cs`
+   (`RTL_88XX_BT` só pega `rtl88*.bin`). Acrescentado por `LINUX_FIRMWARE_FILES`
+   em `config/package-overrides.mk` e garantido por `firmware-required.txt`.
+   Atenção ao **nome**: desde o linux-firmware de 2024-08 o `rtl8821cs_config.bin`
+   é um LINK para `rtl8761b_config.bin` (conteúdo idêntico) e o tarball de
+   release não carrega links — é o `rtl8761b_config.bin` que vai na lista, e o
+   nome do chip é criado por hook (§12.67). Medido no aparelho:
+   `fw version 0x75b8f098`, `Controller A8:4F:A4:C9:98:4C`, scan funcionando.
 5. **`genimage`**: hoje o build entrega `Image`, `rootfs.ext4`, `idbloader.img` e
    `u-boot.itb` soltos. A imagem de cartão precisa do layout: p1 FAT 128 MB com
    `Image` + `dtbs/` + `extlinux.conf` (`FDT /dtbs/rk3566-powkiddy-x55.dtb`),

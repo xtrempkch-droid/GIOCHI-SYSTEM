@@ -10,9 +10,11 @@
 rtw88/rtw8821c_fw.bin
 
 # ── Bluetooth: RTL8821CS por UART (driver btrtl) ─────────────
-# Os dois arquivos EXISTEM em linux-firmware-20240115, mas o Buildroot 2024.02
-# não os instala: BR2_PACKAGE_LINUX_FIRMWARE_RTL_88XX_BT lista rtl8821a_* e
-# rtl8821c_* e omite rtl8821cs_*. O acréscimo está em
-# config/package-overrides.mk, e esta lista garante que ele continua valendo.
+# O driver pede `rtl_bt/rtl8821cs_<fw|config>.bin` — o nome é o do CHIP. Mas o
+# linux-firmware de-duplicou o config (todos os 8821CS/8761B têm os mesmos 25
+# bytes) e o link para `rtl8761b_config.bin` não vem no tarball de release.
+# Por isso o arquivo é instalado com o nome do 8761B e o nome do chip é criado
+# como link pelo hook de `config/package-overrides.mk` (§12.17 e §12.67).
 rtl_bt/rtl8821cs_fw.bin
+rtl_bt/rtl8761b_config.bin
 rtl_bt/rtl8821cs_config.bin

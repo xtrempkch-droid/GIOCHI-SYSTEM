@@ -625,7 +625,9 @@ else
 fi
 
 # Firmware declarado pelo aparelho (device.json → firmwareFiles): blobs que NÃO
-# vêm do linux-firmware do Buildroot — o rtl8821cs_* é o caso concreto (§12.17).
+# vêm do tarball do linux-firmware — ficam versionados em device/<pasta>/.
+# Firmware que ESTÁ no tarball vai por LINUX_FIRMWARE_FILES, em
+# config/package-overrides.mk (é outra pergunta, §12.17/§12.67).
 # Destino é sempre /lib/firmware, preservando a subpasta, porque o driver pede o
 # caminho relativo (`rtl_bt/rtl8821cs_config.bin`), não o nome do arquivo.
 # Arquivo no lugar errado produz `Direct firmware load ... failed with error -2`

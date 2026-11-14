@@ -286,8 +286,10 @@ export async function validateDevice(device) {
     }
   }
 
-  // firmwareFiles: blobs que o aparelho precisa e que NÃO vêm do
-  // linux-firmware do Buildroot (o rtl8821cs_* é o caso concreto, §12.17).
+  // firmwareFiles: blobs que o aparelho precisa e que NÃO vêm do tarball do
+  // linux-firmware (ficam versionados em device/<pasta>/ e são copiados para o
+  // staging). Firmware que ESTÁ no tarball vai por `LINUX_FIRMWARE_FILES`, em
+  // config/package-overrides.mk — é outra pergunta (§12.17).
   // O destino no rootfs é sempre /lib/firmware/, preservando a subpasta: o
   // driver pede o caminho relativo (`rtl_bt/rtl8821cs_config.bin`), não o nome.
   if (device.firmwareFiles !== undefined) {

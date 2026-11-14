@@ -161,8 +161,16 @@ fiel ao padrão deste repositório: build verde, imagem que boota, e Bluetooth q
 Correção em `config/package-overrides.mk`:
 
 ```make
-LINUX_FIRMWARE_FILES += rtl_bt/rtl8821cs_fw.bin rtl_bt/rtl8821cs_config.bin
+LINUX_FIRMWARE_FILES += rtl_bt/rtl8821cs_fw.bin rtl_bt/rtl8761b_config.bin
 ```
+
+> **Atualizado em 14/11/2026 (Buildroot 2025.02).** A linha original pedia
+> `rtl_bt/rtl8821cs_config.bin` direto ao tarball, o que funcionava com
+> `linux-firmware-20240115`. A partir do tarball de 2025 esse nome é um **link**
+> para `rtl8761b_config.bin` e o release não carrega links: o `tar` morre com
+> `Cannot stat` e o build para em `linux-firmware`, uma hora depois de começar.
+> O arquivo pedido passou a ser o `rtl8761b_config.bin` (conteúdo idêntico), e o
+> nome do chip é criado por hook. Detalhe e prova em AGENTS §12.67.
 
 `LINUX_FIRMWARE_FILES` é montada com `+=`, e o arquivo de override é incluído
 antes das receitas, então o acréscimo soma à lista. Prova:
@@ -651,12 +659,13 @@ execução (`wpa_passphrase` no aparelho).
    efeitos foram observados: `hwrng: rockchip-rng` (o `&rng okay`), SDIO em
    SDR50, HDMI fora do `card` de display e `dma-names` aceito pelo uart1.
 3. **~~Firmware de Bluetooth~~ — RESOLVIDO.** O `rtl_bt/rtl8821cs_fw.bin` **é
-   oficial** e vem no `linux-firmware-20240115`; o Buildroot 2024.02 é que não o
-   instala (`config/package-overrides.mk`). O `rtl8821cs_config.bin` também é
-   oficial (25 bytes, 1500000 baud, flow control ligado) — o gerador que havia
-   aqui produzia um arquivo **errado** e foi removido. Medido no aparelho:
-   `fw version 0x75b8f098`, `Controller A8:4F:A4:C9:98:4C`, scan achando
-   dispositivos reais.
+   oficial** e vem no `linux-firmware`; o Buildroot é que não o instala
+   (`config/package-overrides.mk`). O config também é oficial (25 bytes,
+   1500000 baud, flow control ligado) — o gerador que havia aqui produzia um
+   arquivo **errado** e foi removido. Desde 2024-08 ele é o **mesmo arquivo** do
+   `rtl8761b_config.bin`, e o tarball novo traz só esse nome (§12.67). Medido no
+   aparelho: `fw version 0x75b8f098`, `Controller A8:4F:A4:C9:98:4C`, scan
+   achando dispositivos reais.
 4. **`giochi-init` no `/etc/inittab`** — o script está na imagem e ninguém o
    chama; `giochi-selftest` avisa.
 5. **`genimage` dentro do Buildroot** — hoje a imagem de cartão é montada por
