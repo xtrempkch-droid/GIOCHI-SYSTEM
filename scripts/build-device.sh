@@ -16,6 +16,8 @@
 #   GIOCHI_SYSTEM_KEEP_WORK=1     retoma um build existente em vez de apagar
 #   GIOCHI_WITH_GODOT=1           compositor Wayland + eudev (não incremental)
 #   GIOCHI_SYSTEM_SDK=1           gera o tarball do SDK e o põe em out/<device>/
+#   GIOCHI_SYSTEM_EXTRA_OVERLAY   pasta acrescentada como último overlay (apps
+#                                 do Giochi os); relativa ao repo ou absoluta
 #
 # A árvore `buildroot-external/` é sempre passada ao Buildroot por `BR2_EXTERNAL`
 # (ver o comentário no topo do script: mora lá o `--enable-video-dummy` do SDL2).

@@ -105,6 +105,12 @@ test("toda variável usada em ${...} ou $VAR está atribuída no próprio script
     "GIOCHI_SYSTEM_GROWTH_LIMIT_MIB",
     "GIOCHI_SYSTEM_OUT_DIR",
     "GIOCHI_SYSTEM_KEEP_WORK",
+    // Overlay de app do Giochi os (último da pilha). Sempre usada como
+    // `${VAR:-}` na condição, mas o valor cru aparece na atribuição seguinte
+    // (`EXTRA_OVERLAY="$VAR"`), e a análise estática não distingue "está dentro
+    // do if que já testou" de "está solta" — então ela entra aqui, como as
+    // outras de ambiente.
+    "GIOCHI_SYSTEM_EXTRA_OVERLAY",
     "ALLOW_DRAFT",
     "BUILDROOT_VERSION",
     "ROOT_PASSWORD",

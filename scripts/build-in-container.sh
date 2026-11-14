@@ -199,11 +199,25 @@ PASS_ENV=(
 for name in BUILDROOT_VERSION ROOT_PASSWORD JOBS ALLOW_DRAFT \
   GIOCHI_SYSTEM_MIN_FREE_GB GIOCHI_SYSTEM_ABORT_FREE_GIB \
   GIOCHI_SYSTEM_DISK_POLL_SECONDS GIOCHI_SYSTEM_GROWTH_LIMIT_MIB \
-  GIOCHI_SYSTEM_OUT_DIR GIOCHI_SYSTEM_KEEP_WORK BUILDROOT_URL; do
+  GIOCHI_SYSTEM_OUT_DIR GIOCHI_SYSTEM_KEEP_WORK BUILDROOT_URL \
+  GIOCHI_SYSTEM_EXTRA_OVERLAY; do
   if [[ -n "${!name:-}" ]]; then
     PASS_ENV+=(-e "$name=${!name}")
   fi
 done
+
+if [[ -n "${GIOCHI_SYSTEM_EXTRA_OVERLAY:-}" ]]; then
+  # O overlay pode morar fora do repositório (é o caso do Giochi os, que tem
+  # repositório próprio). Monta no MESMO caminho absoluto: o script do build
+  # resolve o caminho e não há tradução para manter em dois lugares.
+  EXTRA_OVERLAY_HOST="$GIOCHI_SYSTEM_EXTRA_OVERLAY"
+  [[ "$EXTRA_OVERLAY_HOST" = /* ]] || EXTRA_OVERLAY_HOST="$PWD/$EXTRA_OVERLAY_HOST"
+  if [[ -d "$EXTRA_OVERLAY_HOST" ]]; then
+    RUN_EXTRA+=(-v "$EXTRA_OVERLAY_HOST:$EXTRA_OVERLAY_HOST:ro")
+    PASS_ENV+=(-e "GIOCHI_SYSTEM_EXTRA_OVERLAY=$EXTRA_OVERLAY_HOST")
+    echo "overlay:   $EXTRA_OVERLAY_HOST"
+  fi
+fi
 
 run_container() {
   # `-it` só quando há terminal: em CI (ou chamado por outro script) o stdin
