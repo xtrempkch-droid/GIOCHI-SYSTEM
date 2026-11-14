@@ -48,3 +48,31 @@ BR2_PACKAGE_SDL2_TTF=y
 # vazio e o TTF_OpenFont falha no aparelho, com o build verde.
 BR2_PACKAGE_DEJAVU=y
 BR2_PACKAGE_DEJAVU_SANS=y
+
+# ── SDL2_image e SDL2_mixer: os jogos pedem ──────────────────
+#
+# Medido com `readelf -d` nos binários do overlay (13/11/2026):
+#
+#   giochi-tower      → libSDL2_image-2.0.so.0, libSDL2_mixer-2.0.so.0
+#   giochi-defender   → libSDL2_mixer-2.0.so.0
+#
+# Sem os dois, dois dos seis apps da primeira release abrem e morrem no
+# `dlopen` — o mesmo `error while loading shared libraries` que o SDL2 base já
+# tinha causado. A injeção do Giochi os recusa essa imagem justamente por isso.
+#
+# `SDL2_image` NÃO traz decodificador sozinho: cada formato só é ligado quando
+# a biblioteca existe por conta própria (`package/sdl2_image/sdl2_image.mk`).
+# Sem LIBPNG/JPEG/WEBP, `IMG_Load` responde "PNG images are not supported".
+BR2_PACKAGE_SDL2_IMAGE=y
+BR2_PACKAGE_LIBPNG=y
+BR2_PACKAGE_JPEG=y
+BR2_PACKAGE_WEBP=y
+# O `sdl2_image` procura `libwebpdemux` no pkg-config, não `libwebp`: sem o
+# DEMUX o configure acha que ligou o WebP e não ligou.
+BR2_PACKAGE_WEBP_DEMUX=y
+BR2_PACKAGE_SDL2_MIXER=y
+# Codecs do mixer. São os mesmos do X55; um jogo que carrega OGG/FLAC/MP3
+# precisa deles, e a falta não aparece no build — aparece muda, em runtime.
+BR2_PACKAGE_MPG123=y
+BR2_PACKAGE_FLAC=y
+BR2_PACKAGE_LIBVORBIS=y
