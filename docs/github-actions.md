@@ -26,9 +26,12 @@ Aparelho em `draft` fica `enabled: false` e não entra na matriz — é o que im
 publicar imagem que não boota. Mas é preciso poder **tentar** o build antes de
 declarar o aparelho pronto, senão a única opção seria mentir no `devices.json`.
 
-`allow_draft: true` + `device=powkiddy-x55` inclui aquele rascunho específico,
+`allow_draft: true` + `device=powkiddy-x35h` inclui aquele rascunho específico,
 desde que ele declare `buildrootDefconfig`. Sem defconfig o job falharia antes de
 começar, então ele simplesmente não entra.
+
+(Aparelho já liberado — hoje `qemu-aarch64` e `powkiddy-x55` — não precisa de
+`allow_draft`: ele entra na matriz por `enabled: true`.)
 
 Localmente o equivalente é `ALLOW_DRAFT=1 bash scripts/build-device.sh <id>`, e a
 matriz responde a `--allow-draft`.

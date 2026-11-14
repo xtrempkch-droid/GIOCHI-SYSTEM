@@ -67,9 +67,28 @@ test("a matriz ARM64 contém apenas devices habilitados e completos", async () =
   assert.ok(qemu.timeout >= 60);
 });
 
+// O aparelho usado como exemplo NÃO é fixo: quando o X55 foi habilitado para a
+// release, três testes que cravavam `powkiddy-x55` como "o desabilitado"
+// passaram a falhar sem que a regra tivesse mudado. A pergunta é sobre a
+// CLASSE ("device desabilitado não entra"), e a resposta vale para qualquer
+// aparelho que esteja nesse estado no índice.
+async function primeiroDesabilitado({ arch = "arm64", comDefconfig = false } = {}) {
+  const index = await loadIndex();
+  for (const entry of index.devices) {
+    if (entry.enabled || entry.arch !== arch) continue;
+    const device = await loadDevice(entry.id, index);
+    if (comDefconfig && !device.buildrootDefconfig) continue;
+    return device;
+  }
+  return null;
+}
+
 test("device desabilitado não entra na lista construível", async () => {
+  const desabilitado = await primeiroDesabilitado();
+  assert.ok(desabilitado, "o índice precisa manter ao menos um device desabilitado");
   await assert.rejects(
-    () => getBuildableDevices({ arch: "arm64", deviceId: "powkiddy-x55" }),
+    () =>
+      getBuildableDevices({ arch: desabilitado.arch, deviceId: desabilitado.id }),
     /desabilitado/,
   );
 });
@@ -82,28 +101,54 @@ test("arquitetura sem device habilitado retorna erro claro", async () => {
 });
 
 test("allow-draft inclui rascunho com defconfig quando pedido pelo id", async () => {
+  const rascunho = await primeiroDesabilitado({ comDefconfig: true });
+  assert.ok(rascunho, "o índice precisa manter ao menos um rascunho com defconfig");
   const matrix = await buildGithubMatrix({
-    arch: "arm64",
-    deviceId: "powkiddy-x55",
+    arch: rascunho.arch,
+    deviceId: rascunho.id,
     allowDraft: true,
   });
   assert.deepEqual(
     matrix.include.map((item) => item.device),
-    ["powkiddy-x55"],
+    [rascunho.id],
   );
 });
 
 test("allow-draft nunca puxa rascunho quando o pedido é device=all", async () => {
+  const index = await loadIndex();
+  const rascunhos = index.devices.filter((entry) => !entry.enabled);
   const matrix = await buildGithubMatrix({ arch: "arm64", allowDraft: true });
   const ids = matrix.include.map((item) => item.device);
-  assert.ok(!ids.includes("powkiddy-x55"), `device=all não deveria puxar draft: ${ids}`);
+  for (const rascunho of rascunhos) {
+    assert.ok(
+      !ids.includes(rascunho.id),
+      `device=all não deveria puxar rascunho (${rascunho.id}): ${ids}`,
+    );
+  }
 });
 
 test("o erro de device desabilitado diz como construir mesmo assim", async () => {
+  const desabilitado = await primeiroDesabilitado();
+  assert.ok(desabilitado, "o índice precisa manter ao menos um device desabilitado");
   await assert.rejects(
-    () => getBuildableDevices({ arch: "arm64", deviceId: "powkiddy-x55" }),
+    () =>
+      getBuildableDevices({ arch: desabilitado.arch, deviceId: desabilitado.id }),
     /allow_draft/,
   );
+});
+
+test("todo device habilitado entra na matriz da própria arquitetura", async () => {
+  const index = await loadIndex();
+  const habilitados = index.devices.filter((entry) => entry.enabled);
+  assert.ok(habilitados.length > 0);
+  for (const entry of habilitados) {
+    const matrix = await buildGithubMatrix({ arch: entry.arch });
+    const ids = matrix.include.map((item) => item.device);
+    assert.ok(
+      ids.includes(entry.id),
+      `${entry.id} está habilitado no índice mas não entrou na matriz ${entry.arch}: ${ids}`,
+    );
+  }
 });
 
 test("o caminho do repositório é utilizado como raiz", () => {

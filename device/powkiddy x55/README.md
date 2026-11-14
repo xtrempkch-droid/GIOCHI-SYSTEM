@@ -5,11 +5,12 @@ MIPI-DSI **720×1280**. É o único aparelho do projeto que já bootou em hardwa
 real — no antecessor `GIOCHI-KONSOL-OS`. Este diretório traz aquele
 conhecimento para cá.
 
-Status: **draft** — mas **boota em hardware real** com tela 720x1280 na
+Status: **ready** — **boota em hardware real** com tela 720x1280 na
 orientação certa, áudio, Wi-Fi, Bluetooth, console e **16 botões de gamepad +
 4 eixos analógicos**. Relatório medido em
-[`docs/x55-bringup.md`](../../docs/x55-bringup.md). Continua draft porque falta a
-interface de jogos, que é do `Giochi app`.
+[`docs/x55-bringup.md`](../../docs/x55-bringup.md). O `enabled: true` no índice
+foi ligado em 14/11/2026 para a build de release; a interface de jogos continua
+sendo do `Giochi app`, e entra pela loja/overlay.
 
 ## De onde veio cada coisa
 
@@ -102,29 +103,31 @@ Nenhum item é configuração de símbolo — são código e layout:
 6. **`giochi-init` no `/etc/inittab`** — hoje o script está na imagem e ninguém
    o chama. Ver `docs/giochi-init.md`.
 
-## Como tentar o build
+## Como construir
 
-O aparelho está `enabled: false`, então o CI não o constrói. Para tentar:
+O aparelho está `enabled: true` no índice desde 14/11/2026, então o CI o
+constrói junto com o `qemu-aarch64` em todo push que toque `device/`, `config/`
+ou `scripts/`:
 
 ```bash
 # local, em Linux/WSL2 com caminho sem espaços
-ALLOW_DRAFT=1 bash scripts/build-device.sh powkiddy-x55
+bash scripts/build-device.sh powkiddy-x55
 
 # sem instalar nada no host (imagem giochi-builder)
-ALLOW_DRAFT=1 bash scripts/build-in-container.sh powkiddy-x55
+bash scripts/build-in-container.sh powkiddy-x55
 
 # retomar de onde parou, sem apagar work/
-GIOCHI_SYSTEM_KEEP_WORK=1 ALLOW_DRAFT=1 bash scripts/build-in-container.sh powkiddy-x55
+GIOCHI_SYSTEM_KEEP_WORK=1 bash scripts/build-in-container.sh powkiddy-x55
 
 # no CI
 Actions → Build Giochi System ARM64 → Run workflow
-  device: powkiddy-x55
-  allow_draft: true
+  device: powkiddy-x55        (ou "all", que agora inclui este aparelho)
+  allow_draft: false
 ```
 
-O primeiro build é o que valida o `defconfig`: se algum símbolo não existir no
-Buildroot 2024.02, o `assert-config` falha com o nome na mão — e é assim que
-deve ser. Nenhuma linha deste diretório foi compilada ainda.
+O `defconfig` é validado pelo `assert-config` a cada build: se algum símbolo não
+existir no Buildroot 2025.02, o build falha com o nome na mão — e é assim que
+deve ser.
 
 ## Depois de gravar, no aparelho
 

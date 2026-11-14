@@ -51,7 +51,8 @@ Repositório: `https://github.com/xtrempkch-droid/GIOCHI-SYSTEM` — branch `mai
 - Estrutura de repositório, `.gitignore`, `.gitattributes`, licença MIT.
 - `device/devices.json` como fonte da verdade da lista **e** da matriz de CI.
 - `device.json` por aparelho, validado por schema em `scripts/lib/devices.mjs`.
-- 7 aparelhos registrados: `qemu-aarch64` (único habilitado) + 6 drafts.
+- 7 aparelhos registrados: `qemu-aarch64` e **`powkiddy-x55`** habilitados
+  (o X55 foi liberado em 14/11/2026 para a build de release) + 5 drafts.
 - Buildroot fixado em **2025.02** (`buildroot.version`, LTS). Subiu de 2024.02 em
   13/11/2026 para ter glibc 2.41 — ver §12.66, que também registra as duas
   armadilhas silenciosas que o upgrade trouxe.
@@ -2649,8 +2650,8 @@ mata o script. O `2>/dev/null` garantia que ninguém visse por quê.
 
 **Por que passou local e falhou no CI:** aqui eu buildei o **R35S**, que tem
 fragmento de kernel; o CI builda o **qemu-aarch64**, que não tem. Um caso de cada
-lado, e o de lá é o único aparelho habilitado — ou seja, era o caminho principal
-que eu nunca exercitei com aquela linha.
+lado, e o de lá era o único aparelho habilitado na época — ou seja, era o caminho
+principal que eu nunca exercitei com aquela linha.
 
 Correção, e o que ela evita:
 
@@ -4318,7 +4319,7 @@ linha exata a acrescentar.
 | ID | Pasta | SoC | Arch | Status | Falta |
 | --- | --- | --- | --- | --- | --- |
 | `qemu-aarch64` | `qemu-aarch64/` | virtual | arm64 | **ready** | nada — é o smoke test do pipeline |
-| `powkiddy-x55` | `powkiddy x55/` | RK3566 | arm64 | draft | **boota com tela, áudio, Wi-Fi, BT e 16 botões + 4 eixos**; falta o launcher (do `Giochi app`) |
+| `powkiddy-x55` | `powkiddy x55/` | RK3566 | arm64 | **ready (habilitado)** | **boota com tela, áudio, Wi-Fi, BT e 16 botões + 4 eixos**; alvo da build de release desde 14/11/2026 — a interface de jogos é do `Giochi app` e entra por overlay |
 | `powkiddy-x35s` | `powkiddy x35s/` | **RK3566** | arm64 | draft | DTS (compartilha com o X35H) e build |
 | `powkiddy-x35h` | `powkiddy x35h/` | **RK3566** | arm64 | draft | **boota com tela 640x480, `usb0` e SSH**; imagem de 04/11 já tem o `respawn`. Falta o launcher, o teste A/B de cartão e os eixos analógicos |
 | `r35s` | `r35s/` | RK3326 | arm64 | draft | **BOOTOU em 06/11/2026 e testado por SSH em 06/11**: tela 640x480, `r36s_Gamepad` com 16 botões + 4 eixos, áudio (`rk817_int`), bateria, térmica e GPU (§12.51, §12.52) |
@@ -4617,6 +4618,9 @@ conferir no aparelho — se a transferência cair, o aparelho continua bootando.
 - **Node.js nos scripts de metadados:** zero dependência npm, portável, testável.
 - **`qemu-aarch64` habilitado:** mantém o pipeline executável enquanto não há
   hardware.
+- **`powkiddy-x55` habilitado (14/11/2026):** bootou várias vezes em hardware
+  real e é o alvo da build de release. `ready` deixa de significar "tem a
+  interface": a interface é do `Giochi app` e entra por overlay/loja.
 - **Drafts desabilitados:** evita publicar imagem que não boota.
 - **Pasta com espaço suportada:** atende ao pedido do usuário sem quebrar o
   Buildroot, via staging.

@@ -4,7 +4,7 @@ Imagens **Linux ARM64** mínimas, reproduzíveis e configuradas por dispositivo,
 
 O repositório foi desenhado para receber os dispositivos depois: cada alvo vive em `device/<nome>/` com sua configuração Buildroot, overlay de rootfs e arquivos únicos. O workflow lê esses arquivos, monta uma matriz e gera as imagens.
 
-> **Estado atual:** o device virtual `qemu-aarch64` está habilitado como referência de pipeline. `powkiddy-x55` (ARM64) e `steamdeck` (x86_64) são placeholders desabilitados até receberem kernel, bootloader, firmware e layout de partições.
+> **Estado atual:** o device virtual `qemu-aarch64` está habilitado como referência de pipeline e o `powkiddy-x55` (ARM64) está **habilitado** — boota em hardware real com tela, áudio, Wi-Fi, Bluetooth, 16 botões e 4 eixos, e é o alvo da build de release. Os demais são rascunhos desabilitados até receberem kernel, bootloader, firmware e layout de partições.
 
 ## O que está incluído
 
@@ -21,8 +21,9 @@ O repositório foi desenhado para receber os dispositivos depois: cada alvo vive
 | Device | Arch | Estado | Build |
 | --- | --- | --- | --- |
 | `qemu-aarch64` | arm64 | ready | habilitado |
-| `powkiddy-x55` | arm64 | draft | desabilitado |
-| `steamdeck` | x86_64 | draft | desabilitado |
+| `powkiddy-x55` | arm64 | ready | habilitado |
+| `powkiddy-x35s` / `powkiddy-x35h` / `r35s` | arm64 | draft | desabilitado |
+| `steamdeck` / `generic-x64` | x86_64 | draft | desabilitado |
 | `_template` | — | template | não listado |
 
 A lista oficial é [`device/devices.json`](./device/devices.json). A pasta `qemu-aarch64` é um alvo virtual para validar o pipeline; ela não representa hardware final.

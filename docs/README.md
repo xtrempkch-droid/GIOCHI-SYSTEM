@@ -49,9 +49,10 @@
 ## Estado atual
 
 - `qemu-aarch64`: device de referência **habilitado** para validar o pipeline ARM64.
-- Drafts ARM64 **desabilitados**: `powkiddy-x55`, `powkiddy-x35s` e
-  `powkiddy-x35h` (todos **RK3566**) e `r35s` (RK3326 — outro SoC, outro
-  pipeline de boot).
+- `powkiddy-x55`: **habilitado** — boota em hardware real (tela 720×1280, áudio,
+  Wi-Fi, Bluetooth, 16 botões + 4 eixos) e é o alvo da build de release.
+- Drafts ARM64 **desabilitados**: `powkiddy-x35s` e `powkiddy-x35h` (ambos
+  **RK3566**) e `r35s` (RK3326 — outro SoC, outro pipeline de boot).
 - `steamdeck`: placeholder x86_64 **desabilitado**.
 - `generic-x64`: PC comum x86_64, **desabilitado** — rascunho com
   `pc_x86_64_efi_defconfig`, nunca compilado. Serve para separar defeito do

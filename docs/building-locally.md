@@ -160,10 +160,12 @@ bash scripts/build-device.sh qemu-aarch64
 ## Build de um device draft
 
 ```bash
-ALLOW_DRAFT=1 bash scripts/build-device.sh "powkiddy-x55"
+ALLOW_DRAFT=1 bash scripts/build-device.sh "powkiddy-x35h"
 ```
 
-Isso só funciona depois que `buildrootDefconfig` estiver preenchido.
+Isso só funciona depois que `buildrootDefconfig` estiver preenchido. Aparelho
+habilitado no índice (`enabled: true`, como o `powkiddy-x55`) constrói sem a
+variável.
 
 ## Limpeza
 
