@@ -25,16 +25,11 @@ BR2_TARGET_ROOTFS_EXT2_SIZE="512M"
 # Ou seja: o app está na imagem e não roda. Pior que não estar — o manifesto
 # diria "6 apps embutidos" e o console mostraria laço de queda.
 #
-# `SDL2_KMSDRM` NÃO entra: depende de libdrm + gbm + EGL, e o `virt` do QEMU
-# sem `-device virtio-gpu-pci` não tem `/dev/dri/card0`. Quem liga o vídeo é o
-# driver `dummy` (ver `buildroot-external/external.mk`), e o `giochi-init`
-# escolhe `dummy` quando não há card DRM — em hardware a escolha continua
-# `kmsdrm`, onde uma falha ali é defeito de verdade.
-#
-# Como não há tela, o próprio device declara isso no overlay
-# (`rootfs-overlay/etc/giochi/headless`): o `giochi-init` mantém o console como
-# interface em vez de subir o launcher para escrever diagnóstico num terminal
-# que ninguém está vendo.
+# A pilha gráfica NÃO entra (ver a seção "pilha gráfica" mais abaixo): ela
+# depende de C++ no toolchain, que este defconfig não tem. O que roda aqui é o
+# driver `dummy`, e o device declara isso em
+# `rootfs-overlay/etc/giochi/headless` para o `giochi-init` manter o console
+# como interface em vez de subir o launcher num terminal que ninguém vê.
 BR2_PACKAGE_SDL2=y
 # SDL2_TTF é PACOTE à parte e faz `select FREETYPE`.
 BR2_PACKAGE_SDL2_TTF=y
@@ -48,6 +43,32 @@ BR2_PACKAGE_SDL2_TTF=y
 # vazio e o TTF_OpenFont falha no aparelho, com o build verde.
 BR2_PACKAGE_DEJAVU=y
 BR2_PACKAGE_DEJAVU_SANS=y
+
+# ── pilha gráfica: NÃO entra, e o motivo é o toolchain ──────
+#
+# `package/mesa3d/Config.in:3` tem `depends on BR2_INSTALL_LIBSTDCPP`, e o
+# `qemu_aarch64_virt_defconfig` não liga C++ no toolchain. Medido em
+# 13/11/2026: ligar `BR2_PACKAGE_MESA3D` no fragmento faz o `assert-config`
+# reprovar com cinco símbolos DESAPARECIDOS (MESA3D, GALLIUM_DRIVER_SWRAST,
+# OPENGL_EGL, OPENGL_ES, SDL2_OPENGLES, SDL2_KMSDRM).
+#
+# Ligar `BR2_TOOLCHAIN_BUILDROOT_CXX=y` resolveria — e obrigaria rebuild do
+# toolchain inteiro, que nesta árvore é a maior parte das ~4 h de build. Não é
+# o que esta entrega precisa:
+#
+# - o LAUNCHER roda (medido na VM: lê os 6 apps do `index.json`, inicializa o
+#   renderer de software e sai com 0);
+# - os JOGOS 3D não abrem, porque pedem GLES:
+#
+#     couldn't set attribute SDL_GL_CONTEXT_PROFILE_MASK:
+#     That operation is not supported
+#
+# O caminho para quando isso importar: `BR2_TOOLCHAIN_BUILDROOT_CXX=y` +
+# `BR2_PACKAGE_MESA3D=y` + `MESA3D_GALLIUM_DRIVER_SWRAST` + `MESA3D_OPENGL_EGL`
+# + `MESA3D_OPENGL_ES` + `SDL2_OPENGLES` + `SDL2_KMSDRM`, e o QEMU sobe com
+# `-device virtio-gpu-pci` (o kernel deste defconfig JÁ tem
+# `CONFIG_DRM_VIRTIO_GPU=y` — medido no `.config` do build). O que falta é só
+# o C++ do toolchain.
 
 # ── SDL2_image e SDL2_mixer: os jogos pedem ──────────────────
 #

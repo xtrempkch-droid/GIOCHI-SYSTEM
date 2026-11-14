@@ -1,8 +1,12 @@
 Alvo virtual sem tela: o console serial é a interface.
 
-O QEMU `virt` sem -device virtio-gpu-pci não tem /dev/dri/card0, e o launcher
-abriria com o driver dummy — sem onde desenhar, e com o diagnóstico dele saindo
-no mesmo console do getty.
+O QEMU `virt` sem pilha gráfica não tem /dev/dri/card0, e o launcher abriria
+com o driver dummy — sem onde desenhar, e com o diagnóstico dele saindo no
+mesmo console do getty, uma linha por segundo.
 
-Para ver o launcher nesta VM: remova este arquivo da imagem e inicie com
--device virtio-gpu-pci e -display.
+O launcher e os jogos continuam na imagem e podem ser rodados à mão:
+
+  SDL_VIDEODRIVER=dummy /opt/giochi/apps/launcher/bin/giochi-launcher
+
+Para ter tela de verdade é preciso ligar MESA3D + SDL2_KMSDRM, que dependem de
+C++ no toolchain — ver o comentário no buildroot.fragment do device.
