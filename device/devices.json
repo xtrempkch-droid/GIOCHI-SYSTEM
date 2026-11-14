@@ -12,7 +12,7 @@
       "id": "powkiddy-x55",
       "folder": "powkiddy x55",
       "arch": "arm64",
-      "enabled": false
+      "enabled": true
     },
     {
       "id": "powkiddy-x35s",
