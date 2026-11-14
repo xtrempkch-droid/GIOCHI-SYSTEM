@@ -62,9 +62,21 @@ case "$1" in
             exit 0
         }
 
+        # fbcon=rotate:N usa rotação horária; o ângulo do psplash é anti-horário.
+        # A X55 (rotate:3) foi medida no aparelho com psplash -a 90.
+        PSPLASH_ANGLE=0
+        for _arg in $(cat /proc/cmdline 2>/dev/null); do
+            case "$_arg" in
+                fbcon=rotate:0) PSPLASH_ANGLE=0 ;;
+                fbcon=rotate:1) PSPLASH_ANGLE=270 ;;
+                fbcon=rotate:2) PSPLASH_ANGLE=180 ;;
+                fbcon=rotate:3) PSPLASH_ANGLE=90 ;;
+            esac
+        done
+
         # `-n`: não daemoniza, para este script poder esperar o desenho inicial.
         # O `&` é do shell: o processo fica filho do init e sobrevive ao script.
-        psplash -n >/dev/null 2>&1 &
+        psplash -n -a "$PSPLASH_ANGLE" >/dev/null 2>&1 &
         SPLASH_PID=$!
         # Espera o FIFO aparecer, que é o sinal de que ele desenhou o primeiro
         # quadro. Sem essa espera, o `PROGRESS` logo abaixo cairia no vazio.

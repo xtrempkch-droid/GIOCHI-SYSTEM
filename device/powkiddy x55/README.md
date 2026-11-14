@@ -35,6 +35,7 @@ copiado sem conferência, e o que não foi verificado está marcado como tal.
 | Bluetooth | o mesmo chip por UART (`hci_h5`, tratado como 3 fios) |
 | USB | `dwc3` OTG, gadget `g_ether` → `usb0` **10.55.0.2/24** (sem DHCP) |
 | Console | **`ttyS2` @ 1500000n8** |
+| Bootsplash | Imagem gerada em paisagem; `S01splash` aplica `psplash -a 90` para acompanhar `fbcon=rotate:3` (confirmado visualmente no aparelho) |
 
 ## Arquivos
 

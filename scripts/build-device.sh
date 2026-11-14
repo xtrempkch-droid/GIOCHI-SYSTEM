@@ -1010,15 +1010,16 @@ if command -v cmake >/dev/null 2>&1; then
 fi
 
 # ---------------------------------------------------------------
-# Bootsplash: a imagem é gerada NO TAMANHO DA TELA deste aparelho.
+# Bootsplash: a imagem é gerada no tamanho lógico da tela deste aparelho.
 #
 # O `psplash` não escala nem centraliza: desenha em (0,0) do framebuffer. Uma
 # imagem de 640x480 numa tela de 720x1280 aparece no canto com o resto preto, o
 # que é pior que não ter splash — parece defeito.
 #
-# A resolução vem de `panel { width, height }` no device.json, validado pelo
-# schema. `config/package-overrides.mk` lê `GIOCHI_SPLASH_PNG` e a entrega ao
-# psplash; sem a variável, o override fica inerte e o pacote usa a imagem dele.
+# A resolução vem de `panel { width, height }` e `kernelCmdline.fbconRotate` no
+# device.json, validados pelo schema. Rotações de 90° geram a imagem em paisagem;
+# `S01splash` passa o ângulo ao psplash, que rotaciona o desenho completo.
+# `config/package-overrides.mk` lê `GIOCHI_SPLASH_PNG` e a entrega ao psplash.
 #
 # O arquivo vai para `work/<device>/` e não para a pasta do aparelho: caminho
 # com espaço entraria cru numa variável de make (§12.6).

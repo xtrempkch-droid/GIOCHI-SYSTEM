@@ -13,8 +13,8 @@
 // superior esquerdo, com o resto da tela preto — que é pior que não ter splash,
 // porque parece defeito.
 //
-// Então a imagem é gerada NO TAMANHO DA TELA, em tempo de build, a partir da
-// resolução declarada no `device.json` do aparelho.
+// Então a imagem é gerada no tamanho lógico da tela, em tempo de build, a
+// partir da resolução e da rotação declaradas no `device.json` do aparelho.
 //
 // ## Por que PNG escrito à mão, sem dependência
 //
@@ -197,6 +197,8 @@ for (let i = 0; i < argv.length; i += 1) {
   }
 }
 
+let rotacao = 0;
+
 // A resolução vem do device.json quando --device é usado: a mesma fonte da
 // verdade que gera a cmdline e o DTB. Um número digitado à mão aqui divergiria
 // do painel em silêncio.
@@ -221,6 +223,11 @@ if (deviceId) {
   }
   largura = painel.width;
   altura = painel.height;
+  rotacao = meta.kernelCmdline?.fbconRotate ?? 0;
+  if (!Number.isInteger(rotacao) || rotacao < 0 || rotacao > 3) {
+    console.error(`ERRO: ${deviceId} declara fbconRotate inválido: ${rotacao}`);
+    process.exit(2);
+  }
 }
 
 if (!largura || !altura) {
@@ -235,41 +242,47 @@ if (!saida) {
 // ---------------------------------------------------------------------------
 // Desenho
 // ---------------------------------------------------------------------------
-const canvas = novoCanvas(largura, altura, FUNDO);
+// psplash aplica a rotação ao desenho inteiro com `-a`; para rotações de 90°
+// ou 270°, a imagem de entrada precisa estar em orientação paisagem.
+const canvasLogico = rotacao % 2 === 0
+  ? novoCanvas(largura, altura, FUNDO)
+  : novoCanvas(altura, largura, FUNDO);
 
 // Escala do texto proporcional à tela: numa tela de 640 de largura o "GIOCHI"
 // com escala 6 ocupa 6*6*6=216 px, que é ~1/3 da largura — legível sem
 // dominar. O divisor foi escolhido para 480p e 720p darem resultado parecido.
-const escalaTitulo = Math.max(2, Math.round(largura / 110));
-const escalaSub = Math.max(1, Math.round(largura / 300));
+const escalaTitulo = Math.max(2, Math.round(canvasLogico.largura / 110));
+const escalaSub = Math.max(1, Math.round(canvasLogico.largura / 300));
 
 const larguraTitulo = "GIOCHI".length * 6 * escalaTitulo;
 const alturaTitulo = 7 * escalaTitulo;
-const yTitulo = Math.round(altura / 2 - alturaTitulo * 0.9);
+const yTitulo = Math.round(canvasLogico.altura / 2 - alturaTitulo * 0.9);
 
-texto(canvas, "GIOCHI", Math.round((largura - larguraTitulo) / 2), yTitulo,
+texto(canvasLogico, "GIOCHI", Math.round((canvasLogico.largura - larguraTitulo) / 2), yTitulo,
   escalaTitulo, TEXTO);
 
 const larguraSub = "SYSTEM".length * 6 * escalaSub;
-texto(canvas, "SYSTEM",
-  Math.round((largura - larguraSub) / 2),
-  yTitulo + alturaTitulo + Math.round(altura * 0.02),
+texto(canvasLogico, "SYSTEM",
+  Math.round((canvasLogico.largura - larguraSub) / 2),
+  yTitulo + alturaTitulo + Math.round(canvasLogico.altura * 0.02),
   escalaSub, DESTAQUE);
 
 // Barra de progresso na base. O `psplash` anima o miolo dela com
 // `psplash-write "PROGRESS n"`; sem a barra o splash é estático e um boot lento
 // fica indistinguível de um travamento.
-const margem = Math.round(largura * 0.12);
-const larguraBarra = largura - margem * 2;
-const alturaBarra = Math.max(4, Math.round(altura * 0.012));
-const yBarra = altura - Math.round(altura * 0.12);
+const margem = Math.round(canvasLogico.largura * 0.12);
+const larguraBarra = canvasLogico.largura - margem * 2;
+const alturaBarra = Math.max(4, Math.round(canvasLogico.altura * 0.012));
+const yBarra = canvasLogico.altura - Math.round(canvasLogico.altura * 0.12);
 
-retangulo(canvas, margem, yBarra, larguraBarra, alturaBarra, TRILHO);
+retangulo(canvasLogico, margem, yBarra, larguraBarra, alturaBarra, TRILHO);
 
-const png = paraPng(canvas);
+const png = paraPng(canvasLogico);
 mkdirSync(dirname(saida), { recursive: true });
 writeFileSync(saida, png);
 
 console.log(`splash: ${saida}`);
-console.log(`  ${largura}x${altura}, ${(png.length / 1024).toFixed(1)} KiB`);
-console.log(`  barra em y=${yBarra}, trilho ${larguraBarra}x${alturaBarra} (psplash anima o miolo)`);
+console.log(`  painel: ${largura}x${altura}; imagem lógica: ${canvasLogico.largura}x${canvasLogico.altura}`);
+console.log(`  rotação fbcon: ${rotacao}; aplicada pelo psplash ao desenho completo`);
+console.log(`  barra ${larguraBarra}x${alturaBarra} (psplash anima o miolo)`);
+console.log(`  ${(png.length / 1024).toFixed(1)} KiB`);

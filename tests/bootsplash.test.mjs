@@ -109,7 +109,7 @@ test("o build gera o splash antes do make", () => {
 
 // ── a imagem ─────────────────────────────────────────────────────────────
 
-test("a imagem é gerada NO TAMANHO DA TELA do aparelho", () => {
+test("a imagem é gerada no tamanho lógico da tela do aparelho", () => {
   const tmp = mkdtempSync(join(tmpdir(), "giochi-splash-"));
   try {
     for (const [id, largura, altura] of [
@@ -121,8 +121,9 @@ test("a imagem é gerada NO TAMANHO DA TELA do aparelho", () => {
       execFileSync(process.execPath, [GERADOR, "--device", id, "--out", out],
         { encoding: "utf8" });
       const png = lerPng(out);
-      assert.equal(png.largura, largura, `${id}: largura`);
-      assert.equal(png.altura, altura, `${id}: altura`);
+      const rotacionado = id === "powkiddy-x55";
+      assert.equal(png.largura, rotacionado ? altura : largura, `${id}: largura lógica`);
+      assert.equal(png.altura, rotacionado ? largura : altura, `${id}: altura lógica`);
       // E o arquivo tem de ser pequeno: é um logo, não uma fotografia. Acima de
       // 50 KiB indicaria que algo inesperado entrou no desenho.
       assert.ok(statSync(out).size < 50 * 1024, `${id}: ${statSync(out).size} B`);
@@ -137,7 +138,7 @@ test("o desenho tem texto legível, barra e fundo — nos dois tamanhos", () => 
   // olha os pixels: um PNG de cor sólida passaria no teste de assinatura.
   const tmp = mkdtempSync(join(tmpdir(), "giochi-splash-px-"));
   try {
-    for (const [id, largura, altura] of [["r35s", 640, 480], ["powkiddy-x55", 720, 1280]]) {
+    for (const [id, largura, altura] of [["r35s", 640, 480], ["powkiddy-x55", 1280, 720]]) {
       const out = join(tmp, `${id}.png`);
       execFileSync(process.execPath, [GERADOR, "--device", id, "--out", out]);
       const png = lerPng(out);
@@ -157,14 +158,32 @@ test("o desenho tem texto legível, barra e fundo — nos dois tamanhos", () => 
       assert.ok(claros > 200, `${id}: só ${claros} pixels de texto`);
 
       // 3. barra na base, no tom do trilho (0x24,0x28,0x30)
-      const yBarra = altura - Math.round(altura * 0.12);
       let trilho = 0;
+      const yBarra = altura - Math.round(altura * 0.12);
       for (let x = 0; x < largura; x += 1) {
         const c = png.cor(x, yBarra);
         if (c[0] === 0x24 && c[1] === 0x28 && c[2] === 0x30) trilho += 1;
       }
-      assert.ok(trilho > largura * 0.6, `${id}: barra com ${trilho} de ${largura} px`);
+      assert.ok(trilho > largura * 0.6, `${id}: barra com ${trilho} pixels`);
     }
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("o splash do X55 é gerado em paisagem para rotação nativa pelo psplash", () => {
+  const tmp = mkdtempSync(join(tmpdir(), "giochi-splash-rot-"));
+  try {
+    const out = join(tmp, "x55.png");
+    execFileSync(process.execPath, [GERADOR, "--device", "powkiddy-x55", "--out", out]);
+    const png = lerPng(out);
+    assert.equal(png.largura, 1280);
+    assert.equal(png.altura, 720);
+    const script = readFileSync(S01, "utf8");
+    assert.match(script, /fbcon=rotate:3\) PSPLASH_ANGLE=90/,
+      "a rotação confirmada no X55 é anti-horária em 90° no psplash");
+    assert.match(script, /psplash -n -a "\$PSPLASH_ANGLE"/,
+      "a rotação do psplash precisa abranger texto e barra");
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
@@ -199,7 +218,8 @@ test("S01splash existe, é executável e sobe o psplash", () => {
   assert.ok(existsSync(S01), "falta o S01splash");
   assert.ok(statSync(S01).mode & 0o100, "tem de ser executável no índice do Git");
   const sh = readFileSync(S01, "utf8");
-  assert.match(sh, /psplash -n/, "o `-n` evita que ele morra ao fechar o FIFO");
+  assert.match(sh, /psplash -n -a "\$PSPLASH_ANGLE"/,
+    "o `-n` mantém o processo e `-a` orienta o desenho completo");
   assert.match(sh, /\/dev\/fb0/, "sem framebuffer não há onde desenhar");
   // Falha não pode derrubar o boot.
   assert.match(sh, /seguindo sem splash|seguindo/);
