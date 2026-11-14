@@ -4042,7 +4042,7 @@ que não estava no relatório e é o maior risco da árvore hoje.
 | 2 | Sem rota default no aparelho | **é o desenho** | nada a fazer; teste impede que alguém "resolva" |
 | 3 | `ldd` ausente | **procedia** | `BR2_PACKAGE_GLIBC_UTILS=y` no comum |
 | 4 | glibc ≥ 2.39 | **impossível em 2024.02** | resolve no upgrade (§ abaixo) |
-| 5 | Driver `dummy` do SDL2 | **procedia** | `buildroot-external/` + `SDL_VIDEODRIVER=kmsdrm` no init |
+| 5 | Driver `dummy` do SDL2 | **procedia** | `buildroot-external/` + `SDL_VIDEODRIVER` escolhido pelo init |
 | 6 | `/dev/*` para grupos | **possível, sem ganho hoje** | não feito: tudo roda como root |
 | 7 | Cabeçalhos e `.pc` na imagem | **caminho errado** | `make sdk` opcional (`GIOCHI_SYSTEM_SDK=1`) |
 | 8 | `libudev` | **premissa errada** | desnecessário: o SDL2 já usa inotify |
@@ -4115,9 +4115,30 @@ comportamento, e um reordenamento futuro desliga o dummy sem erro. Ficou
 E o risco que vem junto, este real: no `SDL_video.c` o `DUMMY_bootstrap` é o
 **ÚLTIMO** da lista. Se o KMSDRM falhar ao iniciar, o SDL cai nele **em
 silêncio** — processo vivo, zero pixel na tela, a mesma forma do §12.62-D.
-Por isso o `giochi-init` passou a exportar `SDL_VIDEODRIVER=kmsdrm` (com `:-`,
-para o teste headless poder escolher `dummy`): a falha vira
-`kmsdrm not available` no stderr, que é o texto que a engine já documenta.
+
+Por isso o `giochi-init` passou a **fixar** o driver, e a regra é binária:
+
+```sh
+if [ -e /dev/dri/card0 ]; then  VIDEO_PADRAO=kmsdrm
+else                            VIDEO_PADRAO=dummy
+fi
+SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-$VIDEO_PADRAO}"
+```
+
+* **com** card → `kmsdrm`: numa placa real, falha ali é defeito de verdade e tem
+  de aparecer (`kmsdrm not available`, o texto que a engine já documenta);
+* **sem** card → `dummy`: alvo virtual sem `virtio-gpu-pci` não tem card e o
+  `kmsdrm` falharia **sempre**. Medido no primeiro boot do Giochi OS para QEMU
+  (13/11/2026): cinco `kmsdrm not available` e o init desistia.
+
+O que a regra **não** faz é cair para `dummy` depois de o `kmsdrm` falhar num
+aparelho que tem card — isso seria trocar a falha visível pela tela preta.
+
+`tests/requisitos-engine.test.mjs` prende as três partes: a condição é a
+**existência** do card (nunca o resultado de abrir o vídeo), o `:-` deixa o
+override do usuário vencer, e existe **uma** atribuição de `SDL_VIDEODRIVER`.
+Verificado por mutação: literal fixo em `kmsdrm`, fallback pós-falha e remoção do
+ramo sem-card reprovam os três.
 
 **`BR2_EXTERNAL` tem de ser exportado em toda invocação do make.** O
 `Makefile:188` reconstrói `$(O)/.br2-external.mk` a partir da variável; sem ela

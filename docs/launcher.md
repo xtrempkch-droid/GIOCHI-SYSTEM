@@ -168,20 +168,29 @@ KMSDRM falhar ao abrir, o SDL cai no dummy **em silêncio** — o processo roda,
 log diz que o vídeo inicializou, e a tela fica preta. É a mesma classe de falha
 do §12.62-D do AGENTS.
 
-Por isso o `giochi-init` exporta:
+Por isso o `giochi-init` decide e exporta:
 
 ```sh
-SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-kmsdrm}"
+if [ -e /dev/dri/card0 ]; then  VIDEO_PADRAO=kmsdrm
+else                            VIDEO_PADRAO=dummy
+fi
+SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-$VIDEO_PADRAO}"
 export SDL_VIDEODRIVER
 ```
 
-Duas consequências práticas:
+Três consequências práticas:
 
-* **falha de KMSDRM agora é explícita** — a engine morre com
+* **com card DRM, falha é explícita** — a engine morre com
   `kmsdrm not available` no stderr, que é a mensagem que o
-  `docs/ferramentas.md` deles já documenta;
+  `docs/ferramentas.md` deles já documenta. Nada de cair para `dummy` depois de
+  falhar: isso trocaria a falha visível pela tela preta;
+* **sem card DRM, `dummy` é o padrão** — alvo virtual sem `virtio-gpu-pci`
+  (QEMU `virt`) não tem `/dev/dri/card0` e o `kmsdrm` falharia sempre. Medido no
+  primeiro boot do Giochi OS para QEMU (13/11/2026): cinco `kmsdrm not available`
+  e o `giochi-init` desistia;
 * **teste headless continua funcionando**: basta definir
-  `SDL_VIDEODRIVER=dummy` no ambiente; o `:-` respeita a escolha.
+  `SDL_VIDEODRIVER=dummy` no ambiente; o `:-` respeita a escolha em qualquer um
+  dos dois casos.
 
 O padrão só vale para o que o `giochi-init` inicia. Um shell por SSH, o getty do
 console e um binário rodado à mão **não** herdam a variável — ali o SDL2 escolhe
@@ -287,8 +296,9 @@ Referência do roteamento de cada placa: `device/<aparelho>/README.md`.
    getty do console ativo (`/etc/inittab`) ou desligar o `fbcon` enquanto o
    launcher roda. **Não medido aqui** — anotar o que acontecer.
 2. **`SDL_VIDEODRIVER`.** Sem a variável o SDL2 escolhe; com `SDL_VIDEODRIVER=dummy`
-   escolhido errado, roda sem desenhar. Fixar `kmsdrm` explicitamente é
-   diagnóstico melhor que "não aparece nada".
+   escolhido errado, roda sem desenhar. O `giochi-init` fixa `kmsdrm` quando há
+   `/dev/dri/card0` e `dummy` quando não há — diagnóstico melhor que "não
+   aparece nada", e cobre o alvo virtual sem `virtio-gpu`.
 3. **Permissão no DRM.** O launcher roda como root nesta imagem, então não há
    problema de grupo `video`. Se um dia houver usuário não-root, ele precisa de
    acesso a `/dev/dri/card0` e ao render node.
