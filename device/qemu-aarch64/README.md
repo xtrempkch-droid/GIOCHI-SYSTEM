@@ -78,3 +78,9 @@ mesmo terminal do login.
 
 Para ver o launcher nesta VM: remova o arquivo da imagem e inicie com
 `-device virtio-gpu-pci -display ...`.
+
+## QA
+
+Este repositório foi construído localmente em 13/11/2026 para a primeira
+release do Giochi OS (`v0.1.0`), com o overlay de apps do Giochi os. Log do
+boot verificado: login `root`, seis apps em `/opt/giochi/apps`.
