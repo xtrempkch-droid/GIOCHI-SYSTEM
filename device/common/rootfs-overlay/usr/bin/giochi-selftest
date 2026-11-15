@@ -354,10 +354,35 @@ if ! command -v kmscube >/dev/null 2>&1; then
     skip "kmscube ausente — não dá para provar 3D; habilitar BR2_PACKAGE_KMSCUBE"
 elif [ "${LAUNCHER_RODANDO:-0}" = "1" ]; then
     skip "launcher detém o DRM master — kmscube roubaria a tela; 3D em uso pelo launcher"
-elif timeout 10 kmscube -D /dev/dri/card0 >/dev/null 2>&1; then
-    pass "kmscube rodou (EGL/GLES + scanout OK)"
 else
-    fail "kmscube falhou — EGL/GLES ou scanout quebrado"
+    # O kmscube é uma ANIMAÇÃO: não sai sozinho, quem encerra é o `timeout`.
+    # Duas medidas no R35S em 15/11/2026 (imagem `commit=a012b5a`):
+    #
+    #   1. o `timeout` do BUSYBOX devolve 143 (128+SIGTERM), não 124 como o do
+    #      coreutils. A versão anterior testava `if timeout ... ; then pass`,
+    #      então o 143 caía no `else` e virava `[FAIL] kmscube falhou` num
+    #      aparelho cuja GPU tinha acabado de se apresentar como Mali-G31;
+    #   2. o shell imprime "Terminated" no stderr de quem executou. Com
+    #      `$(...)` isso vaza: a substituição de comando captura só o stdout.
+    #      Daí o arquivo temporário + o grupo com `2>/dev/null`.
+    #
+    # A decisão é pelo RENDERER, nunca pelo código de saída: sem panfrost o Mesa
+    # responde a MESMA `GL_VERSION` com `renderer: softpipe` (§12.51), então
+    # exit code não distingue GPU de CPU.
+    KMS_TMP="/tmp/.giochi-kmscube.$$"
+    { timeout 10 kmscube -D /dev/dri/card0 >"$KMS_TMP" 2>&1 ; } 2>/dev/null
+    KMS_RC=$?
+    KMS_GPU="$(sed -n 's/^ *renderer: *//p' "$KMS_TMP" 2>/dev/null | head -1 | tr -d '"')"
+    rm -f "$KMS_TMP"
+    if [ "$KMS_RC" = "127" ]; then
+        skip "kmscube não executou (biblioteca ausente) — não é prova de 3D"
+    else
+        case "$KMS_GPU" in
+            "") fail "kmscube não criou contexto EGL/GLES (exit $KMS_RC) — sem renderer na saída" ;;
+            *softpipe*|*swrast*|*llvmpipe*) fail "kmscube desenhou na CPU (renderer '$KMS_GPU') — panfrost não assumiu" ;;
+            *) pass "kmscube rodou: $KMS_GPU (EGL/GLES + scanout OK)" ;;
+        esac
+    fi
 fi
 
 if [ -r /proc/meminfo ]; then

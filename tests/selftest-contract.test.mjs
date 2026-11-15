@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -429,7 +429,7 @@ test("o kmscube é PULADO quando o launcher detém o DRM master, não reprovado"
   );
   assert.match(
     bloco,
-    /elif timeout 10 kmscube/,
+    /timeout 10 kmscube -D \/dev\/dri\/card0/,
     "sem launcher, o kmscube tem de RODAR — skip incondicional não prova nada",
   );
   // A ordem importa: o guarda do launcher vem ANTES da execução.
@@ -439,6 +439,105 @@ test("o kmscube é PULADO quando o launcher detém o DRM master, não reprovado"
     iGuard < iRun,
     "o guarda do launcher tem de vir antes do kmscube rodar",
   );
+});
+
+test("o bloco do kmscube lê o RENDERER, e o timeout 124 é sucesso", async () => {
+  // Medido no R35S em 15/11/2026, imagem `commit=a012b5a`: o kmscube imprimiu
+  // `renderer: "Mali-G31 (Panfrost)"` e o selftest deu
+  //
+  //   [FAIL] kmscube falhou — EGL/GLES ou scanout quebrado
+  //
+  // num aparelho com a GPU funcionando. Causa: o kmscube é uma ANIMAÇÃO e não
+  // sai sozinho — quem encerra é o `timeout`, e ele devolve 124. A primeira
+  // versão usava `if timeout 10 kmscube; then pass; else fail`, então 124 caía
+  // no `else`. Falso negativo da mesma família do §12.34.
+  //
+  // E o espelho, que é o que o §12.51 ensina: sem panfrost o Mesa responde a
+  // MESMA `GL_VERSION` com `renderer: softpipe`. Se o teste só olhasse o exit
+  // code, um aparelho renderizando na CPU passaria verde.
+  //
+  // Este teste executa o bloco REAL do selftest com um `kmscube` de mentira,
+  // nos cinco desfechos que importam.
+  const texto = await read();
+  const inicio = texto.indexOf("EGL/GLES: sem binário");
+  assert.ok(inicio > 0, "o bloco de EGL/GLES sumiu do selftest");
+  const fim = texto.indexOf("\nfi\n", texto.indexOf("timeout 10 kmscube"));
+  assert.ok(fim > inicio, "não consegui delimitar o bloco do kmscube");
+  const bloco = texto.slice(inicio, fim + 4);
+
+  const raiz = mkdtempSync(path.join(tmpdir(), "giochi-kms-"));
+  const bin = path.join(raiz, "bin");
+  mkdirSync(bin, { recursive: true });
+
+  // `pass`/`fail`/`skip` do selftest viram eco, para o veredito ser legível.
+  const cabecalho = [
+    "pass() { echo \"PASS\"\" $*\"; }",
+    "fail() { echo \"FAIL\"\" $*\"; }",
+    "skip() { echo \"SKIP\"\" $*\"; }",
+  ].join("\n");
+  const script = path.join(raiz, "t.sh");
+  writeFileSync(script, `${cabecalho}\n${bloco}\n`);
+
+  function roda({ exit = 0, renderer = "", launcher = 0, ausente = false }) {
+    if (ausente) {
+      rmSync(path.join(bin, "kmscube"), { force: true });
+    } else {
+      const corpo = [
+        "#!/bin/sh",
+        "echo 'OpenGL ES information:'",
+        renderer ? `echo '  renderer: "${renderer}"'` : "true",
+        `exit ${exit}`,
+        "",
+      ].join("\n");
+      const alvo = path.join(bin, "kmscube");
+      writeFileSync(alvo, corpo);
+      chmodSync(alvo, 0o755);
+    }
+    return execFileSync("sh", [script], {
+      env: {
+        PATH: `${bin}:/usr/bin:/bin`,
+        LAUNCHER_RODANDO: String(launcher),
+        HOME: raiz,
+      },
+      timeout: 30_000,
+      encoding: "utf8",
+    }).trim();
+  }
+
+  try {
+    assert.match(
+      roda({ exit: 124, renderer: "Mali-G31 (Panfrost)" }),
+      /^PASS.*Mali-G31/,
+      "timeout 124 com GPU tem de ser PASS — é o falso FAIL medido no aparelho",
+    );
+    assert.match(
+      roda({ exit: 0, renderer: "Mali-G31 (Panfrost)" }),
+      /^PASS/,
+      "saída limpa com GPU também é PASS",
+    );
+    assert.match(
+      roda({ exit: 143, renderer: "softpipe" }),
+      /^FAIL.*CPU/,
+      "softpipe tem de reprovar — sem panfrost a GL_VERSION é a MESMA (§12.51)",
+    );
+    assert.match(
+      roda({ exit: 1, renderer: "" }),
+      /^FAIL.*exit 1/,
+      "falha de verdade tem de doer, e com o código na mensagem",
+    );
+    assert.match(
+      roda({ exit: 143, renderer: "Mali-G31 (Panfrost)", launcher: 1 }),
+      /^SKIP/,
+      "com launcher o kmscube roubaria a tela — SKIP, nunca FAIL (§12.45)",
+    );
+    assert.match(
+      roda({ ausente: true }),
+      /^SKIP/,
+      "sem o binário é SKIP, não FAIL: não deu para medir não é o mesmo que quebrado",
+    );
+  } finally {
+    rmSync(raiz, { recursive: true, force: true });
+  }
 });
 
 test("a leitura de /proc/*/cmdline silencia o processo que sumiu", async () => {

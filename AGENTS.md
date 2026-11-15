@@ -4878,6 +4878,112 @@ E a contraprova, apagando o pai do defconfig instalado e repetindo:
 
 Custo: ~4 min e 86 MB. Um build completo é 1 h 45. O replay existe para isso.
 
+### 12.72 O kmscube é uma animação: `timeout` matando não é falha
+
+Medido no R35S em 15/11/2026, na primeira imagem que trouxe o `kmscube`
+(`commit=a012b5a`, §12.69). O bloco do selftest deu:
+
+```text
+[FAIL] kmscube falhou — EGL/GLES ou scanout quebrado
+```
+
+num aparelho cuja GPU tinha acabado de se apresentar como `Mali-G31 (Panfrost)`
+com `OpenGL ES 3.1 Mesa 24.0.9`. Falso negativo — e da mesma família do §12.34:
+**o teste perguntou a coisa errada.**
+
+#### Três defeitos em quatro linhas de shell
+
+**1. O `kmscube` não sai sozinho.** É uma animação em laço. Quem encerra é o
+`timeout`, e a primeira versão era:
+
+```sh
+elif timeout 10 kmscube -D /dev/dri/card0 >/dev/null 2>&1; then pass ...
+```
+
+Ou seja: o encerramento normal caía no `else`.
+
+**2. O `timeout` do BUSYBOX devolve 143, não 124.** Medido no aparelho:
+
+```text
+$ timeout 2 sleep 30; echo $?
+Terminated
+143                        # 128 + SIGTERM (15)
+$ timeout 2 /nao_existe; echo $?
+127
+```
+
+Minha primeira correção tratou `124` (o do coreutils) — e continuou falhando,
+agora com `exit 143`. Supor que o busybox se comporta como o coreutils foi o
+mesmo erro da §12.20 (`strtonum`) e da §12.46 (`ps`): a ferramenta do alvo não é
+a do desktop.
+
+**3. `$(...)` não captura o `stderr` — o "Terminated" vazava.**
+
+```
+$ KMS_OUT="$(timeout 10 kmscube ... 2>&1)"
+```
+
+A substituição de comando captura só o stdout. O aviso `Terminated` é do
+**shell**, escrito no fd 2 de quem executou, e apareceu como uma linha de ruído
+no stderr do selftest — o mesmo tipo de sujeira que a correção da ordem dos
+redirecionamentos tinha acabado de limpar.
+
+Correção: arquivo temporário + grupo com `2>/dev/null`, que engole o aviso sem
+perder a saída:
+
+```sh
+{ timeout 10 kmscube -D /dev/dri/card0 >"$KMS_TMP" 2>&1 ; } 2>/dev/null
+```
+
+#### A decisão passou a ser o RENDERER, não o código de saída
+
+```sh
+case "$KMS_GPU" in
+    "") fail "kmscube não criou contexto EGL/GLES (exit $KMS_RC)" ;;
+    *softpipe*|*swrast*|*llvmpipe*) fail "desenhou na CPU ($KMS_GPU) — panfrost não assumiu" ;;
+    *) pass "kmscube rodou: $KMS_GPU (EGL/GLES + scanout OK)" ;;
+esac
+```
+
+Três razões, e a terceira é a que já custou caro neste projeto:
+
+1. `exit 143` passa a ser irrelevante — o que importa é ter chegado a criar
+   contexto;
+2. `127` (biblioteca ausente) vira **`SKIP`**, não `FAIL`: não deu para medir
+   não é o mesmo que está quebrado;
+3. **sem panfrost o Mesa responde a MESMA `GL_VERSION` com
+   `renderer: softpipe`** (§12.51). Um teste que só olhasse o exit code daria
+   `PASS` num aparelho renderizando na CPU. `GL_RENDERER` é a única pergunta que
+   separa GPU de CPU.
+
+#### Resultado no aparelho, com a imagem final
+
+```text
+[PASS] driver de GPU reconhecido: panfrost
+[PASS] kmscube rodou: Mali-G31 (Panfrost) (EGL/GLES + scanout OK)
+
+PASS 40 · WARN 1 · FAIL 0 · SKIP 3      stderr: 0 linha(s)
+```
+
+O único `WARN` é `/opt/giochi/apps/index.json` ausente — arquivo do
+`Giochi app`, não do sistema. Os três `SKIP` são `lsblk ausente`, `sem wlan0`
+(sem dongle, e esta placa não tem rádio onboard) e `sem launcher empacotado`.
+**O 3D deixou de ser `SKIP` pela primeira vez.**
+
+`tests/selftest-contract.test.mjs` ganhou um teste **comportamental**: extrai o
+bloco real do selftest e roda com um `kmscube` de mentira em seis desfechos —
+`143`+GPU (`PASS`), `0`+GPU (`PASS`), `143`+`softpipe` (`FAIL`), exit não-zero
+sem renderer (`FAIL`), launcher (`SKIP`), binário ausente (`SKIP`). Verificado
+por mutação: voltar `124` no lugar de `143` derruba o teste.
+
+#### A lição que se repete
+
+Três suposições erradas na mesma correção, e nenhuma delas sobre o hardware:
+`timeout` do busybox, semântica de `$(...)`, e a ideia de que "processo morto
+pelo timeout" é processo quebrado. Todas as três seriam pegas por **uma
+execução no alvo** — que é exatamente o que o aparelho na bancada permite e o
+desktop não.
+
 ## 13. Aparelhos
 
 | ID | Pasta | SoC | Arch | Status | Falta |
