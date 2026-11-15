@@ -88,7 +88,8 @@ fail() { printf '[FAIL] %s\n' "$*"; FALHAS=$((FALHAS + 1)); }
 
 echo "=== aparelho ==="
 echo "host:     $(hostname 2>/dev/null || echo '?')"
-echo "compat:   $(tr '\0' ' ' < /proc/device-tree/compatible 2>/dev/null | sed 's/ *$//')"
+COMPAT=$(cat /proc/device-tree/compatible 2>/dev/null | tr '\0' ' ' | sed 's/ *$//' || true)
+echo "compat:   ${COMPAT:-(sem device tree)}"
 echo "kernel:   $(uname -r)"
 
 echo
@@ -112,7 +113,7 @@ fi
 # nome de dispositivo, e a falha aparece só no `speaker-test`. Pega os dois.
 CARD_LINHA=$(grep '^[[:space:]]*[0-9]' /proc/asound/cards 2>/dev/null | head -n 1)
 CARD_NUM=$(printf '%s\n' "$CARD_LINHA" | awk '{print $1}')
-CARD_ID=$(printf '%s\n' "$CARD_LINHA" | sed -n 's/.*\[\([^]]*\)\].*/\1/p')
+CARD_ID=$(printf '%s\n' "$CARD_LINHA" | sed -n 's/.*\[\([^]]*\)\].*/\1/p' | sed 's/[[:space:]]*$//')
 echo "card:     hw:${CARD_NUM:-0} (${CARD_ID:-?})"
 
 echo
@@ -159,7 +160,11 @@ if [ -z "$MUX" ] && [ -r /etc/giochi/asound.state ]; then
 fi
 
 if [ -z "$MUX" ]; then
-    warn "controle 'Playback Mux' não encontrado no mixer"
+    if command -v amixer >/dev/null 2>&1; then
+        warn "controle 'Playback Mux' não encontrado no mixer"
+    else
+        warn "sem 'amixer' e sem /etc/giochi/asound.state — o mux não pôde ser lido"
+    fi
 elif [ -z "$EXPECT_MUX" ]; then
     warn "Playback Mux = $MUX — o 'Speaker' do DT não permitiu decidir o esperado"
 elif [ "$MUX" = "$EXPECT_MUX" ]; then
@@ -241,7 +246,7 @@ echo "=== erros no dmesg ==="
 if command -v dmesg >/dev/null 2>&1; then
     ERROS=$(dmesg 2>/dev/null | grep -i -E 'rk817.*(error|fail)|i2s.*(error|fail)|asoc.*(error|fail)' | tail -n 5)
     if [ -z "$ERROS" ]; then
-        pass "nenhum erro de rk817/i2s/asoc no dmesg"
+        pass "nenhuma mensagem de erro de rk817/i2s/asoc no dmesg"
     else
         warn "mensagens de erro no dmesg:"
         printf '       %s\n' "$ERROS"
