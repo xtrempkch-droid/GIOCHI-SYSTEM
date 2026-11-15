@@ -222,8 +222,37 @@ endif
 # degradação graciosa, sem quebrar build.
 override PSPLASH_IMAGE = $(GIOCHI_SPLASH_PNG)
 
+# A barra, a geometria e as cores viajam junto com essa imagem — e sem elas o
+# psplash desenha a NOSSA imagem e a barra DELE, em lugares diferentes.
+#
+# Três coisas saem do repositório e entram no fonte extraído:
+#
+#   base-images/psplash-bar.png  a barra, virada `psplash-bar-img.h` no build
+#                                (regra do `Makefile.am`, via host-gdk-pixbuf)
+#   psplash-config.h             `IMG_FULLSCREEN 1` e split em 9/16, que é onde
+#                                `gerar-splash.mjs` põe o logo logo acima
+#   psplash-colors.h             fundo/texto/preenchimento do projeto; é o que
+#                                o `psplash_draw_progress` usa para pintar o
+#                                miolo da barra e para LIMPAR a tela no começo
+#
+# Com os valores de fábrica o resultado medido no X55 (14/11/2026) era: logo no
+# meio, barra solta em 5/6 da tela, faixa creme do Yocto no rodapé e um flash
+# claro antes do primeiro quadro. Nada disso gera erro — só uma tela feia.
+#
+# `ifneq` porque um build à mão (sem `build-device.sh`) não define as variáveis,
+# e nesse caso o pacote segue com o visual de fábrica em vez de quebrar.
+ifneq ($(GIOCHI_SPLASH_BAR),)
+define GIOCHI_PSPLASH_VISUAL
+	cp $(GIOCHI_SPLASH_BAR) $(@D)/base-images/psplash-bar.png
+	cp $(GIOCHI_SPLASH_DIR)/psplash-config.h $(@D)/psplash-config.h
+	cp $(GIOCHI_SPLASH_DIR)/psplash-colors.h $(@D)/psplash-colors.h
+endef
+PSPLASH_POST_EXTRACT_HOOKS += GIOCHI_PSPLASH_VISUAL
+endif
+
 # Conferir com:
 #   make -p -n | grep '^PSPLASH_IMAGE'
+#   ls work/<device>/build/build/psplash-*/base-images/
 
 # ── sdl2_mixer: o sdl2-config do SISTEMA vaza para o cross-compile ──────────
 # Só aparece em máquina que tem `libsdl2-dev` instalado — e esta tem, porque o

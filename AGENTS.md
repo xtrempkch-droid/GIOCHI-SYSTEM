@@ -5089,3 +5089,46 @@ caminho que o próprio `flash-sd.sh` documenta. `lsblk` falha dentro do containe
 **O que esta rodada NÃO prova:** nada foi medido no aparelho. O cartão está
 gravado, conferido e desmontado; falta colocá-lo no X55 e ler a serial a
 1500000. A imagem anterior ficou em `out/_anterior-x55-20261104/` para rollback.
+
+## 22. Bootsplash: logo e barra como um bloco (14/11/2026)
+
+O `psplash` desenha **duas coisas independentes**: a imagem de fundo (o PNG que
+o projeto gera) e, por conta própria, a barra de progresso — numa linha fixa do
+framebuffer, com cores que vêm de `psplash-colors.h`.
+
+Até esta data só a imagem era nossa. Consequência medida no X55: o logo ficava
+no meio da tela, a barra do psplash caía 1/6 de tela abaixo dele, o rodapé
+aparecia com o creme do Yocto (`#ecece1`) e todo boot começava com um flash
+claro antes de o fundo escuro entrar. Nada disso gera erro — só uma tela que
+parece montada por duas pessoas diferentes.
+
+O que passou a existir:
+
+| Peça | Arquivo | Quem usa |
+| --- | --- | --- |
+| fundo + logo | `gerar-splash.mjs --out` | `override PSPLASH_IMAGE` |
+| barra | `gerar-splash.mjs --bar-out` | `PSPLASH_POST_EXTRACT_HOOKS` → `base-images/psplash-bar.png` |
+| geometria | `config/psplash/psplash-config.h` | `FULLSCREEN=1`, split `9/16` |
+| cores | `config/psplash/psplash-colors.h` | fundo/texto/preenchimento/trilho |
+
+O número que amarra os dois lados é o split `9/16`: o gerador posiciona o logo
+logo acima dessa linha, e o psplash desenha a barra nela. `tests/bootsplash.test.mjs`
+lê a fração do header e compara com a constante do gerador — divergir não dá
+erro em lugar nenhum, só um logo flutuando longe da barra.
+
+Duas armadilhas fechadas no caminho:
+
+- **Hook de extração não roda em pacote já extraído.** Num `work/` retomado
+  (`GIOCHI_SYSTEM_KEEP_WORK=1`, o caminho normal) a pasta `build/psplash-*/` já
+  existe, os hooks são pulados e o build fica VERDE com o splash antigo. Por
+  isso `build-device.sh` remove a pasta do pacote a cada build — segundos,
+  porque `host-gdk-pixbuf` já está pronto.
+- **`psplash.c` calcula a linha da barra com aritmética inteira do C**
+  (`height - ((DEN-NUM)*height/DEN)`). Repetir como `height*9/16` no JS diverge
+  em um pixel para alturas ímpares — o bastante para a barra encostar no texto.
+  O gerador usa a mesma expressão.
+
+Verificado: `make psplash` no container gerou `BAR_IMG 312x14` e `POKY_IMG
+640x480` a partir dos nossos arquivos, e o framebuffer lido de dentro do QEMU
+(`-device virtio-gpu-pci`, `dd if=/dev/fb0`) mostra o lockup de 312 px com a
+barra de 312 px na mesma coluna.

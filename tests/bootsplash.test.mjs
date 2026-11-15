@@ -94,17 +94,39 @@ test("o override usa `override`, não `=` — senão a receita apaga (§12.7)", 
   );
 });
 
-test("o build gera o splash antes do make", () => {
+test("o build gera imagem E barra antes do make", () => {
   const sh = readFileSync(`${ROOT}scripts/build-device.sh`, "utf8");
   assert.match(sh, /gerar-splash\.mjs/);
   assert.match(sh, /GIOCHI_SPLASH_PNG/);
+  // A barra é um segundo arquivo: o psplash desenha a imagem de fundo e, em
+  // separado, a barra. Gerar só a imagem deixava as duas peças em lugares
+  // diferentes — o defeito que este par fecha.
+  assert.match(sh, /--bar-out "\$SPLASH_BAR"/);
+  assert.match(sh, /GIOCHI_SPLASH_BAR/);
+  // Geometria e cores viajam com eles.
+  assert.match(sh, /psplash-config\.h/);
+  assert.match(sh, /psplash-colors\.h/);
   // O caminho tem de ir para work/, não para a pasta do aparelho: caminho com
   // espaço entraria cru numa variável de make (§12.6).
-  assert.match(sh, /SPLASH_PNG="\$WORK_DIR\/splash\.png"/);
+  assert.match(sh, /SPLASH_DIR="\$WORK_DIR\/psplash"/);
+  assert.match(sh, /SPLASH_PNG="\$SPLASH_DIR\/splash\.png"/);
   // E falhar ao gerar NÃO pode derrubar o build — sem splash o aparelho boota.
-  const bloco = sh.slice(sh.indexOf("SPLASH_PNG="), sh.indexOf("SPLASH_PNG=") + 900);
+  const inicio = sh.indexOf("SPLASH_PNG=");
+  const bloco = sh.slice(inicio, inicio + 2000);
   assert.match(bloco, /NÃO gerado/);
   assert.ok(!/^\s*exit 1\s*$/m.test(bloco), "splash é cosmético: não derruba o build");
+});
+
+test("o psplash é reconstruído: hook de extração não roda em pacote já extraído", () => {
+  // A imagem, a barra e os headers entram por POST_EXTRACT. Num `work/`
+  // retomado (`GIOCHI_SYSTEM_KEEP_WORK=1`, o caminho normal) a pasta do pacote
+  // já existe, o hook é pulado e o build fica VERDE com o splash antigo.
+  const sh = readFileSync(`${ROOT}scripts/build-device.sh`, "utf8");
+  assert.match(
+    sh,
+    /rm -rf "\$BUILD_DIR\/build\/psplash-"\*/,
+    "sem remover a pasta do psplash, mudar o splash não muda a imagem",
+  );
 });
 
 // ── a imagem ─────────────────────────────────────────────────────────────
@@ -133,9 +155,14 @@ test("a imagem é gerada no tamanho lógico da tela do aparelho", () => {
   }
 });
 
-test("o desenho tem texto legível, barra e fundo — nos dois tamanhos", () => {
+test("o desenho tem texto legível e NÃO pinta a barra", () => {
   // "Gerou PNG" e "gerou splash legível" são perguntas diferentes. Aqui o teste
-  // olha os pixels: um PNG de cor sólida passaria no teste de assinatura.
+  // olha os pixels.
+  //
+  // O trilho era exigido nesta imagem até 14/11/2026 — e era exatamente o
+  // defeito: uma barra decorativa desenhada aqui, longe do logo, enquanto o
+  // psplash desenhava a barra REAL em outro lugar. Agora a barra tem arquivo
+  // próprio (`--bar-out`) e a imagem não pinta trilho nenhum.
   const tmp = mkdtempSync(join(tmpdir(), "giochi-splash-px-"));
   try {
     for (const [id, largura, altura] of [["r35s", 640, 480], ["powkiddy-x55", 1280, 720]]) {
@@ -157,18 +184,118 @@ test("o desenho tem texto legível, barra e fundo — nos dois tamanhos", () => 
       }
       assert.ok(claros > 200, `${id}: só ${claros} pixels de texto`);
 
-      // 3. barra na base, no tom do trilho (0x24,0x28,0x30)
+      // 3. nenhum pixel do trilho: a barra é do psplash, não da imagem
       let trilho = 0;
-      const yBarra = altura - Math.round(altura * 0.12);
-      for (let x = 0; x < largura; x += 1) {
-        const c = png.cor(x, yBarra);
-        if (c[0] === 0x24 && c[1] === 0x28 && c[2] === 0x30) trilho += 1;
+      for (let y = 0; y < altura; y += 1) {
+        for (let x = 0; x < largura; x += 1) {
+          const c = png.cor(x, y);
+          if (c[0] === 0x24 && c[1] === 0x28 && c[2] === 0x30) trilho += 1;
+        }
       }
-      assert.ok(trilho > largura * 0.6, `${id}: barra com ${trilho} pixels`);
+      assert.equal(trilho, 0, `${id}: ${trilho} pixels de trilho pintados na imagem`);
     }
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+test("a barra nasce na largura do logo e logo abaixo dele", () => {
+  // A queixa que originou o trabalho: "o carregamento e o texto estão
+  // separados". Aqui a geometria é medida: a barra tem de ter a largura do logo
+  // e começar poucos pixels abaixo dele.
+  const tmp = mkdtempSync(join(tmpdir(), "giochi-splash-bar-"));
+  try {
+    for (const [id, largura, altura] of [["r35s", 640, 480], ["powkiddy-x55", 1280, 720]]) {
+      const splashOut = join(tmp, `${id}.png`);
+      const barraOut = join(tmp, `${id}-bar.png`);
+      execFileSync(process.execPath,
+        [GERADOR, "--device", id, "--out", splashOut, "--bar-out", barraOut]);
+
+      const splash = lerPng(splashOut);
+      const barra = lerPng(barraOut);
+
+      // Caixa do texto: onde há pixel claro ou azul.
+      let minX = largura, maxX = -1, maxY = -1;
+      for (let y = 0; y < altura; y += 1) {
+        for (let x = 0; x < largura; x += 1) {
+          const c = splash.cor(x, y);
+          const claro = c[0] > 200 && c[1] > 200 && c[2] > 200;
+          const azul = c[0] === 0x3d && c[1] === 0x9a && c[2] === 0xff;
+          if (!claro && !azul) continue;
+          minX = Math.min(minX, x);
+          maxX = Math.max(maxX, x);
+          maxY = Math.max(maxY, y);
+        }
+      }
+      assert.ok(maxX > 0, `${id}: não achei o logo`);
+
+      // A barra começa na mesma coluna e tem a mesma largura do logo.
+      assert.equal(barra.largura, maxX - minX + 1, `${id}: largura da barra ≠ do logo`);
+      const barraX = Math.floor((largura - barra.largura) / 2);
+      assert.equal(barraX, minX, `${id}: a barra não está na coluna do logo`);
+
+      // E fica logo abaixo: o vão é o mesmo que o gerador declara (2% da
+      // altura, no mínimo dois pixels de escala), nunca um sexto de tela.
+      const barraY = altura - Math.floor(((16 - 9) * altura) / 16);
+      const vao = barraY - maxY - 1;
+      assert.ok(vao > 0 && vao < Math.round(altura * 0.06),
+        `${id}: vão de ${vao}px entre logo e barra`);
+
+      // A barra é uma cápsula: os cantos ficam no fundo, o meio no trilho.
+      const [cr, cg, cb] = barra.cor(0, 0);
+      assert.deepEqual([cr, cg, cb], [0x10, 0x12, 0x16], `${id}: canto da barra`);
+      const [mr, mg, mb] = barra.cor(Math.floor(barra.largura / 2), Math.floor(barra.altura / 2));
+      assert.deepEqual([mr, mg, mb], [0x24, 0x28, 0x30], `${id}: trilho`);
+    }
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("geometria e cores do psplash batem com o gerador", () => {
+  // O gerador posiciona o logo pela fração 9/16; o psplash desenha a barra na
+  // fração que está no header. Se as duas divergirem, ninguém vê erro — só um
+  // logo flutuando longe da barra, que é o defeito original voltando por outra
+  // porta.
+  const config = readFileSync(`${ROOT}config/psplash/psplash-config.h`, "utf8");
+  const cores = readFileSync(`${ROOT}config/psplash/psplash-colors.h`, "utf8");
+  const gerador = readFileSync(GERADOR, "utf8");
+
+  assert.match(config, /^#define PSPLASH_IMG_FULLSCREEN 1$/m,
+    "sem FULLSCREEN a imagem é centralizada em 5/6 e o logo desloca H/12");
+  assert.match(config, /^#define PSPLASH_SHOW_PROGRESS_BAR 1$/m);
+
+  const num = Number(/^#define PSPLASH_IMG_SPLIT_NUMERATOR (\d+)$/m.exec(config)?.[1]);
+  const den = Number(/^#define PSPLASH_IMG_SPLIT_DENOMINATOR (\d+)$/m.exec(config)?.[1]);
+  assert.ok(num > 0 && den > 0 && num < den, `split inválido: ${num}/${den}`);
+
+  const numGerador = Number(/const SPLIT_NUMERADOR = (\d+);/.exec(gerador)?.[1]);
+  const denGerador = Number(/const SPLIT_DENOMINADOR = (\d+);/.exec(gerador)?.[1]);
+  assert.equal(numGerador, num, "SPLIT_NUMERADOR do gerador ≠ do header");
+  assert.equal(denGerador, den, "SPLIT_DENOMINADOR do gerador ≠ do header");
+
+  // Cores: o psplash pinta o miolo da barra e limpa a tela com estes valores.
+  const cor = (nome) => {
+    const m = new RegExp(`^#define ${nome} (0x[0-9a-f]{2}),(0x[0-9a-f]{2}),(0x[0-9a-f]{2})$`, "mi")
+      .exec(cores);
+    return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+  };
+  const paleta = (nome) => {
+    const m = new RegExp(`const ${nome} = \\[(0x[0-9a-f]{2}), (0x[0-9a-f]{2}), (0x[0-9a-f]{2})\\]`, "i")
+      .exec(gerador);
+    return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+  };
+
+  assert.deepEqual(cor("PSPLASH_BACKGROUND_COLOR"), paleta("FUNDO"));
+  assert.deepEqual(cor("PSPLASH_TEXT_COLOR"), paleta("TEXTO"));
+  assert.deepEqual(cor("PSPLASH_BAR_COLOR"), paleta("DESTAQUE"));
+  assert.deepEqual(cor("PSPLASH_BAR_BACKGROUND_COLOR"), paleta("TRILHO"));
+
+  // E o pacote tem de receber os três arquivos, não só a imagem.
+  assert.match(OVERRIDES, /base-images\/psplash-bar\.png/);
+  assert.match(OVERRIDES, /psplash-config\.h/);
+  assert.match(OVERRIDES, /psplash-colors\.h/);
+  assert.match(OVERRIDES, /PSPLASH_POST_EXTRACT_HOOKS \+= GIOCHI_PSPLASH_VISUAL/);
 });
 
 test("o splash do X55 é gerado em paisagem para rotação nativa pelo psplash", () => {

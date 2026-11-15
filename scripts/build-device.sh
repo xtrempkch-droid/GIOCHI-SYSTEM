@@ -1012,31 +1012,59 @@ if command -v cmake >/dev/null 2>&1; then
 fi
 
 # ---------------------------------------------------------------
-# Bootsplash: a imagem é gerada no tamanho lógico da tela deste aparelho.
+# Bootsplash: imagem e barra geradas no tamanho lógico da tela deste aparelho.
 #
-# O `psplash` não escala nem centraliza: desenha em (0,0) do framebuffer. Uma
-# imagem de 640x480 numa tela de 720x1280 aparece no canto com o resto preto, o
-# que é pior que não ter splash — parece defeito.
+# São DOIS arquivos porque o psplash desenha duas coisas: a imagem de fundo e,
+# numa linha fixa do framebuffer, a barra de progresso (que ele mesmo anima com
+# as cores de `psplash-colors.h`). Gerar só a imagem deixa a barra em outro
+# lugar, com o visual do Yocto — foi o que aconteceu até 14/11/2026.
+#
+# Os três arquivos vão juntos para `work/<device>/psplash/`:
+#
+#   splash.png            fundo + "GIOCHI OS", logo acima da linha da barra
+#   bar.png               a barra, na mesma largura do logo
+#   psplash-{config,colors}.h   geometria e cores, copiadas do repositório
+#
+# O diretório é curto e sem espaço de propósito: `PSPLASH_IMAGE` e as variáveis
+# do hook entram cruas numa linha de make (§12.6), e a pasta do aparelho tem
+# espaço no nome em vários casos.
 #
 # A resolução vem de `panel { width, height }` e `kernelCmdline.fbconRotate` no
-# device.json, validados pelo schema. Rotações de 90° geram a imagem em paisagem;
-# `S01splash` passa o ângulo ao psplash, que rotaciona o desenho completo.
-# `config/package-overrides.mk` lê `GIOCHI_SPLASH_PNG` e a entrega ao psplash.
-#
-# O arquivo vai para `work/<device>/` e não para a pasta do aparelho: caminho
-# com espaço entraria cru numa variável de make (§12.6).
+# device.json, validados pelo schema. Rotações de 90° geram o desenho em
+# paisagem; `S01splash` passa o ângulo ao psplash, que rotaciona tudo.
 # ---------------------------------------------------------------
-SPLASH_PNG="$WORK_DIR/splash.png"
-if node "$ROOT/scripts/gerar-splash.mjs" --device "$DEVICE_ID" --out "$SPLASH_PNG" \
+SPLASH_DIR="$WORK_DIR/psplash"
+SPLASH_PNG="$SPLASH_DIR/splash.png"
+SPLASH_BAR="$SPLASH_DIR/bar.png"
+rm -rf "$SPLASH_DIR"
+mkdir -p "$SPLASH_DIR"
+
+if node "$ROOT/scripts/gerar-splash.mjs" --device "$DEVICE_ID" \
+     --out "$SPLASH_PNG" --bar-out "$SPLASH_BAR" \
      >"$WORK_DIR/splash.log" 2>&1; then
+  cp "$ROOT/config/psplash/psplash-config.h" "$ROOT/config/psplash/psplash-colors.h" \
+    "$SPLASH_DIR/"
   export GIOCHI_SPLASH_PNG="$SPLASH_PNG"
+  export GIOCHI_SPLASH_BAR="$SPLASH_BAR"
+  export GIOCHI_SPLASH_DIR="$SPLASH_DIR"
   echo "  splash:    $(sed -n '2p' "$WORK_DIR/splash.log" | sed 's/^ *//')"
+  echo "  splash:    $(sed -n '5p' "$WORK_DIR/splash.log" | sed 's/^ *//')"
 else
   # Sem splash o aparelho boota igual. Não vale derrubar o build por cosmético,
   # mas o motivo tem de aparecer: rascunho sem `panel` no device.json é o caso
   # normal e o aviso explica o que falta.
   echo "  splash:    NÃO gerado — $(tail -1 "$WORK_DIR/splash.log" 2>/dev/null)" >&2
 fi
+
+# O psplash é reconstruído a cada build, de propósito.
+#
+# A imagem, a barra e os dois headers chegam por hook de POST-EXTRACT, e o
+# Buildroot NÃO reexecuta hook num pacote já extraído: num `work/` retomado
+# (`GIOCHI_SYSTEM_KEEP_WORK=1`, que é o caminho normal aqui) a pasta
+# `build/psplash-*/` já existe, o hook é pulado e o build fica VERDE com o
+# splash antigo. Remover a pasta força extrair, aplicar os hooks e compilar de
+# novo — segundos, porque as dependências (host-gdk-pixbuf) continuam prontas.
+rm -rf "$BUILD_DIR/build/psplash-"*
 
 # ---------------------------------------------------------------
 # Monitor de disco durante o build.
