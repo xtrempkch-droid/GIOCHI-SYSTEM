@@ -4794,6 +4794,90 @@ canal dizia que `HP` era **errado** no R35S, o oposto do medido (§12.68).
 Quando o relato vier de outro repo e o repo for somente leitura (§2-A), o
 entregável é **a análise com a medição**, não o patch e não o silêncio.
 
+### 12.71 O `assert-config` reprovou meu próprio commit — e o meu teste tinha aprovado
+
+Em 15/11/2026 o CI do commit `c5fe2ce` ficou vermelho em *Build image* do R35S.
+A mudança era uma linha: `BR2_PACKAGE_KMOD_TOOLS=y` no
+`device/r35s/buildroot.fragment`. O `assert-config` reprovou e **estava certo**.
+
+`package/kmod/Config.in` no Buildroot 2025.02:
+
+```kconfig
+config BR2_PACKAGE_KMOD
+	bool "kmod"
+	depends on !BR2_STATIC_LIBS
+
+if BR2_PACKAGE_KMOD
+
+config BR2_PACKAGE_KMOD_TOOLS
+	bool "kmod utilities"
+	depends on BR2_PACKAGE_BUSYBOX_SHOW_OTHERS
+
+endif
+```
+
+`KMOD_TOOLS` vive **dentro** do `if BR2_PACKAGE_KMOD`. Sem o pai o símbolo filho
+nem existe no Kconfig — o `olddefconfig` o descarta, o `assert-config` reprova.
+X55 e X35H já tinham `BR2_PACKAGE_KMOD=y` no defconfig (herdado da correção do
+§12.60); o R35S não, e eu acrescentei o filho sem o pai.
+
+#### O defeito que dói mais: o teste que eu escrevi aprovou
+
+Na mesma rodada eu tinha trocado o teste de lista-à-mão por invariante, e ele
+passou. Ele cobrava **só o filho**:
+
+```js
+assert.match(fragmento, /^BR2_PACKAGE_KMOD_TOOLS=y$/m, ...)
+```
+
+O `buildroot.fragment` tinha a linha. O teste passou. O build quebrou. É o §12.1
+("o teste perguntou metade da pergunta") na forma mais pura: a invariante estava
+certa na *direção* e incompleta na *dependência*.
+
+Agora cobra os dois, e a mensagem diz a consequência:
+
+```text
+r35s: declara KMOD_TOOLS sem declarar o pai BR2_PACKAGE_KMOD. Em 2025.02 o
+filho vive dentro de `if BR2_PACKAGE_KMOD` — sem o pai o símbolo não existe no
+Kconfig, o olddefconfig o descarta e o assert-config reprova o build
+```
+
+Verificado por mutação: apagar `BR2_PACKAGE_KMOD=y` do defconfig derruba o teste
+nomeando o aparelho.
+
+#### A divisão que fica, e vale para qualquer par pai/filho do Kconfig
+
+| Símbolo | Onde mora | Por quê |
+| --- | --- | --- |
+| `BR2_PACKAGE_KMOD` (pai) | **defconfig** | `depends on !BR2_STATIC_LIBS`, do toolchain — resolvido na leitura do defconfig |
+| `BR2_PACKAGE_KMOD_TOOLS` (filho) | **buildroot.fragment** | `depends on BR2_PACKAGE_BUSYBOX_SHOW_OTHERS`, que só o `common.fragment` satisfaz (§12.60) |
+
+Regra: **pai cuja dependência é do toolchain vai no defconfig; filho cuja
+dependência vem de fragmento vai no fragmento.** Misturar os dois produz o
+vermelho de hoje — e, pior, o verde de amanhã se o gate for silenciado.
+
+#### Como isso foi provado sem compilar
+
+Replay do pipeline em árvore descartável (§12.60), com `cp -al` do
+`buildroot-2025.02` (hardlink no mesmo filesystem; `/tmp` é outro e o `cp -al`
+falha silenciosamente — 992 KB copiados), depois:
+
+```text
+make O=<build> giochi_r35s_defconfig
+node prepare-config.mjs --fragment config/common.fragment --fragment device/r35s/buildroot.fragment
+make O=<build> olddefconfig
+node assert-config.mjs   ->  OK — 39 símbolo(s), exit 0
+```
+
+E a contraprova, apagando o pai do defconfig instalado e repetindo:
+
+```text
+# BR2_PACKAGE_KMOD is not set        ← o pai sumiu
+(vazio em KMOD_TOOLS)               ← o filho foi descartado
+```
+
+Custo: ~4 min e 86 MB. Um build completo é 1 h 45. O replay existe para isso.
+
 ## 13. Aparelhos
 
 | ID | Pasta | SoC | Arch | Status | Falta |
