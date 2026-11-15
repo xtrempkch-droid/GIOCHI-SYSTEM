@@ -22,7 +22,8 @@ O repositório foi desenhado para receber os dispositivos depois: cada alvo vive
 | --- | --- | --- | --- |
 | `qemu-aarch64` | arm64 | ready | habilitado |
 | `powkiddy-x55` | arm64 | ready | habilitado |
-| `powkiddy-x35s` / `powkiddy-x35h` / `r35s` | arm64 | draft | desabilitado |
+| `r35s` | arm64 | ready | habilitado |
+| `powkiddy-x35s` / `powkiddy-x35h` | arm64 | draft | desabilitado |
 | `steamdeck` / `generic-x64` | x86_64 | draft | desabilitado |
 | `_template` | — | template | não listado |
 

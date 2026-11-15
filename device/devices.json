@@ -30,7 +30,7 @@
       "id": "r35s",
       "folder": "r35s",
       "arch": "arm64",
-      "enabled": false
+      "enabled": true
     },
     {
       "id": "steamdeck",

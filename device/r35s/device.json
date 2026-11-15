@@ -25,8 +25,8 @@
   ],
   "runner": "ubuntu-24.04",
   "timeoutMinutes": 300,
-  "status": "draft",
-  "bootNotes": "SoC RK3326 (nao RK3566): sem NPU, Mali-G31, 1 GB de RAM. Medido no aparelho: painel 640x480, gamepad r36s_Gamepad (js0+event3), 981 MiB visiveis. DTS e drivers GPL vendorizados COMPILAM no kernel 6.12. BOOT: com o caminho mainline (idbloader TPL+SPL + u-boot.itb) o aparelho executa TPL, DDR e BL31 e para ao saltar para o U-Boot em 0x200000, com console mudo. Com o caminho legacy da Rockchip (miniloader) o console fica MUDO desde o inicio — pior para diagnosticar. Mainline e' o padrao enquanto a causa do crash em 0x200000 nao for isolada.",
+  "status": "ready",
+  "bootNotes": "SoC RK3326 (nao RK3566): sem NPU, Mali-G31, 1 GB de RAM. Medido no aparelho: painel 640x480, gamepad r36s_Gamepad (js0+event3), 981 MiB visiveis. BOOT: o caminho mainline (idbloader TPL+SPL + u-boot.itb) LIGA desde 06/11/2026, depois do patch do ADC (device/r35s/uboot-patches/0001) que impede o rk_board_late_init do odroid-go2 de abortar com 'Unable to detect device type: -6'; o console do U-Boot e' 1500000 (uboot.fragment), nao 115200. Audio: o Playback Mux do RK817 tem de ficar em SPK (o DTS roteia Speaker -> SPKO) — aplicado por rootfs-overlay/etc/giochi/asound.state + S51mixer; com HP o falante fica mudo e o selftest reprova. GPU/bateria/termica exigem =y (CONFIG_DRM_PANFROST, CONFIG_CHARGER_RK817, CONFIG_ROCKCHIP_THERMAL), nao =m.",
   "kernelCmdline": {
     "console": "ttyS2",
     "baud": 1500000

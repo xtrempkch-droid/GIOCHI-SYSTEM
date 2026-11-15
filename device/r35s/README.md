@@ -12,7 +12,7 @@ Console portátil Rockchip **RK3326**, tela 640×480. Mesma base do R36S.
 | Wi-Fi / Bluetooth | **não tem rádio** |
 | Botões | `rocknix-singleadc-joypad` (`r36s_Gamepad`, `js0`+`event3`) — **driver fora da árvore**, GPL |
 | Console serial | `ttyS2` @ **1500000** — medido no aparelho, ver abaixo |
-| Status | `draft` — **BOOTOU em 06/11/2026**: tela 640x480, 16 botões + 4 eixos, shell serial. Falta áudio e launcher |
+| Status | `ready` (habilitado em 15/11/2026) — **BOOTOU em 06/11/2026**: tela 640x480, 16 botões + 4 eixos, shell serial, áudio com `Playback Mux = SPK`. Falta o launcher, que é do `Giochi app` |
 
 > **Boot próprio, medido em 06/11/2026.** Não é mais "não inicializável". O
 > console serial a 1500000 entrega o login, o painel acende em 640x480

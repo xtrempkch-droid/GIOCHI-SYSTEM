@@ -101,12 +101,17 @@ done
 # em 8355840 bytes = 16320 setores), feito para ser escrito no setor 64 — os
 # 64 setores de deslocamento põem o FIT exatamente no setor 16384. Medido nos
 # artefatos reais deste build.
-# Legacy da Rockchip tem PRECEDÊNCIA quando existe. Medido no R35S
-# (06/11/2026): o caminho mainline (u-boot-rockchip.bin = idbloader + u-boot.itb)
-# executa TPL, DDR e BL31 e **trava ao saltar para o U-Boot em 0x200000**, sem
-# nada no console. O caminho legacy (idbloader + uboot.img + trust.img) é o que a
-# ROCKNIX usa nesta placa e o que o BootROM espera.
-# Gerado por scripts/make-rk3326-bootloader.sh.
+# Legacy da Rockchip tem PRECEDÊNCIA quando existe.
+#
+# Não porque o mainline não funcione: ele FUNCIONA desde 06/11/2026 — o que
+# travava em `Entry point address = 0x200000` era o `rk_board_late_init()` do
+# `odroid-go2` abortando no ADC, corrigido por
+# `device/r35s/uboot-patches/0001`. O legacy só é gerado quando o aparelho
+# declara `bootloader: "rockchip-legacy"` em `device.json` (hoje nenhum), e
+# nesse caso ele É a escolha do aparelho: se as duas peças estivessem em `out/`,
+# o mainline herdado de um build anterior venceria por ordem e o cartão sairia
+# com o firmware que o aparelho recusou. Gerado por
+# scripts/make-rk3326-bootloader.sh.
 if [[ -f "$OUT_DIR/u-boot-legacy.bin" ]]; then
   FIRMWARE_MODE="combined"
   FIRMWARE_FILE="$OUT_DIR/u-boot-legacy.bin"

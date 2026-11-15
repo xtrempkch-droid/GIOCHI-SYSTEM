@@ -4422,7 +4422,7 @@ o único jeito de provar isso sem aparelho na mão.
 | `powkiddy-x55` | `powkiddy x55/` | RK3566 | arm64 | **ready (habilitado)** | **boota com tela, áudio, Wi-Fi, BT e 16 botões + 4 eixos**; alvo da build de release desde 14/11/2026 — a interface de jogos é do `Giochi app` e entra por overlay |
 | `powkiddy-x35s` | `powkiddy x35s/` | **RK3566** | arm64 | draft | DTS (compartilha com o X35H) e build |
 | `powkiddy-x35h` | `powkiddy x35h/` | **RK3566** | arm64 | draft | **boota com tela 640x480, `usb0` e SSH**; imagem de 04/11 já tem o `respawn`. Falta o launcher, o teste A/B de cartão e os eixos analógicos |
-| `r35s` | `r35s/` | RK3326 | arm64 | draft | **BOOTOU em 06/11/2026 e testado por SSH em 06/11**: tela 640x480, `r36s_Gamepad` com 16 botões + 4 eixos, áudio (`rk817_int`), bateria, térmica e GPU (§12.51, §12.52) |
+| `r35s` | `r35s/` | RK3326 | arm64 | **ready (habilitado)** | **BOOTOU em 06/11/2026 e testado por SSH**: tela 640x480, `r36s_Gamepad` com 16 botões + 4 eixos, áudio (`rk817_int`, `Playback Mux = SPK`), bateria, térmica e GPU (§12.51, §12.52). Habilitado em 15/11/2026 para a rodada de validação do som |
 | `steamdeck` | `steamdeck/` | x86_64 | x86_64 | draft | kernel, firmware, áudio, Wi-Fi, controle |
 | `generic-x64` | `generic-x64/` | x86_64 | x86_64 | draft | **nunca compilado**; `pc_x86_64_efi_defconfig` declarado para permitir dispatch com `allow_draft` |
 
