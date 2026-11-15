@@ -409,3 +409,34 @@ test("o selftest não repete a lenda de que `amixer` não existe no Buildroot", 
     "amixer existe no Buildroot; o que faltava era a subopção ligada",
   );
 });
+
+test("o kmscube é PULADO quando o launcher detém o DRM master, não reprovado", async () => {
+  // O DRM master é exclusivo. Com o launcher rodando, `kmscube -D /dev/dri/card0`
+  // não consegue virar master e sai diferente de zero — e chamar isso de FAIL é
+  // falso negativo em cima de uma GPU funcionando, na mesma família do §12.45
+  // (a ferramenta de diagnóstico consumindo o recurso que o produto usa).
+  //
+  // O teste também pega o defeito espelhado: transformar o bloco inteiro em
+  // `skip` incondicional deixaria 3D sem prova nenhuma em aparelho sem launcher,
+  // que é justamente o caso da X55 de release.
+  const texto = await read();
+  const bloco = texto.slice(texto.indexOf("EGL/GLES: sem binário"));
+  assert.ok(bloco.length > 0, "o bloco de EGL/GLES sumiu do selftest");
+  assert.match(
+    bloco,
+    /LAUNCHER_RODANDO/,
+    "o passo do kmscube tem de ler LAUNCHER_RODANDO antes de rodar",
+  );
+  assert.match(
+    bloco,
+    /elif timeout 10 kmscube/,
+    "sem launcher, o kmscube tem de RODAR — skip incondicional não prova nada",
+  );
+  // A ordem importa: o guarda do launcher vem ANTES da execução.
+  const iGuard = bloco.indexOf("LAUNCHER_RODANDO");
+  const iRun = bloco.indexOf("timeout 10 kmscube");
+  assert.ok(
+    iGuard < iRun,
+    "o guarda do launcher tem de vir antes do kmscube rodar",
+  );
+});

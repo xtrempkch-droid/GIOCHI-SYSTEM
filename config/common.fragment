@@ -120,23 +120,22 @@ BR2_PACKAGE_BINUTILS_TARGET=y
 BR2_PACKAGE_GLIBC_UTILS=y
 BR2_PACKAGE_UTIL_LINUX=y
 
-# kmscube NÃO entra aqui.
+# kmscube NÃO entra aqui — vai no defconfig de cada aparelho com GPU.
 #
-# `BR2_PACKAGE_KMSCUBE` não sobrevive ao olddefconfig no 2024.02: ele depende da
-# pilha mesa3d (GBM + OpenGL ES + libdrm), que o defconfig do QEMU não liga. Ligar
-# só o kmscube não basta — arrasta mesa inteiro, e num aparelho real o custo é
-# outro (Mali via panfrost).
+# `BR2_PACKAGE_KMSCUBE` depende da pilha mesa3d (GBM + EGL + OpenGL ES +
+# libdrm). O defconfig do QEMU não liga mesa, então o símbolo nem seria
+# oferecido: o `olddefconfig` o descartaria em silêncio e o `assert-config`
+# reprovaria o build do smoke test. Por isso ele mora junto do mesa3d, no
+# defconfig de quem tem tela e GPU (X55, X35H, R35S).
 #
-# Consequência assumida: `giochi-selftest` marca o bloco 3D como SKIP e DIZ que
-# não pode provar EGL/GLES, em vez de assumir que funciona. Provar 3D exige
-# habilitar a pilha gráfica por aparelho, com a GPU daquele SoC.
+# O que ele compra: `giochi-selftest` deixa de dizer "o driver panfrost existe"
+# e passa a provar "desenha" — `kmscube` cria contexto EGL, compila shader e
+# faz scanout. É a diferença entre uma GPU que pode estar em `softpipe` e uma
+# que de fato renderizou (§12.51: `GL_VERSION` não distingue as duas).
 #
-# Para habilitar no futuro, no fragmento DO DISPOSITIVO (não no comum):
-#   BR2_PACKAGE_MESA3D=y
-#   BR2_PACKAGE_MESA3D_GBM=y
-#   BR2_PACKAGE_MESA3D_OPENGL_ES=y
-#   BR2_PACKAGE_KMSCUBE=y
-# e confirmar que os quatro sobrevivem ao assert-config.
+# Com o launcher rodando o teste é PULADO, não reprovado: o DRM master é
+# exclusivo e o kmscube não conseguiria virar master (§12.45 — a ferramenta de
+# diagnóstico não pode consumir o recurso que o produto está usando).
 
 # Console serial: o getty NÃO define a velocidade, o kernel define.
 #

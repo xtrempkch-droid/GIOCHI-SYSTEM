@@ -104,6 +104,11 @@ BR2_PACKAGE_MESA3D_GALLIUM_DRIVER_PANFROST=y
 BR2_PACKAGE_MESA3D_GALLIUM_DRIVER_SWRAST=y
 BR2_PACKAGE_MESA3D_OPENGL_ES=y
 BR2_PACKAGE_MESA3D_OPENGL_EGL=y
+# kmscube: a ÚNICA forma de provar EGL/GLES + scanout no aparelho. Sem ele o
+# `giochi-selftest` só consegue dizer "o driver panfrost existe", não "desenha".
+# Cabe porque OPENGL_EGL já faz `select MESA3D_GBM` (package/mesa3d/Config.in),
+# que é o que o kmscube exige além de EGL/GLES/libdrm. Custa ~1 MB.
+BR2_PACKAGE_KMSCUBE=y
 BR2_PACKAGE_LIBDRM=y
 BR2_PACKAGE_SDL2=y
 # KMSDRM depende de SDL2_OPENGL||SDL2_OPENGLES além de libdrm/gbm/egl. Sem o

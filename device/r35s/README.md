@@ -12,7 +12,7 @@ Console portátil Rockchip **RK3326**, tela 640×480. Mesma base do R36S.
 | Wi-Fi / Bluetooth | **não tem rádio** |
 | Botões | `rocknix-singleadc-joypad` (`r36s_Gamepad`, `js0`+`event3`) — **driver fora da árvore**, GPL |
 | Console serial | `ttyS2` @ **1500000** — medido no aparelho, ver abaixo |
-| Status | `ready` (habilitado em 15/11/2026) — **BOOTOU em 06/11/2026**: tela 640x480, 16 botões + 4 eixos, shell serial, áudio com `Playback Mux = SPK`. Falta o launcher, que é do `Giochi app` |
+| Status | `ready` (habilitado em 15/11/2026) — **BOOTOU em 06/11/2026**: tela 640x480, 16 botões + 4 eixos, shell serial, e **áudio medido** em 15/11/2026 (`Playback Mux = HP` — ver adiante). Falta o launcher, que é do `Giochi app` |
 
 > **Boot próprio, medido em 06/11/2026.** Não é mais "não inicializável". O
 > console serial a 1500000 entrega o login, o painel acende em 640x480
@@ -257,8 +257,9 @@ bash scripts/audio-validar.sh              # aparelho em 10.55.0.2
 bash scripts/audio-validar.sh --duracao 2  # tom mais longo
 ```
 
-Ele mede, em ordem: card em `/proc/asound/cards` → `Playback Mux` casando com o
-`simple-audio-card,routing` do DT → volume ≠ 0 → **PCM de reprodução em
+Ele mede, em ordem: card em `/proc/asound/cards` → `Playback Mux` igual ao
+**declarado** em `/etc/giochi/asound.state` (nunca deduzido do DT, §12.68) →
+volume ≠ 0 → **PCM de reprodução em
 `RUNNING`** durante um `speaker-test` de 440 Hz (com o `owner_pid` de quem está
 tocando). O último item é o que separa "abriu o dispositivo" de "os dados
 chegaram ao DAC" (§12.56). Se o PCM rodou e **não** saiu som, o problema está
@@ -994,7 +995,7 @@ Conferido **lendo o cartão**, não o `out/`:
 | firmware no setor 64 | `9a08d5c9…` = `u-boot-rockchip.bin` |
 | `giochi-init`/`giochi-buttons`/`giochi-usb` | **idênticos** aos fontes do repo |
 | `S51mixer`, `giochi-init` | `0755` |
-| `asound.state` | `Playback Mux = SPK` |
+| `asound.state` | `Playback Mux = HP` |
 | `e2fsck -fn` na p2 | limpo, 3423/65536 arquivos |
 | p1 FAT | `Image` + `dtbs/` + `extlinux/` + `boot.scr` |
 
@@ -1007,7 +1008,7 @@ boot de imagem nova), e o `build-info.txt` diz `patched_from=18789ea`.
 | Verificação | Resultado |
 | --- | --- |
 | console de texto | **assume em 8,8 s** — `(M) frame buffer device`, `80x30`, `fbcon: Taking over console` |
-| `audio-validar.sh` | **0 falha, 0 aviso** — card, mux `SPK`, `Master 100%`, PCM `RUNNING`, dmesg limpo |
+| `audio-validar.sh` | **0 falha, 0 aviso** — card, mux `HP`, `Master 100%`, PCM `RUNNING`, dmesg limpo |
 | `giochi-selftest` | **PASS 39 · WARN 1 · FAIL 0 · SKIP 4** (o WARN é o `index.json` do launcher) |
 | `giochi-buttons` | gamepad `event2` (17 botões), eixos `event2`, volume `event1` |
 | `giochi-usb --status` | "nenhum papel forçado", UDC `configured` |
@@ -1023,3 +1024,36 @@ E, com o marcador `/etc/giochi/boot-log` ativo, o `giochi-bootlog` gravou
 `PASS 39 · WARN 1 · FAIL 0`. **É o rastro que faltou** quando o aparelho
 reiniciou sozinho durante o teste de modo HOST — sem ele, "reiniciou" não deixa
 nada para investigar.
+
+### O áudio, resolvido e provado (15/11/2026)
+
+O `asound.state` desta imagem dizia `SPK`. Trocado para `HP` — o porquê está na
+seção de áudio acima e no AGENTS §12.68. Com o cartão corrigido, tudo medido de
+novo **depois de um boot limpo**:
+
+| Verificação | Resultado |
+| --- | --- |
+| `giochi-selftest` | **PASS 41 · WARN 0 · FAIL 0 · SKIP 3** |
+| `audio-validar.sh` | **0 falha, 0 aviso** — card `rk817_int`, mux `HP`, `Master 100%`, PCM `RUNNING` (owner_pid do próprio teste), dmesg sem erro de rk817/i2s/asoc |
+| `Playback Mux` depois do boot | `HP` — vindo do cartão, aplicado pelo `S51mixer` |
+| GPU | `panfrost`, `Mali-G31` |
+| bateria | 54 % (Discharging) |
+| `giochi-buttons` | 10/17 botões durante o teste, eixos com valores reais |
+
+**A cadeia de boot foi provada declarando o valor errado.** Reiniciar com
+`asound.state = HP` não prova nada — `HP` é o default do driver, então o mux
+ficaria `HP` mesmo sem o `S51mixer`. O teste que separa os dois casos:
+
+```text
+asound.state := SPK → reboot → amixer: Item0 'SPK'   ← o S51mixer aplicou
+asound.state := HP  → reboot → amixer: Item0 'HP'    ← idem, e o som volta
+```
+
+O aparelho volta em ~10 s (uptime 9 s quando o SSH respondeu), então a prova
+custa menos que um café.
+
+**O que o som tem de diferente do resto do diagnóstico:** não há como medir "saiu
+som" por software. O que fecha a questão é o par — o usuário ouve, e o estado
+declarado é o que estava no aparelho naquele instante. Por isso o valor medido
+foi **congelado em `asound.state`** e o selftest passou a comparar contra ele em
+vez de tentar adivinhar.

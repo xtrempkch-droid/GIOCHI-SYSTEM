@@ -86,7 +86,7 @@ Repositório: `https://github.com/xtrempkch-droid/GIOCHI-SYSTEM` — branch `mai
 
 | Verificação | Resultado |
 | --- | --- |
-| `node tests/run-all.mjs` | **543/543 + 1 skip** (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, devices 13, assert-config 12, fdt 11, gpu-bench 16, …) |
+| `node tests/run-all.mjs` | **546/546 + 1 skip** (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, devices 13, assert-config 12, fdt 11, gpu-bench 16, …) |
 | `node scripts/validate-devices.mjs` | OK — 7 devices, 1 habilitado |
 | `node scripts/list-devices.mjs --github-matrix` | matriz com `qemu-aarch64` |
 | matriz com `--device powkiddy-x55 --allow-draft` | devolve **só** o X55 |
@@ -449,7 +449,7 @@ si (§12.4), mas provavelmente **não** era a causa dos 3 s.
 
 ```bash
 node scripts/validate-devices.mjs
-node tests/run-all.mjs                          # 544 testes
+node tests/run-all.mjs                          # 547 testes
 node scripts/list-devices.mjs
 node scripts/list-devices.mjs --github-matrix
 node scripts/list-devices.mjs --github-matrix --device powkiddy-x55 --allow-draft
@@ -494,7 +494,7 @@ absoluto** do host — §12.40).
 
 ## 10. Testes
 
-`node tests/run-all.mjs` → **543/543 + 1 skip**, em **59 arquivos**. A tabela abaixo é uma
+`node tests/run-all.mjs` → **546/546 + 1 skip**, em **59 arquivos**. A tabela abaixo é uma
 seleção dos que prendem contratos de projeto; a lista completa é `ls tests/` e
 `tests/runner-coverage.test.mjs` **falha** se algum arquivo existir sem estar
 importado no `run-all.mjs` — foi assim que dois testes desta revisão quase
@@ -3132,7 +3132,8 @@ Testes novos, e o que cada um prende:
 | `tests/ci-cache-e-sd-image.test.mjs` | 6 | o cache do CI é o caminho que o script escreve; `make-sd-image.sh` sem DTB de reserva |
 | `tests/build-device-vars.test.mjs` | 8 (era 5) | estado de patches executa de verdade, inclusive com patch ausente; `out/` limpo só depois do `make` |
 | `tests/rk3326-legacy-boot.test.mjs` | 18 (era 17) | inclui o nome do alvo `uboot-dirclean` e o estado de `uboot.fragment` + `uboot-patches/` |
-| `tests/selftest-contract.test.mjs` | 16 (era 12) | nenhum `\s` em grep, nenhum `grep -c \|\| echo 0`, nenhuma contagem morta, e a lenda do `amixer` fora do código |
+| `tests/selftest-contract.test.mjs` | 17 (era 12) | nenhum `\s` em grep, nenhum `grep -c \|\| echo 0`, nenhuma contagem morta, a lenda do `amixer` fora do código, e o kmscube **pulado** (nunca reprovado) quando o launcher detém o DRM master |
+| `tests/graphics-stack.test.mjs` | 4 | nada de X11/Wayland/GTK nos defconfigs, e **todo** defconfig com `MESA3D_OPENGL_EGL` leva `KMSCUBE` — invariante, não lista |
 | `tests/busybox-config.test.mjs` | 7 | o gate do busybox morde nos três casos medidos (símbolo inexistente, dependência não satisfeita, string pedida como bool) |
 | `tests/defconfig-gate.test.mjs` | 4 | o defconfig do aparelho entra no assert, com os placeholders já resolvidos |
 | `tests/help-sentinels.test.mjs` | 4 | nenhum `--help` recortado por linha, sentinelas completas, e o `--help` do rootfs sem prosa |
@@ -4496,6 +4497,14 @@ sinal. `hp-det-gpios = <&gpio2 RK_PC6 GPIO_ACTIVE_HIGH>` lê `hi` **sempre**
 nesta placa, então `Headphones Jack = on` é permanente e não há chaveamento
 automático. Não é defeito a perseguir: é a mesma pinagem que faz o `HP` funcionar.
 
+E o `Headphones Jack` **não gateia nada** — conferido no fonte, não suposto:
+`simple_util_init_jack()` (`sound/soc/generic/simple-card-utils.c`) só registra
+um jack de GPIO com `SND_JACK_HEADPHONE` e dá `gpiod_set_consumer_name`; não
+muta widget, não mexe no mux, não muda rota. O estado do jack é **informação**;
+quem decide o caminho é o `Playback Mux` e mais nada. Sem essa leitura, o
+`[PASS] Headphones Jack = on` do mixer pareceria a causa do silêncio e a
+investigação iria para o GPIO.
+
 #### O que mudou no código
 
 | Peça | Antes | Depois |
@@ -4545,6 +4554,89 @@ ele dava no estado correto (`... o DTS roteia 'Speaker -> SPKO'`) é a terceira
 ferramenta com a mesma dedução errada. `tests/onboard-drivers.test.mjs` passou a
 varrer **as duas** por texto: nenhuma pode conter `EXPECT_MUX`, e as duas têm de
 ler `DECLARED_MUX`. A classe inteira, não o caso (§12.34 e §12.50).
+
+### 12.69 "Driver de GPU presente" não é "a GPU desenha" — e o teste que prova isso não pode roubar a tela
+
+O `giochi-selftest` sabia dizer `[PASS] driver de GPU reconhecido: panfrost` e
+mesmo assim **pulava** o 3D, porque não havia na imagem nenhum binário capaz de
+desenhar. A diferença não é acadêmica: sem panfrost o Mesa cai no `softpipe`, e o
+probe responde exatamente a mesma `GL_VERSION` (§12.51). "O driver existe" e "o
+driver funciona" só se separam com um desenho de verdade — contexto EGL, shader
+compilado, scanout.
+
+Correção: `BR2_PACKAGE_KMSCUBE=y` nos **três** aparelhos com GPU (X55, X35H,
+R35S), no defconfig de cada um.
+
+#### Por que no defconfig e não no `common.fragment`
+
+`BR2_PACKAGE_KMSCUBE` depende de `BR2_PACKAGE_HAS_LIBEGL`, `HAS_LIBGBM` e
+`HAS_LIBGLES`. O `qemu-aarch64` usa o defconfig do Buildroot, que não liga mesa:
+o símbolo nem seria oferecido, o `olddefconfig` o descartaria em silêncio e o
+`assert-config` reprovaria o build do **único aparelho que a CI constrói sempre**.
+É a mesma razão do stack de texto do launcher (§11-A) e do `KMOD_TOOLS` (§12.60):
+símbolo cuja dependência só existe em alguns aparelhos mora no defconfig desses.
+
+O que **não** foi preciso acrescentar: `BR2_PACKAGE_MESA3D_GBM`. Ele já vem por
+`select` de `BR2_PACKAGE_MESA3D_OPENGL_EGL` (`package/mesa3d/Config.in`), que os
+três já tinham — e é dele que saem `HAS_LIBGBM` e
+`LIBGBM_HAS_FEATURE_FORMAT_MODIFIER_PLANE_COUNT`, as duas dependências do
+kmscube. Medido, não deduzido: replay do pipeline (2025.02, `make <defconfig>` →
+`prepare-config` → `olddefconfig` → `assert-config`) nos três:
+
+```text
+r35s     assert-config OK — 88 símbolos    KMSCUBE=y
+x55      assert-config OK — 101 símbolos   KMSCUBE=y
+x35h     assert-config OK — 98 símbolos    KMSCUBE=y
+```
+
+#### O defeito que a correção quase criou
+
+A primeira versão do passo era:
+
+```sh
+if command -v kmscube >/dev/null 2>&1; then
+    if timeout 10 kmscube -D /dev/dri/card0; then pass ...; else fail ...; fi
+fi
+```
+
+Com o launcher rodando, o kmscube **não consegue virar DRM master** e sai
+diferente de zero — e isso viraria `[FAIL] kmscube falhou — EGL/GLES ou scanout
+quebrado` num aparelho com a GPU funcionando e o launcher desenhando na tela. É o
+§12.45 na forma exata: **a ferramenta de diagnóstico consumindo o recurso que o
+produto está usando**. Um `FAIL` falso aqui custa a confiança no bloco inteiro
+(§12.34), e o operador aprenderia a ignorar justamente o teste de 3D.
+
+O passo passou a ler `LAUNCHER_RODANDO` (já calculado antes, para o bloco do
+console) e a **pular com o motivo escrito** quando há launcher:
+
+```sh
+if ! command -v kmscube >/dev/null 2>&1; then
+    skip "kmscube ausente — não dá para provar 3D; habilitar BR2_PACKAGE_KMSCUBE"
+elif [ "${LAUNCHER_RODANDO:-0}" = "1" ]; then
+    skip "launcher detém o DRM master — kmscube roubaria a tela; 3D em uso pelo launcher"
+elif timeout 10 kmscube -D /dev/dri/card0; then
+    pass "kmscube rodou (EGL/GLES + scanout OK)"
+else
+    fail "kmscube falhou — EGL/GLES ou scanout quebrado"
+fi
+```
+
+Cinco estados provados rodando o bloco real num harness (não por leitura):
+
+| Estado | Resultado |
+| --- | --- |
+| sem kmscube, sem launcher | `SKIP ausente` |
+| sem kmscube, com launcher | `SKIP ausente` |
+| kmscube bom, sem launcher | `PASS` |
+| kmscube sai ≠ 0, sem launcher | `FAIL` — é o caso que tem de doer |
+| kmscube presente, launcher rodando | `SKIP launcher detém o DRM master` |
+
+O último estado também impede o defeito espelhado: transformar o bloco em `skip`
+incondicional deixaria 3D sem prova nenhuma justamente na X55 de release, que é a
+única que **não** tem launcher empacotado. `tests/graphics-stack.test.mjs` exige
+o kmscube em todo defconfig que ligue `MESA3D_OPENGL_EGL` (invariante, não lista)
+e proíbe o símbolo no `common.fragment`; `tests/selftest-contract.test.mjs`
+verifica a **ordem** — o guarda do launcher antes do `kmscube` rodar.
 
 ## 13. Aparelhos
 
@@ -4911,7 +5003,7 @@ o cartão — não só no `target/`.
 
 | Item | Estado |
 | --- | --- |
-| Código e configuração | **pronto** — 543/543 testes |
+| Código e configuração | **pronto** — 546/546 testes |
 | Imagem X55 (`Image` + `rootfs.ext4` + DTB + bootloader) | **existe** em `out/powkiddy-x55/`, `built_at_utc=2026-11-04T21:05:13Z` |
 | `/etc/inittab` na imagem | **linha 30: `::respawn:/usr/bin/giochi-init`** — conferida com `debugfs` no `rootfs.ext4` |
 | `work/` do X55 | preservado em `~/.cache/giochi-system/work/powkiddy-x55` (17 GB, já com `target/` finalizado) |
@@ -5052,7 +5144,7 @@ Ordem sugerida para a próxima sessão (nada aqui precisa da X55):
 
 ```bash
 node scripts/validate-devices.mjs      # 7 devices, 1 habilitado
-node tests/run-all.mjs                 # 543/543 + 1 skip
+node tests/run-all.mjs                 # 546/546 + 1 skip
 node scripts/list-devices.mjs --github-matrix
 ```
 
@@ -5118,7 +5210,7 @@ as duas correções (`uboot-patches/0001-…-adc-nao-fatal.patch` +
 
 ```bash
 cd /home/charles/Giochi/GIOCHI-SYSTEM
-node tests/run-all.mjs                                   # esperado: 543/543
+node tests/run-all.mjs                                   # esperado: 546/546
 git add device/r35s/README.md AGENTS.md
 git commit -m "r35s: o U-Boot mainline liga; a frase do README estava desatualizada
 

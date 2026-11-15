@@ -344,14 +344,20 @@ case "$GPU_DRIVER" in
 esac
 
 # EGL/GLES: sem binário de teste não há como provar. Não fingir.
-if command -v kmscube >/dev/null 2>&1; then
-    if timeout 10 kmscube -D /dev/dri/card0 >/dev/null 2>&1; then
-        pass "kmscube rodou (EGL/GLES + scanout OK)"
-    else
-        fail "kmscube falhou — EGL/GLES ou scanout quebrado"
-    fi
-else
+#
+# O DRM master é EXCLUSIVO. Com o launcher rodando, o kmscube não consegue virar
+# master e sai diferente de zero — e transformar isso em `FAIL` seria um falso
+# negativo em cima de uma GPU funcionando (§12.45: a ferramenta de diagnóstico
+# não pode consumir o recurso que o produto está usando). Por isso o teste é
+# pulado, com o motivo escrito, quando há launcher na tela.
+if ! command -v kmscube >/dev/null 2>&1; then
     skip "kmscube ausente — não dá para provar 3D; habilitar BR2_PACKAGE_KMSCUBE"
+elif [ "${LAUNCHER_RODANDO:-0}" = "1" ]; then
+    skip "launcher detém o DRM master — kmscube roubaria a tela; 3D em uso pelo launcher"
+elif timeout 10 kmscube -D /dev/dri/card0 >/dev/null 2>&1; then
+    pass "kmscube rodou (EGL/GLES + scanout OK)"
+else
+    fail "kmscube falhou — EGL/GLES ou scanout quebrado"
 fi
 
 if [ -r /proc/meminfo ]; then

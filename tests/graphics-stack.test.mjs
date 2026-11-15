@@ -101,3 +101,61 @@ test("o estudo do Quiver registra o veredito e os quatro bloqueios", async () =>
   // O veredito não pode ter sido escrito sem citar o caminho que serve.
   assert.match(texto, /loja|store/i);
 });
+
+// kmscube é o único jeito de PROVAR que a GPU desenha.
+//
+// `GL_VERSION` não distingue GPU de CPU: com o panfrost fora do caminho, o Mesa
+// cai no `softpipe` e responde exatamente "OpenGL ES 3.1" (§12.51). O que
+// separa os dois é `GL_RENDERER` — e, de forma ainda mais direta, um desenho de
+// verdade: contexto EGL, shader compilado e scanout. Sem um binário de teste na
+// imagem, `giochi-selftest` só consegue afirmar "o driver panfrost existe", que
+// é a pergunta indireta.
+//
+// A invariante é a mesma do launcher-deps: **quem liga mesa3d liga o teste**.
+test("todo aparelho com mesa3d leva o kmscube, para poder provar 3D", async () => {
+  const semTeste = [];
+  const comMesa = [];
+  for (const entry of await readdir(DEVICE_ROOT, { withFileTypes: true })) {
+    if (!entry.isDirectory() || entry.name.startsWith("_")) continue;
+    const arquivo = path.join(DEVICE_ROOT, entry.name, "defconfig");
+    let texto;
+    try {
+      texto = await readFile(arquivo, "utf8");
+    } catch {
+      continue;
+    }
+    const mesa = /^BR2_PACKAGE_MESA3D=y$/m.test(texto);
+    const egl = /^BR2_PACKAGE_MESA3D_OPENGL_EGL=y$/m.test(texto);
+    const kms = /^BR2_PACKAGE_KMSCUBE=y$/m.test(texto);
+    if (mesa && egl) {
+      comMesa.push(entry.name);
+      if (!kms) semTeste.push(entry.name);
+    }
+  }
+  assert.ok(
+    comMesa.length > 0,
+    "nenhum defconfig liga mesa3d+EGL: o teste não estaria testando nada",
+  );
+  assert.deepEqual(
+    semTeste,
+    [],
+    `estes aparelhos têm GPU e pilha de render, mas nenhum jeito de provar que ` +
+      `ela desenha: ${semTeste.join(", ")}. Acrescente BR2_PACKAGE_KMSCUBE=y ao ` +
+      `defconfig. As dependências (EGL, GLES, libgbm, libdrm) já vêm de ` +
+      `MESA3D_OPENGL_EGL, que faz select MESA3D_GBM.`,
+  );
+});
+
+test("o kmscube NÃO entra no fragmento comum (o QEMU não tem mesa3d)", async () => {
+  const texto = await readFile(path.join(ROOT, "config/common.fragment"), "utf8");
+  // `config/common.fragment` vale para o qemu-aarch64 também, e sem mesa3d o
+  // símbolo nem é oferecido: o olddefconfig o descarta em silêncio e o
+  // assert-config reprova o build do único aparelho que a CI sempre constrói.
+  const ligado = /^BR2_PACKAGE_KMSCUBE=y$/m.test(texto);
+  assert.ok(
+    !ligado,
+    "BR2_PACKAGE_KMSCUBE=y no fragmento comum quebra o build do qemu-aarch64: " +
+      "sem mesa3d o símbolo é descartado e o assert-config reprova. " +
+      "Ele mora no defconfig de cada aparelho com GPU.",
+  );
+});
