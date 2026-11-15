@@ -189,3 +189,26 @@ BR2_PACKAGE_DEJAVU_SANS=y
 BR2_PACKAGE_EVTEST=y
 BR2_PACKAGE_DOSFSTOOLS=y
 BR2_PACKAGE_E2FSPROGS=y
+
+# ── utilitários de módulo: o PAI mora aqui, o filho no fragmento ────
+# Em Buildroot 2025.02 o `package/kmod/Config.in` é:
+#
+#     config BR2_PACKAGE_KMOD
+#         bool "kmod"
+#         depends on !BR2_STATIC_LIBS
+#
+#     if BR2_PACKAGE_KMOD
+#     config BR2_PACKAGE_KMOD_TOOLS
+#         bool "kmod utilities"
+#         depends on BR2_PACKAGE_BUSYBOX_SHOW_OTHERS
+#
+# Ou seja: `KMOD_TOOLS` vive DENTRO de `if BR2_PACKAGE_KMOD`. Sem o pai, o
+# símbolo filho nem existe no Kconfig e o `olddefconfig` o descarta — o
+# `assert-config` reprova e o build fica vermelho (medido no CI de 15/11/2026,
+# run do commit c5fe2ce).
+#
+# Divisão: o pai fica AQUI porque sua dependência (`!BR2_STATIC_LIBS`) é do
+# toolchain e já está resolvida na leitura do defconfig; o filho fica no
+# `buildroot.fragment` porque depende de `BR2_PACKAGE_BUSYBOX_SHOW_OTHERS`, que
+# só é satisfeita pelo `common.fragment` (§12.60).
+BR2_PACKAGE_KMOD=y

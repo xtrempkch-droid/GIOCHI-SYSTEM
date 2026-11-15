@@ -138,5 +138,33 @@ test("quem usa os utilitários de módulo declara KMOD_TOOLS no fragmento", () =
       `${device}: o kernel tem módulos (=m) e o rootfs não tem kmod-tools; ` +
         `o modprobe do busybox não resolve modules.dep.bin nem softdeps`,
     );
+
+    // E o PAI. Em 2025.02 `package/kmod/Config.in` tem
+    //
+    //     config BR2_PACKAGE_KMOD
+    //         depends on !BR2_STATIC_LIBS
+    //     if BR2_PACKAGE_KMOD
+    //     config BR2_PACKAGE_KMOD_TOOLS
+    //         depends on BR2_PACKAGE_BUSYBOX_SHOW_OTHERS
+    //
+    // O `KMOD_TOOLS` só existe DENTRO do `if`: sem `BR2_PACKAGE_KMOD=y` o
+    // símbolo filho nem é oferecido, o `olddefconfig` o descarta e o
+    // `assert-config` reprova o build. Aconteceu no CI de 15/11/2026 — o teste
+    // da época cobrava só o filho e passou, o build é que ficou vermelho. É a
+    // mesma classe do §12.1: o teste perguntou metade da pergunta.
+    let defconfig = "";
+    try {
+      defconfig = readFileSync(path.join(pasta, device, "defconfig"), "utf8");
+    } catch {
+      // sem defconfig próprio: o pai teria de estar no fragmento
+    }
+    const temPai = /^BR2_PACKAGE_KMOD=y$/m.test(defconfig) || /^BR2_PACKAGE_KMOD=y$/m.test(fragmento);
+    assert.ok(
+      temPai,
+      `${device}: declara KMOD_TOOLS sem declarar o pai BR2_PACKAGE_KMOD. ` +
+        `Em 2025.02 o filho vive dentro de \`if BR2_PACKAGE_KMOD\` — sem o pai ` +
+        `o símbolo não existe no Kconfig, o olddefconfig o descarta e o ` +
+        `assert-config reprova o build`,
+    );
   }
 });
