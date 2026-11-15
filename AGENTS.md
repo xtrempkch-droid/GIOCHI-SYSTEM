@@ -5773,5 +5773,81 @@ selftest inteiro. O agrupamento por assinatura do §12.62-C funciona — nada de
 - **`--host` do `giochi-usb` não foi exercitado.** Trocar para host derruba o
   `usb0`, que é o canal por onde o teste está sendo feito — precisa de watchdog
   (`setsid`) ou do console serial para voltar.
-- **`kmscube` não está na imagem**, então 3D fica `SKIP` no selftest. O
-  `renderD128` + panfrost provam o driver, não o desenho.
+- ~~**`kmscube` não está na imagem**~~ — **corrigido em 15/11/2026**
+  (`BR2_PACKAGE_KMSCUBE=y`, §12.69). A imagem do cartão gravado em 15/11 já o
+  traz; a partir dela o 3D deixa de ser `SKIP`.
+
+## 25. As duas imagens de 15/11/2026 (Buildroot 2025.02 do zero)
+
+Duas imagens construídas localmente no mesmo dia, ambas a partir de
+**Buildroot 2025.02** — o primeiro build completo dos handhelds nessa árvore
+(§12.66 listava isso como "não provado").
+
+| | R35S | X55 |
+| --- | --- | --- |
+| `commit` da imagem | `a012b5a` | `0e6d5bd` |
+| `built_at_utc` | `2026-11-15T21:00:56Z` | `2026-11-15T19:03:59Z` |
+| `Image` | 39,5 MB | 39,4 MB |
+| `rootfs.ext4` | 1,0 GiB | 1,0 GiB |
+| `sd.img` (2,0 GiB) | `6b84e603…` | `396af1df…` |
+| `assert-config` | 90 símbolos | 101 símbolos |
+
+### O que cada imagem acrescenta
+
+**R35S** — `kmscube` (0755), `kmod` com `modinfo`/`depmod`, `giochi-selftest` sem
+ruído de `stderr` (§do `2>/dev/null`), e o `Playback Mux = HP` que **fez o som
+sair** (§12.68).
+
+**X55** — `kmscube`, `kmod`, e `CONFIG_UHID=y` (§12.70). Os três símbolos do
+Wi-Fi/Bluetooth conferidos no `.config` do kernel construído, não no fragmento:
+
+```text
+CONFIG_UHID=y            CONFIG_HID=y             CONFIG_BT_HIDP=m
+CONFIG_RTW88_8821CS=m    CONFIG_BT_HCIUART_RTL=y  CONFIG_DRM_PANFROST=y
+```
+
+### O cartão do R35S: gravado e conferido lendo, não confiando no `dd`
+
+`/dev/sdd` de 116,1 GiB, `flash-sd.sh --expect-gib 116 --grow` por container
+privilegiado (sem `sudo` no host). O SHA256 foi conferido **antes** de crescer;
+o `p2` passou de 1,7 GiB para **115,8 GiB**.
+
+Conferido no cartão, não no `out/`:
+
+| Parte | Medida | Igual a |
+| --- | --- | --- |
+| firmware no setor 64 | md5 `41ce198f…` | `u-boot-rockchip.bin` (mainline) |
+| `Image` em p1 | md5 `851ab367…` | `out/r35s/Image` |
+| DTB em p1 | md5 `7be37912…` | `rk3326-gameconsole-r36s-giochi.dtb` |
+| `/usr/bin/kmod`, `modinfo`, `kmscube` | presentes | — |
+| `S51mixer` | 0755 | §12.50 |
+| `Playback Mux` | **`HP`** | §12.68 |
+| `extlinux.conf` | `timeout 30`, **sem `menu title`** | §12.38 |
+
+**Armadilha medida no caminho** (§12.28 de novo): o `udisks2` monta as duas
+partições sozinho assim que o cartão é gravado, e o `mount` de dentro do
+container passa a responder `already mounted or mount point busy`. A leitura
+foi feita **pelo host**, em `/run/media/charles/GIOCHI_BOOT` e `…/rootfs`. E o
+`udisksctl unmount` do `p2` falhou com `target is busy` por causa do **Nautilus**
+com o diretório aberto — resolvido com `--force` depois de `sync`.
+
+### O que NÃO foi provado
+
+**Nada foi medido no hardware com estas duas imagens.** O cartão do R35S está
+gravado, conferido e desmontado; falta colocá-lo no aparelho e ligar. A imagem
+que está lá agora é a de `41428cf` + overlay manual (`patched_from=18789ea+1d36008`),
+que é onde o áudio foi confirmado. O X55 não tem cartão gravado nesta rodada —
+a `.img` existe em `out/powkiddy-x55/`.
+
+### O build local do R35S precisou de dois passes, e o motivo importa
+
+O primeiro terminou em `2944248` — commit **anterior** ao `kmscube` e ao `KMOD`.
+O `git rev-parse` que carimba o `commit=` no `build-info.txt` foi lido **antes**
+dos commits seguintes. Medido no rootfs: tinha `kmscube`, **não** tinha
+`modinfo`. Retomado com `GIOCHI_SYSTEM_KEEP_WORK=1`, que é seguro aqui porque a
+mudança **acrescenta** pacote (§12.27), e o segundo passe saiu em `a012b5a`.
+
+Consequência prática: `commit=` no `build-info.txt` diz de onde o código veio,
+não o que estava na árvore no instante em que cada pacote compilou. Num build de
+~2 h, os pacotes do início são de commits anteriores. Para as duas imagens acima
+a diferença é nula — o único delta era o `KMOD`, que entrou no segundo passe.
