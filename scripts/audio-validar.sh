@@ -175,17 +175,33 @@ fi
 
 echo
 echo "=== volume ==="
+# DOIS nomes para o mesmo controle, e isso custa uma rodada se não for previsto:
+# `alsactl`/o `asound.state` usam o nome do kcontrol (`Master Playback Volume`),
+# e o `amixer` usa o nome SIMPLES (`Master`). Medido no R35S em 15/11/2026 —
+# `amixer sget "Master Playback Volume"` responde "Unable to find simple
+# control", e o script reportava "não consegui ler o volume" num mixer a 100%.
+VOL=""
+VOL_NOME=""
 if command -v amixer >/dev/null 2>&1; then
-    VOL=$(amixer sget "Master Playback Volume" 2>/dev/null | sed -n "s/.*\[\([0-9]*\)%\].*/\1/p" | head -n 1)
-    if [ -z "$VOL" ]; then
-        warn "não consegui ler 'Master Playback Volume'"
-    elif [ "$VOL" -eq 0 ]; then
-        fail "Master Playback Volume = 0% — a cadeia está muda por volume"
+    for nome in "Master Playback Volume" "Master" "Digital Playback Volume" "PCM"; do
+        VOL=$(amixer sget "$nome" 2>/dev/null | sed -n "s/.*\[\([0-9]*\)%\].*/\1/p" | head -n 1)
+        if [ -n "$VOL" ]; then
+            VOL_NOME="$nome"
+            break
+        fi
+    done
+fi
+
+if [ -z "$VOL" ]; then
+    if command -v amixer >/dev/null 2>&1; then
+        warn "nenhum controle de volume de reprodução reconhecido em: $(amixer scontrols 2>/dev/null | sed -n "s/.*'\([^']*\)'.*/\1/p" | tr '\n' ' ')"
     else
-        pass "Master Playback Volume = $VOL%"
+        warn "sem 'amixer' na imagem — volume não medido"
     fi
+elif [ "$VOL" -eq 0 ]; then
+    fail "$VOL_NOME = 0% — a cadeia está muda por volume"
 else
-    warn "sem 'amixer' na imagem — volume não medido"
+    pass "$VOL_NOME = $VOL%"
 fi
 
 # O RK817 é invertido (`xinvert=1`): registrador 0x00 é 0 dB, NÃO mudo. Ler o
@@ -205,8 +221,15 @@ else
         warn "sem pcm0p de reprodução — o card existe, mas nenhum PCM de saída"
     else
         # Em segundo plano: o status só mostra RUNNING ENQUANTO há dados.
-        speaker-test -D "hw:${CARD_NUM:-0},0" -t sine -f 440 -l 1 -c 1 -p 1 \
-            >/dev/null 2>&1 &
+        #
+        # DOIS canais, e a primeira tentativa foi com UM. Medido no R35S em
+        # 15/11/2026: `-c 1` devolve "Channels count (1) not available for
+        # playbacks: Invalid argument" e o PCM fica `closed` — o veredito era
+        # "os dados não chegaram ao DAC" num card que toca normalmente. O card
+        # do RK817 é estéreo, e não há como saber isso sem abrir o dispositivo.
+        LOG_TESTE=/tmp/giochi-audio-teste.log
+        speaker-test -D "hw:${CARD_NUM:-0},0" -t sine -f 440 -l 1 -c 2 -p 1 \
+            >"$LOG_TESTE" 2>&1 &
         TESTE=$!
         VISTO=""
         i=0
@@ -236,7 +259,16 @@ else
             echo "          já entregou os dados."
             echo "       -> se saiu som, o áudio do sistema está validado."
         else
+            # O motivo tem de aparecer: `speaker-test` falhando por parâmetro
+            # recusado e falhando por driver ausente dão o MESMO veredito, e só
+            # a mensagem dele distingue as duas.
+            MOTIVO=$(grep -i -E "invalid|not available|failed|error" "$LOG_TESTE" 2>/dev/null | head -n 2 | tr '\n' ' ')
             fail "o PCM nunca entrou em RUNNING — os dados não chegaram ao DAC"
+            if [ -n "$MOTIVO" ]; then
+                echo "       speaker-test: $MOTIVO"
+            else
+                echo "       (o speaker-test não registrou erro — suspeitar de mux/volume)"
+            fi
         fi
     fi
 fi

@@ -358,19 +358,52 @@ stop_splash() {
 #   stty size < /dev/tty0            -> 25 80                (geometria default)
 #   /sys/class/graphics/fbcon/rotate -> 0                    (o WARN do selftest)
 #
-# E depois de UMA linha escrita em /dev/tty0:
+# E depois de TEXTO escrito em /dev/tty0:
 #
 #   vtcon1 -> (M) frame buffer device ; stty size -> 45 160 ; fbcon/rotate -> 3
 #
 # Ou seja: a configuração do kernel está certa (`ROTATION=y`, `fbcon=rotate:3`);
 # faltava o gatilho. Sem ele, um aparelho sem launcher fica com a tela parada no
 # último quadro — indistinguível de "não ligou" (§12.45).
+#
+# ## TEXTO, e não um `\n` — o gatilho é `putcs`, não "um write"
+#
+# A versão anterior escrevia só `printf '\n'`, e no X55 isso bastou. No R35S
+# (medido em 15/11/2026, imagem `41428cf`) a mesma linha rodava sem erro e o
+# console continuava `(S) dummy device`, `stty size` em `25 80`:
+#
+#   printf '\n'  > /dev/tty0  ->  nada no dmesg, vtcon segue dummy
+#   dd 64 bytes   > /dev/tty0  ->  "fbcon: Taking over console" + 80x30
+#
+# A causa está em `drivers/video/fbdev/core/fbcon.c`: com
+# `DEFERRED_TAKEOVER` o driver se registra como notifier de SAÍDA do dummycon,
+# e quem chama o notifier é `dummycon_putcs`/`dummycon_putc`. Uma quebra de
+# linha é tratada pela camada de console como movimento de cursor e **não gera
+# `putcs`** — então o notifier nunca dispara. Precisa de caractere visível.
+#
+# Por isso: texto de verdade, e depois CONFERIR no sysfs. Um `printf` que sai
+# com 0 não prova que o fbcon assumiu, e o sintoma de não assumir é tela parada
+# (§12.30: perguntar pela consequência).
 assumir_console() {
-    for _t in /dev/tty0 /dev/tty1; do
+    _assumiu=0
+    for _t in /dev/tty0 /dev/tty1 /dev/tty2; do
         [ -w "$_t" ] || continue
-        printf '\n' >"$_t" 2>/dev/null && { log "console de texto assumido em $_t"; return 0; }
+        printf 'Giochi System: console de texto ativo\n' >"$_t" 2>/dev/null || continue
+        # O notifier agenda o take-over num workqueue; não é síncrono.
+        _i=0
+        while [ "$_i" -lt 10 ]; do
+            # A prova é o NOME do vtcon: `bind` guarda 0/1, não o estado.
+            if grep -qs 'frame buffer device' /sys/class/vtconsole/vtcon*/name 2>/dev/null; then
+                _assumiu=1
+                break
+            fi
+            _i=$((_i + 1))
+            sleep 0.2
+        done
+        [ "$_assumiu" = 1 ] && { log "console de texto assumido em $_t"; return 0; }
     done
-    log "AVISO: nenhum tty0/tty1 gravável — console de texto na tela fica sem o fbcon"
+    log "AVISO: escrita em tty0/tty1/tty2 não fez o fbcon assumir o console"
+    log "       (a tela fica parada no último quadro; ver DEFERRED_TAKEOVER)"
     return 0
 }
 
