@@ -150,9 +150,23 @@ mostrar_status() {
                 echo "  usb0: ${addr:-(sem endereco)}"
             done
             ;;
+        none)
+            # `none` é um valor LEGÍTIMO do role switch: existe o arquivo, mas
+            # ninguém forçou papel — o `dwc2` fica com o `dr_mode` do DT. Medido
+            # no R35S em 15/11/2026: role `none`, UDC `configured`, `usb0` up e
+            # o PC enumerado. Dizer "desconhecido" aqui manda procurar defeito
+            # num aparelho que está funcionando (§12.30).
+            echo "  nenhum papel forçado — o dwc2 segue o \`dr_mode\` do device tree"
+            for u in /sys/class/udc/*; do
+                [ -d "$u" ] || continue
+                echo "  UDC $(basename "$u"): $(cat "$u/state" 2>/dev/null)"
+            done
+            echo "  --host e --device forçam o papel (o gadget cai ao virar host)"
+            ;;
         *)
             echo "papel desconhecido: $papel"
-            echo "  procurando em $ROLE_SWITCH_GLOB"
+            echo "  arquivo: $(role_file 2>/dev/null || echo "$ROLE_SWITCH_GLOB (nenhum)")"
+            echo "  valores esperados: host, device, none"
             ;;
     esac
 
