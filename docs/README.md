@@ -2,6 +2,8 @@
 
 Índice da documentação técnica do projeto.
 
+- [Notas da versão v0.2.0](release-v0.2.0.md) — o que mudou, o que foi **provado** e o
+  que **não** foi. Comece por aqui se está chegando agora.
 - [Arquitetura](architecture.md) — como o Buildroot, os devices e o workflow se encaixam.
 - [Adicionar um dispositivo](adding-a-device.md) — passo a passo para Powkiddy X55, Steam Deck ou novo hardware.
 - [Build local](building-locally.md) — como compilar no Linux/WSL2 e quais variáveis usar.
