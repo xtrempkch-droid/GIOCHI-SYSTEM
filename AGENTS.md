@@ -5212,3 +5212,99 @@ Duas armadilhas fechadas na construção dele:
 - **O `u-boot-legacy.bin` não é gerado** (o aparelho não declara
   `bootloader: "rockchip-legacy"`), então o cartão leva o mainline — que é o
   caminho que boota desde 06/11/2026 (§20).
+
+## 24. R35S no aparelho: o som medido, e os dois falsos negativos (15/11/2026)
+
+Primeira sessão com o R35S rodando a **nossa** imagem (`commit=41428cf`, a do
+cartão gravado nesta mesma data). O aparelho bootou, a rede USB subiu sozinha e
+o SSH respondeu. O que segue foi medido, não deduzido.
+
+### O áudio: a cadeia inteira, medida
+
+`scripts/audio-validar.sh` (novo, §24) rodou de ponta a ponta **0 falha, 0
+aviso**:
+
+```text
+[DEPOIS] card:     0 [rk817int       ]: simple-card - rk817_int
+         mux:      Playback Mux = SPK (casa com o DTS: Speaker -> SPKO)
+         volume:   Master = 100%
+         reprodução: PCM RUNNING (owner_pid 561) durante o tom de 440 Hz
+         dmesg:    nenhuma mensagem de erro de rk817/i2s/asoc
+```
+
+E `giochi-selftest`: **PASS 39 · WARN 1 · FAIL 0 · SKIP 4**, com o único WARN
+sendo `/opt/giochi/apps/index.json` ausente — que é do `Giochi app`, não do
+sistema. O áudio está **validado até o DAC**; se o falante não emitir som, o
+defeito é físico e posterior ao kernel.
+
+Hardware medido no mesmo boot: painel 640x480 `card0-DSI-1 connected`,
+`renderD128` com **panfrost** (`mali-g31 id 0x7093`), 17 botões + 4 eixos em
+`r36s_Gamepad`, bateria 46% (Not charging — a porta não carrega, §12.58 P3),
+térmica `soc 52,9 °C`/`gpu 54,2 °C`, RTC em 2026-11-15, CPU 1,296 GHz.
+
+### Defeito 1 — `printf '\n'` no tty0 não dispara o fbcon
+
+O `assumir_console` do `giochi-init` escrevia **só uma quebra de linha**, e no
+X55 isso bastou. No R35S a mesma linha sai com 0 e o console continua `(S)
+dummy device`, `stty size` em `25 80`:
+
+```text
+printf '\n'  > /dev/tty0  ->  nada no dmesg, vtcon segue dummy
+dd 64 bytes  > /dev/tty0  ->  "fbcon: Taking over console" + 80x30
+```
+
+Causa, lida no fonte do kernel 6.12 (`drivers/video/fbdev/core/fbcon.c`): com
+`DEFERRED_TAKEOVER` o fbcon se registra como notifier de **saída do dummycon**,
+e quem chama o notifier é `dummycon_putcs`/`dummycon_putc`. Uma quebra de linha
+é tratada pela camada de console como movimento de cursor e **não gera
+`putcs`** — o notifier nunca dispara.
+
+Correção: texto de verdade, e **conferência no sysfs** (`vtcon*/name` contém
+"frame buffer device"). Um `printf` que sai com 0 não prova nada; o sintoma de
+não assumir é tela parada por tempo indeterminado (§12.30).
+
+Verificado com `reboot` de verdade: o console assume em **3,5 s**, e o WARN do
+selftest desapareceu (WARN 3 → 1).
+
+### Defeito 2 — `giochi-buttons` procurava o nome do driver da X55
+
+```text
+$ giochi-buttons
+gpio-keys-control não encontrado; veja --list
+```
+
+num aparelho com `r36s_Gamepad`, 17 botões e 4 eixos. O `giochi-selftest` já
+aceitava os três nomes desde 06/11 (§13-B); a ferramenta ao lado não — mesma
+classe do §12.30, perguntar pelo **nome** em vez da **consequência**.
+
+`find_gamepad`/`find_axes` agora tentam o nome conhecido e caem na descoberta
+por capacidade (`*Gamepad*|*joypad*` com bitmap de botão; qualquer `ABS_*`
+ligado para eixos). No aparelho: `--all` acha `event2` (gamepad), `event2`
+(eixos) e `event1` (volume).
+
+### Defeito 3 — `none` não é papel desconhecido
+
+`giochi-usb --status` dizia `papel desconhecido: none` num aparelho com
+role switch presente, UDC `configured` e `usb0` up. `none` é valor legítimo: o
+arquivo existe e ninguém forçou papel, então o dwc2 segue o `dr_mode` do DT.
+Agora tem ramo próprio, com o estado do UDC e a lembrete de que `--host` /
+`--device` forçam.
+
+### O que o log de boot mostrou
+
+`giochi-bootlog` gravou **99 linhas** úteis na FAT (`/mnt/bootlog`): rede, `df`,
+selftest inteiro. O agrupamento por assinatura do §12.62-C funciona — nada de
+1200 linhas de charger.
+
+### Pendências deste aparelho
+
+- **`CONFIG_FRAMEBUFFER_CONSOLE_ROTATION` não está ligado** no R35S, e está
+  certo assim: o painel é 640x480 **paisagem nativa** (`80x30`, pixel 1:1). O
+  `=y` é necessidade da X55 (720x1280 retrato).
+- **`S96bootlog` não roda sozinho** (falta `/etc/giochi/boot-log`). Ligar isso
+  é decisão de produto: escreve no cartão a cada boot.
+- **`--host` do `giochi-usb` não foi exercitado.** Trocar para host derruba o
+  `usb0`, que é o canal por onde o teste está sendo feito — precisa de watchdog
+  (`setsid`) ou do console serial para voltar.
+- **`kmscube` não está na imagem**, então 3D fica `SKIP` no selftest. O
+  `renderD128` + panfrost provam o driver, não o desenho.
