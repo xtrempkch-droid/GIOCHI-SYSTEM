@@ -5479,12 +5479,23 @@ sem medir o build completo.
 
 | Aparelho | Estado | Consequência |
 | --- | --- | --- |
+| `r35s` | **em uso por outra equipe** (15/11/2026, a partir das 19h) | **indisponível** — nem SSH, nem reboot, nem troca de cartão |
 | `powkiddy-x55` | **em uso pelo time do `Giochi app`** (launcher) | não usar para teste; **avisar com antecedência** se precisar |
 | `powkiddy-x35h` | **conectado, mas em uso** (04/11) | **indisponível momentaneamente** — nem SSH, nem serial, nem reboot |
 
-A X55 continua conectada (USB e TTL) mas está **ocupada**. Não rode nada nela
-sem combinar antes: um reboot ou uma gravação de cartão interrompe o trabalho de
-quem está usando. O mesmo vale para `adb`/SSH/serial — conectar já interfere.
+**Nenhum aparelho está livre.** O R35S entrou na lista em 15/11/2026: estava na
+bancada com a imagem `a012b5a` e passou para outra equipe. A X55 continua
+conectada (USB e TTL) mas está **ocupada**.
+
+Não rode nada neles sem combinar antes: um reboot ou uma gravação de cartão
+interrompe o trabalho de quem está usando. O mesmo vale para `adb`/SSH/serial —
+**conectar já interfere**, e no R35S há um detalhe adicional: o `10.55.0.2` é
+compartilhado por todos os aparelhos (§12.64), então "conectar" pode significar
+interromper sem que ninguém perceba de onde veio.
+
+O que fazer com o aparelho ocupado: **medir antes, escrever depois**. Foi o que
+produziu a §12.72 — o falso `FAIL` do kmscube foi encontrado numa janela de
+bancada e agora está no teste, sem precisar do hardware de novo.
 
 Ordem sugerida para a próxima sessão (nada aqui precisa da X55):
 
