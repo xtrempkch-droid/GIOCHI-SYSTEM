@@ -5968,3 +5968,108 @@ Consequência prática: `commit=` no `build-info.txt` diz de onde o código veio
 não o que estava na árvore no instante em que cada pacote compilou. Num build de
 ~2 h, os pacotes do início são de commits anteriores. Para as duas imagens acima
 a diferença é nula — o único delta era o `KMOD`, que entrou no segundo passe.
+
+## 26. Handoff: estado no fim da sessão de 15/11/2026
+
+**Nenhum aparelho está disponível** — os três estão com outras equipes (§18). A
+sessão terminou sem bancada, e é por isso que a lista abaixo separa o que foi
+medido do que ficou pendente de medição.
+
+### O que está em `origin/main`
+
+```text
+58510df  docs: notas da v0.2.0, e a lista do que NÃO foi provado
+e3b72b8  idiomas: wqy-zenhei nos três aparelhos e as duas fontes Noto
+f2a040b  AGENTS 18: nenhum aparelho livre — o R35S passou para outra equipe
+0bd9383  kmscube: o timeout matando não é falha, e o renderer é a prova
+d1bbc2a  AGENTS 25: as duas imagens de 15/11
+a012b5a  AGENTS 12.71: o assert-config reprovou meu commit
+ad35151  r35s: KMOD_TOOLS sem o pai KMOD
+c5fe2ce  r35s perdeu o kmod-tools, e o teste que devia pegar listava dois nomes
+2944248  selftest: o `2>/dev/null` estava do lado errado do `<`
+```
+
+Suíte: **553/553 + 1 skip**, em 60 arquivos.
+
+### O cartão do R35S está pronto e conferido
+
+`commit=0bd9383`, gravado em `/dev/sdd` e lido de volta: firmware no setor 64,
+`Image`, DTB, `kmod`/`modinfo`/`kmscube`, `S51mixer` 0755, `Playback Mux = HP`,
+`extlinux.conf` com `timeout 30` e sem `menu title`.
+
+**O cartão é anterior às fontes** (`e3b72b8`) — quem quiser o CJK/हिन्दी/বাংলা na
+tela precisa regravar com o build que inclua `e3b72b8` ou posterior.
+
+### O que o hardware provou nesta sessão
+
+| Medição | Onde | Resultado |
+| --- | --- | --- |
+| Áudio pela cadeia inteira | R35S, imagem `a012b5a` | `PCM RUNNING`, mux `HP`, volume 100% |
+| GPU desenha | R35S, mesma imagem | `kmscube` → `Mali-G31 (Panfrost)` |
+| `selftest` limpo | R35S | `PASS 40 · WARN 1 · FAIL 0 · SKIP 3`, stderr **0 linha** |
+| RTC grava | R35S | 2017 → 2026, `hwclock -r` confirma |
+| `kmod` presente | R35S | `modinfo hidp` → `depends: bluetooth` |
+
+O único `WARN` é `/opt/giochi/apps/index.json` ausente — arquivo do
+`Giochi app`, não do sistema.
+
+### Pendências, em ordem de risco
+
+1. **CI vermelho do `0bd9383` no r35s, sem diagnóstico.** O job morreu em
+   *Build image* aos 753 s (o mesmo passo leva ~34 min quando passa). `x55` e
+   `qemu-aarch64` ficaram verdes no **mesmo commit**, e o **build local do r35s
+   em `0bd9383` passou** (`out/r35s/build-info.txt`, `built_at 21:48:23Z`). O
+   delta entre o `ad35151` (verde) e o `0bd9383` é **só** o
+   `giochi-selftest` — nenhuma linha de `device/r35s/` mudou. O log exige token
+   (`GET /actions/jobs/<id>/logs` → 403) e esta máquina não tem. **Sem o log,
+   não afirmo causa** — os candidatos são concorrência de cache e um limite do
+   runner, não o código.
+
+2. **As fontes novas não foram vistas na tela.** Verificadas por leitura da
+   tabela `cmap` (6/6 devanágari, 5/5 bengali, 0/2 CJK de propósito) e por
+   `BR2_PACKAGE_WQY_ZENHEI=y` nos três defconfigs. O `giochi-launcher --fontes`
+   com a imagem nova é a prova que falta.
+
+3. **O áudio da X55 em 2025.02 não foi medido.** O do R35S foi.
+
+4. **`CONFIG_UHID` não foi exercitado com controle BLE de verdade.** Provado que
+   o símbolo entrou e que `/dev/uhid` existe.
+
+5. **Issue #5 do GIOCHI-SYSTEM (fontes) segue aberta.** O trabalho está feito em
+   `e3b72b8`; fechar exige `PATCH` e não há token. O próprio corpo da issue já
+   traz o comando de conferência (`giochi-launcher --fontes --idioma zh`).
+
+6. **Três issues para o `GIOCHI-APP`, prontas e não postadas.** Texto em
+   `.copilot/session-state/…/files/issue-giochi-app-integracao-r35s.md`. O
+   `docs/integracao.md` deles diz `rk817_ext` "nome fixo, se mudar falhar" e
+   controle `Playback` — no R35S é `rk817_int` e `Master`.
+
+### Onde os builds locais estão
+
+```text
+~/.cache/giochi-system/work/r35s/          2025.02, completo, commit 0bd9383
+~/.cache/giochi-system/work/powkiddy-x55/  2025.02, completo, commit 0e6d5bd
+out/r35s/              Image + rootfs + sd.img (commit 0bd9383)
+out/powkiddy-x55/      Image + rootfs + sd.img (commit 0e6d5bd, SEM as fontes)
+out/_anterior-*        quatro imagens antigas, para rollback
+```
+
+O X55 **precisa de rebuild** para levar as fontes (`e3b72b8`). O `work/` dele já
+tem `WQY_ZENHEI=y` no `.config` — basta retomar com
+`GIOCHI_SYSTEM_KEEP_WORK=1` (acrescentar pacote é seguro, §12.27).
+
+### Como retomar
+
+```bash
+node scripts/validate-devices.mjs       # 7 devices, 3 habilitados
+node tests/run-all.mjs                  # 552/552 + 1 skip
+GIOCHI_SYSTEM_KEEP_WORK=1 bash scripts/build-in-container.sh powkiddy-x55
+bash scripts/build-in-container.sh --sd-image powkiddy-x55
+```
+
+E, com aparelho na mão e autorização de quem estiver usando:
+
+```bash
+giochi-selftest                          # esperado: PASS 40 · WARN 1 · FAIL 0
+giochi-launcher --fontes --idioma zh     # a prova que falta: 8/8
+```
