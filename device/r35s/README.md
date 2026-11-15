@@ -945,3 +945,34 @@ espera até 5 s pelo arquivo, e a mensagem de falha diz o que realmente acontece
 **Consequência prática para quem for testar host:** sem console serial, trocar
 para host pode deixar o aparelho inalcançável. O caminho seguro é
 `setsid sh -c 'sleep 25; giochi-usb --device'` **lançado antes**, ou a serial.
+
+### Imagem de 15/11/2026 (a que está no cartão)
+
+```text
+base       commit 41428cf (build do CI, run 43716046299)
+overlay    commit 18789ea — giochi-init, giochi-buttons, giochi-usb
+SHA256     5bdb9eb7a5f51e64270d8c0a3c350efc1f6d6c7f37117b349782d6ac4143d027
+```
+
+**Procedência honesta:** o build do CI em `18789ea` ficou verde (`qemu`,
+`x55` e `r35s`), mas o artefato **não pôde ser baixado** — o servidor MCP do
+GitHub estava respondendo `header mismatch` e a API REST exige token que esta
+máquina não tem. A imagem no cartão é o rootfs de `41428cf` com os **três
+arquivos do overlay** de `18789ea` aplicados por `debugfs`, e
+`/etc/giochi/build-info.txt` registra isso em `patched_from=` /
+`patched_files=` / `patched_reason=`.
+
+O delta entre os dois commits é exatamente esses três scripts (conferido com
+`git diff --name-only 41428cf 18789ea`): nada de kernel, DTB, U-Boot ou
+biblioteca mudou, então a imagem é equivalente à que o CI produziria.
+
+Conferido **lendo o cartão**, não o `out/`:
+
+| Item | Resultado |
+| --- | --- |
+| firmware no setor 64 | `9a08d5c9…` = `u-boot-rockchip.bin` |
+| `giochi-init`/`giochi-buttons`/`giochi-usb` | **idênticos** aos fontes do repo |
+| `S51mixer`, `giochi-init` | `0755` |
+| `asound.state` | `Playback Mux = SPK` |
+| `e2fsck -fn` na p2 | limpo, 3423/65536 arquivos |
+| p1 FAT | `Image` + `dtbs/` + `extlinux/` + `boot.scr` |
