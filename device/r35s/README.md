@@ -917,3 +917,31 @@ nem driver.
 Para ter SSH ou ADB no PC, é preciso **forçar o papel de dispositivo** (o
 `usb-role-switch` existe no DTB, então é configurável), ou usar Wi-Fi — que esta
 placa não tem. Na prática: só com o cartão no leitor.
+
+### Modo HOST do USB: funciona, mas o rolé switch some na troca (15/11/2026)
+
+Testado no aparelho com um guardião que reverte sozinho. O que ficou medido:
+
+| Passo | Resultado |
+| --- | --- |
+| `giochi-usb --host` | **funciona**: `role=host`, `/sys/bus/usb/devices/usb1` enumerado |
+| `usb0` (shell por USB) | cai, como esperado — é outro papel na mesma porta |
+| reverter 25 s depois | **falhou**: `/sys/class/usb_role/` estava **vazio** naquele instante |
+| reverter depois | funciona; `usb0` volta com `10.55.0.2` |
+
+A causa do "falhou" é a janela de reconfiguração do `dwc2`: logo depois de
+`echo host > role` o diretório do role switch **desaparece por um instante**.
+O erro que isso produzia era
+
+```text
+can't create /sys/class/usb_role/*/role: nonexistent directory
+ERRO: não há role switch (veja --host).
+```
+
+— a segunda linha é falsa e manda procurar defeito no DTS. `role_file()` agora
+espera até 5 s pelo arquivo, e a mensagem de falha diz o que realmente acontece
+(papel fixo em tempo de device tree).
+
+**Consequência prática para quem for testar host:** sem console serial, trocar
+para host pode deixar o aparelho inalcançável. O caminho seguro é
+`setsid sh -c 'sleep 25; giochi-usb --device'` **lançado antes**, ou a serial.

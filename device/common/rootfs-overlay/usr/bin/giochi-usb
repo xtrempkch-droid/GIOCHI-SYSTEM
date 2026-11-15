@@ -47,9 +47,30 @@ GADGET=/sys/kernel/config/usb_gadget/giochi
 USBNET=/usr/bin/giochi-usbnet
 
 # Só o primeiro: nenhum aparelho desta árvore tem dois controladores OTG.
+#
+# ## A espera não é preciosismo: o diretório do role switch SOME na troca
+#
+# Medido no R35S em 15/11/2026. Logo depois de `echo host > role`, o `dwc2`
+# reconfigura o controlador e `/sys/class/usb_role/` fica VAZIO por um instante.
+# Um guardião que tentou reverter 25 s depois pegou exatamente essa janela e
+# falhou com
+#
+#   can't create /sys/class/usb_role/*/role: nonexistent directory
+#
+# — e o aparelho ficou em host, inalcançável por USB, até alguém entrar pela
+# serial. A mensagem que o script dava nesse caso era "não há role switch neste
+# aparelho", que é falso e manda procurar defeito no DTS (§12.30).
+#
+# Por isso: espera até 5 s pelo arquivo. Custa nada no caso normal (aparece na
+# primeira volta) e evita perder o canal de shell.
 role_file() {
-    for f in $ROLE_SWITCH_GLOB; do
-        [ -w "$f" ] && { printf '%s' "$f"; return 0; }
+    _tentativas=0
+    while [ "$_tentativas" -lt 50 ]; do
+        for f in $ROLE_SWITCH_GLOB; do
+            [ -w "$f" ] && { printf '%s' "$f"; return 0; }
+        done
+        _tentativas=$((_tentativas + 1))
+        sleep 0.1
     done
     return 1
 }
@@ -225,7 +246,10 @@ virar_host() {
 
 virar_device() {
     f="$(role_file)" || {
-        echo "ERRO: não há role switch (veja --host)." >&2
+        echo "ERRO: não há $ROLE_SWITCH_GLOB nem depois de 5 s de espera." >&2
+        echo "      Este aparelho fixa o papel em tempo de device tree: o" >&2
+        echo "      \`dr_mode\` do DTS escolhe device ou host, e não há como" >&2
+        echo "      alternar em runtime. \`--host\`/\`--device\` não se aplicam." >&2
         return 1
     }
     if [ "$(cat "$f")" != host ]; then
