@@ -970,7 +970,13 @@ if [ -x "$LAUNCHER" ]; then
     for cmdline in /proc/[0-9]*/cmdline; do
         # O processo pode sumir entre o glob e o `open` (é /proc): o redirect
         # falha e polui a saída com "No such file". Silêncio é o certo aqui.
-        cmd="$(tr '\0' ' ' <"$cmdline" 2>/dev/null)"
+        #
+        # A ORDEM dos redirecionamentos importa: o shell os aplica da esquerda
+        # para a direita, então `2>/dev/null` precisa vir ANTES do `<`. Escrito
+        # ao contrário (`<"$cmdline" 2>/dev/null`) o `<` falha primeiro, o shell
+        # emite o erro no stderr que ainda não foi desviado, e o `/dev/null`
+        # nunca chega a valer — medido: `cannot open /proc/999999/cmdline`.
+        cmd="$(tr '\0' ' ' 2>/dev/null <"$cmdline")"
         pid="${cmdline#/proc/}"
         pid="${pid%/cmdline}"
         # Fora a si mesmo e o pai: se alguém rodar este teste de um shell cuja

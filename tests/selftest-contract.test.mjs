@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -438,5 +438,55 @@ test("o kmscube é PULADO quando o launcher detém o DRM master, não reprovado"
   assert.ok(
     iGuard < iRun,
     "o guarda do launcher tem de vir antes do kmscube rodar",
+  );
+});
+
+test("a leitura de /proc/*/cmdline silencia o processo que sumiu", async () => {
+  // Medido no R35S em 15/11/2026: o bloco do launcher imprimiu
+  //   /usr/bin/giochi-selftest: line 967: can't open /proc/3021/cmdline
+  // porque o processo saiu entre o glob e o `open` — normal em /proc. O código
+  // JÁ tinha `2>/dev/null`, e o comentário acima dele já dizia "silêncio é o
+  // certo aqui". Não silenciava: o shell aplica os redirecionamentos da
+  // ESQUERDA para a DIREITA, então `<"$cmdline"` falhava primeiro, o erro ia
+  // para um stderr que ainda não tinha sido desviado, e o `/dev/null` nunca
+  // chegava a valer.
+  //
+  // É a mesma família do §12.59/§12.62: a intenção escrita no comentário não é
+  // o comportamento. Por isso o teste roda a LINHA REAL do script — reescrever
+  // a ordem de novo faz ele falhar com o ruído que aparecer.
+  const texto = await read();
+  const linha = texto
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => /^cmd="\$\(tr\b/.test(l));
+  assert.ok(
+    linha,
+    "a leitura de /proc/*/cmdline sumiu do selftest — é ela que decide se o " +
+      "launcher está vivo, e `ps` não serve nesta imagem (§12.46)",
+  );
+
+  const r = spawnSync(
+    "sh",
+    ["-c", `cmdline=/proc/999999/cmdline\n${linha}\nprintf '%s' "$cmd"\n`],
+    { encoding: "utf8" },
+  );
+  assert.equal(
+    r.status,
+    0,
+    `a leitura falhou com status ${r.status}: ${r.stderr.trim()}`,
+  );
+  assert.equal(
+    r.stdout,
+    "",
+    "o redirect que falhou devolveu conteúdo em vez de vazio",
+  );
+  assert.equal(
+    r.stderr.trim(),
+    "",
+    `um /proc de processo que sumiu poluiu a saída do selftest:\n` +
+      `  ${r.stderr.trim()}\n` +
+      `A ordem dos redirecionamentos é o que importa: ` +
+      `\`2>/dev/null\` tem de vir ANTES do \`<\`. Escrito ao contrário, o \`<\` ` +
+      `falha primeiro e o stderr ainda não está desviado.`,
   );
 });
