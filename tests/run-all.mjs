@@ -64,3 +64,4 @@ import "./bootlog-dmesg-spam.test.mjs";
 import "./hardware-x55.test.mjs";
 import "./requisitos-engine.test.mjs";
 import "./buildroot-upgrade.test.mjs";
+import "./fontes-idiomas.test.mjs";

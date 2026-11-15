@@ -181,6 +181,23 @@ BR2_PACKAGE_HARFBUZZ=y
 BR2_PACKAGE_DEJAVU=y
 BR2_PACKAGE_DEJAVU_SANS=y
 
+# ── escrita CJK: chinês, japonês, coreano ───────────────────
+# O launcher tem os dez idiomas do site; `zh` sai em quadradinhos com o DejaVu
+# sozinho (medido: 5/8 caracteres cobertos). O `wqy-zenhei` cobre 35 mil
+# glifos, incluindo 21 mil hanzi, e fica em poucos MB — contra 19 MB do
+# `NotoSansCJK-Regular.ttc`.
+#
+# O Buildroot instala na pasta DO PACOTE (`/usr/share/fonts/wqy-zenhei/`), e o
+# launcher procura exatamente ali: `DIRETORIOS_FONTE` em
+# `ui-sdl/src/draw.rs` lista `wqy-zenhei`, `wqy-microhei` e `truetype/wqy`.
+# Ligar o pacote e não listar o diretório daria quadradinho com a fonte
+# presente — o pior tipo. As duas pontas foram conferidas.
+#
+# Devanágari e bengali NÃO vêm daqui: não há pacote do Buildroot que instale
+# no caminho que o app varre, então as duas fontes estão versionadas em
+# `device/common/rootfs-overlay/usr/share/fonts/truetype/noto/` (400 KB, OFL).
+BR2_PACKAGE_WQY_ZENHEI=y
+
 # ── áudio ────────────────────────────────────────────────────
 BR2_PACKAGE_ALSA_LIB=y
 BR2_PACKAGE_ALSA_UTILS=y
