@@ -655,53 +655,44 @@ else
     fail "sem /proc/asound — ALSA não carregou"
 fi
 
-# O `Playback Mux` do RK817 tem DOIS valores (HP | SPK) e a escolha certa depende
-# do roteamento do DTS — não é a mesma em todo aparelho. Este bloco dizia
-# "precisa estar em HP" com a justificativa da X55 ("o SPK DAC é class-D interno e
-# não está roteado nesta placa"), e isso é FALSO no R35S, cujo DTS roteia
-# `Speaker -> SPKO` e `Headphones -> HPOL/HPOR`. Resultado medido em 06/11/2026: o
-# R35S dava `[PASS] Playback Mux = HP` com o falante potencialmente mudo — um PASS
-# falso, que é pior que FAIL porque encerra a investigação.
+# O `Playback Mux` do RK817 tem DOIS valores (HP | SPK), e a expectativa NÃO
+# pode vir do roteamento do device tree.
 #
-# A expectativa agora vem do próprio device tree, que é a fonte da verdade do
-# roteamento:
-#   X55   : "Speaker Amp INL" -> HPOL   (amp alimentado por HPOL)  => Mux = HP
-#   R35S  : "Speaker"         -> SPKO   (falante no SPKO)          => Mux = SPK
+# Foi assim até 15/11/2026, e a inferência estava errada por uma premissa: o
+# bloco olhava `Speaker -> SPKO` e concluía "logo o mux tem de ser SPK". Mas o
+# próprio driver (6.12, `sound/soc/codecs/rk817_codec.c`, linha 98) diz que
+#
+#   /* the speaker output and L headphone pin are internally the same */
+#
+# — `SPKO` e `HPOL` são o MESMO pino. O mux não escolhe o destino; escolhe qual
+# estágio alimenta aquele pino (analógico de fone, ou class-D). Qual dos dois o
+# falante de uma placa consegue tocar é fato de HARDWARE, não de roteamento, e
+# não dá para deduzir do DTS.
+#
+# Medido no R35S em 15/11/2026, com o mesmo tom de 440 Hz:
+#
+#   Mux = SPK -> PCM em RUNNING, DAPM todo ligado, registradores 0x38=0xb0 /
+#                0x40=0xa9, dmesg limpo ... e SILÊNCIO no falante e no fone.
+#   Mux = HP  -> o tom SAI.
+#
+# Conclusão: a pergunta certa não é "o DTS pede qual?", é "o mixer em execução
+# está no estado que ESTE aparelho declara?". A declaração mora no próprio
+# aparelho, em `/etc/giochi/asound.state`, aplicado pelo `S51mixer` no boot.
+#
+#   - com estado declarado: comparar. Diferente = o `S51mixer` não rodou ou
+#     falhou, e isso é FAIL de verdade (o aparelho fica mudo do jeito medido).
+#   - sem estado declarado (X55, X35H): vale o default do driver, `HP`, e o
+#     relatório diz isso em vez de inventar uma expectativa.
 #
 # `amixer` existe no Buildroot — como SUBOPÇÃO do `alsa-utils`, desligada por
-# padrão (§12.16). Durante onze revisões este comentário dizia que ele "não
-# existe", porque "não empacotado" e "empacotado e desligado" dão o mesmo
-# sintoma numa imagem. Hoje ele está nos defconfigs dos aparelhos com tela.
-#
-# O caminho principal continua sendo o `alsactl store`: ele é o mecanismo que o
-# ALSA prevê para APLICAR estado de placa (é o que o `S51mixer` usa), e o
-# formato é um arquivo versionável. O `amixer` é a reserva, para o caso de uma
-# imagem construída sem a subopção.
-EXPECT_MUX=""
-EXPECT_WHY=""
-# Globs, e NÃO `find`: o `find` do busybox não desce em `/proc/device-tree`
-# (`find /proc/device-tree -maxdepth 1` devolve só a raiz). Medido no R35S em
-# 06/11/2026 — a versão com `find` não achava o nó e o bloco caía no WARN
-# "não permitiu decidir", que parece um dado ausente e é a ferramenta errada.
-# Dois níveis cobrem o nó na raiz (`rk817-sound`) e sob um pai (`sound`).
-for f in /proc/device-tree/*/simple-audio-card,routing \
-         /proc/device-tree/*/*/simple-audio-card,routing; do
-    [ -r "$f" ] || continue
-    PARSED=$(tr '\0' '\n' < "$f" 2>/dev/null | awk '
-        NR % 2 == 1 { src = $0; next }
-        {
-            if (src ~ /[Ss]peaker/) {
-                if ($0 ~ /^SPK/) { print "SPK|" src " -> " $0; exit }
-                if ($0 ~ /HPO/)  { print "HP|"  src " -> " $0; exit }
-            }
-        }
-    ' 2>/dev/null)
-    if [ -n "$PARSED" ]; then
-        EXPECT_MUX=${PARSED%%|*}
-        EXPECT_WHY=${PARSED#*|}
-        break
-    fi
-done
+# padrão (§12.16). O `alsactl store` é a reserva quando ele não está.
+DECLARED_MUX=""
+if [ -r /etc/giochi/asound.state ]; then
+    DECLARED_MUX=$(awk '
+        /name .Playback Mux./ { achou = 1; next }
+        achou && /value /       { print $2; exit }
+    ' /etc/giochi/asound.state 2>/dev/null)
+fi
 
 MUX=""
 if command -v amixer >/dev/null 2>&1; then
@@ -711,20 +702,21 @@ if [ -z "$MUX" ] && command -v alsactl >/dev/null 2>&1; then
     STATE=/tmp/giochi-mixer.state
     if alsactl -f "$STATE" store >/dev/null 2>&1; then
         # O bloco é: name 'Playback Mux' / value <X>. Pega o value seguinte.
-        MUX=$(awk "
+        MUX=$(awk '
             /name .Playback Mux./ { achou = 1; next }
-            achou && /value / { print \$2; exit }
-        " "$STATE" 2>/dev/null)
+            achou && /value / { print $2; exit }
+        ' "$STATE" 2>/dev/null)
         rm -f "$STATE"
     fi
 fi
+
 if [ -n "$MUX" ]; then
-    if [ -z "$EXPECT_MUX" ]; then
-        warn "Playback Mux = $MUX — roteamento do DTS não permitiu decidir o esperado (confira 'Speaker' em simple-audio-card,routing)"
-    elif [ "$MUX" = "$EXPECT_MUX" ]; then
-        pass "Playback Mux = $MUX (casa com o DTS: $EXPECT_WHY)"
+    if [ -z "$DECLARED_MUX" ]; then
+        pass "Playback Mux = $MUX (sem /etc/giochi/asound.state: vale o default do driver — nada a conferir)"
+    elif [ "$MUX" = "$DECLARED_MUX" ]; then
+        pass "Playback Mux = $MUX (igual ao declarado em /etc/giochi/asound.state)"
     else
-        fail "Playback Mux = $MUX — o DTS roteia '$EXPECT_WHY', então precisa ser $EXPECT_MUX (em $MUX o falante fica MUDO)"
+        fail "Playback Mux = $MUX, mas este aparelho declara $DECLARED_MUX em /etc/giochi/asound.state — o S51mixer não aplicou; o falante fica MUDO"
     fi
 elif command -v alsactl >/dev/null 2>&1 || command -v amixer >/dev/null 2>&1; then
     warn "controle 'Playback Mux' não encontrado no mixer"
@@ -1008,7 +1000,8 @@ if [ "$FAIL" -gt 0 ]; then
     say "Há falha(s). Ordem de investigação, do mais provável:"
     say "  1. tela preta        -> DTB errado, não kernel (ver docs/troubleshooting.md)"
     say "  2. sem /dev/dri      -> CONFIG_PHY_ROCKCHIP_INNO_DSIDPHY=y (nunca =m)"
-    say "  3. mudou o Mux       -> Playback Mux casa com o roteamento do DTS (HP ou SPK)"
+    say "  3. som mudo          -> Playback Mux igual ao de /etc/giochi/asound.state"
+    say "                          (HP ou SPK: o mux escolhe o ESTÁGIO, não o destino)"
     say "  4. sem botão         -> buttons.map e o driver do joypad"
     exit 1
 fi

@@ -5,15 +5,42 @@
 # guarda o valor, e o driver não lê propriedade de DT para ele — quem escolhe é
 # userspace. O default do driver é `HP`.
 #
-# No R35S o DTS roteia `Speaker -> SPKO`, e a tabela de rotas do codec é
-# explícita: `Playback Mux, "HP"` alimenta HPOL/HPOR; só `Playback Mux, "SPK"`
-# alimenta `SPK DAC -> SPKO`. Com `HP` o falante NÃO recebe sinal — o aparelho
-# só toca no fone. Medido em 06/11/2026: o selftest dava `PASS` porque a regra
-# de HP era da X55 (lá o amplificador é alimentado por HPOL/HPOR, então HP é o
-# valor certo).
+# ## O valor certo é HP, e isso foi MEDIDO — a versão anterior deste arquivo
+# ## dizia SPK e deixava o aparelho MUDO
+#
+# O raciocínio que levava a SPK era: "o DTS roteia `Speaker -> SPKO`, logo o mux
+# tem de estar em SPK". Ele parte de uma premissa FALSA, e o próprio driver
+# (6.12, `sound/soc/codecs/rk817_codec.c`) diz o contrário na linha 98:
+#
+#   /* Since the speaker output and L headphone pin are internally the same,
+#      make audio path mutually exclusive with a mux. */
+#
+# Ou seja: `SPKO` e `HPOL` são **o mesmo pino** dentro do codec. O mux não
+# escolhe *para onde* o som vai — escolhe **qual estágio** alimenta aquele pino:
+#
+#   HP  -> estágio analógico de fone (DAC L/R -> amp de fone)
+#   SPK -> estágio class-D (SPK DAC)
+#
+# O falante deste aparelho está naquele pino, mas só toca pelo estágio
+# analógico. Medido em 15/11/2026 no R35S, imagem `41428cf`, com os dois valores
+# e o mesmo tom de 440 Hz:
+#
+#   Playback Mux = SPK  -> PCM em RUNNING, DAPM todo ligado (SPKO On, Class D
+#                          Mode On, Enable Class D On, DAC Mute Off On),
+#                          registradores 0x38=0xb0 / 0x40=0xa9 ... e SILÊNCIO
+#                          no falante e no fone.
+#   Playback Mux = HP   -> o mesmo tom SAI no falante.
+#
+# Ou seja: não era o mux "errado" no sentido de roteamento; era o estágio
+# errado. E o silêncio não deixava rastro — o PCM rodava, o DAPM dizia On e o
+# dmesg estava limpo, que é exatamente o tipo de falha que este projeto persegue.
+#
+# Consequência aceita: em `HP` o fone e o falante recebem o mesmo sinal (é o
+# mesmo pino). Neste aparelho não há chave mecânica que corte o falante.
 #
 # Formato: saída de `alsactl store`, editada no valor do Mux. Conferido no
-# aparelho — `alsactl -f <este arquivo> restore` deixa o controle em SPK.
+# aparelho — `alsactl -f <este arquivo> restore` deixa o controle em HP e o som
+# sai pelos dois.
 state.rk817int {
 	control.1 {
 		iface CARD
@@ -76,7 +103,7 @@ state.rk817int {
 	control.5 {
 		iface MIXER
 		name 'Playback Mux'
-		value SPK
+		value HP
 		comment {
 			access 'read write'
 			type ENUMERATED

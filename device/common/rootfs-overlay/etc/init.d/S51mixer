@@ -8,12 +8,19 @@
 # `sound/soc/codecs/rk817_codec.c`). Quem escolhe é userspace, e sem `amixer` no
 # rootfs (§12.16) a única via é `alsactl restore`.
 #
-# O default do driver é `HP`, e isso NÃO é universalmente certo:
+# O default do driver é `HP`, e o valor certo é fato de HARDWARE — não sai do
+# roteamento do device tree. O próprio driver diz por quê (6.12,
+# `sound/soc/codecs/rk817_codec.c`):
 #
-#   X55  — `Speaker Amp INL <- HPOL`: o amplificador é alimentado por HPOL/HPOR,
-#          então `HP` é o valor correto e nada precisa ser feito;
-#   R35S — `Speaker -> SPKO`: com `HP` o falante não recebe sinal e o aparelho só
-#          toca no fone. Medido em 06/11/2026.
+#   /* the speaker output and L headphone pin are internally the same */
+#
+# `SPKO` e `HPOL` são o MESMO pino; o mux escolhe o ESTÁGIO que o alimenta:
+# `HP` = analógico de fone, `SPK` = class-D. Qual dos dois o falante de uma
+# placa consegue tocar é medido, não deduzido:
+#
+#   X55  — amplificador alimentado por HPOL/HPOR: `HP`. É o default, nada a fazer;
+#   R35S — com `SPK` o PCM roda, o DAPM fica On, os registradores conferem e o
+#          aparelho fica MUDO (medido em 15/11/2026); com `HP` o som sai.
 #
 # O arquivo é POR APARELHO (`/etc/giochi/asound.state`). A ausência dele não é
 # erro: sem estado declarado, vale o default do driver — é o caso da X55 e do

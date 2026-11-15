@@ -86,7 +86,7 @@ Repositório: `https://github.com/xtrempkch-droid/GIOCHI-SYSTEM` — branch `mai
 
 | Verificação | Resultado |
 | --- | --- |
-| `node tests/run-all.mjs` | **512/512** (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, devices 13, assert-config 12, fdt 11, gpu-bench 16, …) |
+| `node tests/run-all.mjs` | **542/542 + 1 skip** (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, devices 13, assert-config 12, fdt 11, gpu-bench 16, …) |
 | `node scripts/validate-devices.mjs` | OK — 7 devices, 1 habilitado |
 | `node scripts/list-devices.mjs --github-matrix` | matriz com `qemu-aarch64` |
 | matriz com `--device powkiddy-x55 --allow-draft` | devolve **só** o X55 |
@@ -449,7 +449,7 @@ si (§12.4), mas provavelmente **não** era a causa dos 3 s.
 
 ```bash
 node scripts/validate-devices.mjs
-node tests/run-all.mjs                          # 512 testes
+node tests/run-all.mjs                          # 543 testes
 node scripts/list-devices.mjs
 node scripts/list-devices.mjs --github-matrix
 node scripts/list-devices.mjs --github-matrix --device powkiddy-x55 --allow-draft
@@ -494,7 +494,7 @@ absoluto** do host — §12.40).
 
 ## 10. Testes
 
-`node tests/run-all.mjs` → **512/512**, em **56 arquivos**. A tabela abaixo é uma
+`node tests/run-all.mjs` → **542/542 + 1 skip**, em **59 arquivos**. A tabela abaixo é uma
 seleção dos que prendem contratos de projeto; a lista completa é `ls tests/` e
 `tests/runner-coverage.test.mjs` **falha** se algum arquivo existir sem estar
 importado no `run-all.mjs` — foi assim que dois testes desta revisão quase
@@ -2561,46 +2561,56 @@ A tabela de rotas do próprio driver diz o que cada valor faz:
 {"SPKO", NULL, "Playback Mux"}, {"HPOL", ...}, {"HPOR", ...}
 ```
 
-E o roteamento de cada aparelho decide qual é o certo:
+E daí este documento concluiu — **errado** — que o roteamento de cada aparelho
+decidia qual era o certo:
 
-| Aparelho | `simple-audio-card,routing` | Mux correto |
-| --- | --- | --- |
-| X55 | `"Speaker Amp INL", "HPOL"` — o amplificador é alimentado por HPOL/HPOR | **HP** |
-| R35S | `"Speaker", "SPKO"` — o falante está no class-D | **SPK** |
+| Aparelho | `simple-audio-card,routing` | Mux que a §12.52 dizia | Medido em 15/11/2026 |
+| --- | --- | --- | --- |
+| X55 | `"Speaker Amp INL", "HPOL"` — amplificador alimentado por HPOL/HPOR | **HP** | **HP**, confere (é o default) |
+| R35S | `"Speaker", "SPKO"` — "o falante está no class-D" | **SPK** | **HP**. Em `SPK` o aparelho fica **MUDO** |
 
-O `giochi-selftest` testava `MUX = HP → pass`, herdado da X55, e reportava no
-R35S:
+Ver AGENTS §12.68. A dedução não se sustenta por dois motivos, e o primeiro está
+escrito no próprio driver.
 
-```text
-[PASS] Playback Mux = HP (falante roteado por HPOL/HPOR)
+**1. `SPKO` e `HPOL` são o mesmo pino.** `sound/soc/codecs/rk817_codec.c`, 6.12:
+
+```c
+/* Since the speaker output and L headphone pin are internally the same, make
+ * audio path mutually exclusive with a mux. */
 ```
 
-com o falante **sem sinal**: em `HP` só HPOL/HPOR recebem o DAC; o `SPKO` fica
-mudo. O texto do `PASS` era falso em duas coisas ao mesmo tempo — o aparelho não
-tem amplificador, e o caminho não era aquele.
+O mux não escolhe o **destino** do som — escolhe o **estágio** que alimenta
+aquele pino único: `HP` = estágio analógico de fone, `SPK` = estágio class-D.
+Portanto "o DTS roteia `Speaker -> SPKO`" **não** implica "o mux tem de ser SPK";
+a rota continua correta nos dois casos, porque é o mesmo pino.
 
-É pior que um `FAIL` falso (§12.34), porque encerra a investigação: ninguém olha
-de novo para um bloco verde. E é o §12.26 em forma de teste — **herdar a premissa
-de outro aparelho e não perceber**.
+**2. Qual estágio o falante de uma placa consegue tocar é fato de hardware.**
+Mede-se; não sai de leitura de DTS. No R35S o class-D não entrega som no falante
+e o estágio de fone entrega.
 
-Correção em três peças:
-
-| Peça | O que faz |
-| --- | --- |
-| `giochi-selftest` | deriva o Mux esperado do **DT do próprio aparelho** (`Speaker -> SPK*` ⇒ SPK; `Speaker -> HPO*` ⇒ HP), e o `FAIL` cita o roteamento e a consequência |
-| `device/r35s/rootfs-overlay/etc/giochi/asound.state` | estado do mixer com `Playback Mux = SPK` (formato do `alsactl store`) |
-| `device/common/rootfs-overlay/etc/init.d/S51mixer` | restaura `/etc/giochi/asound.state` **se ele existir**; ausente não é erro (X55 e X35H seguem no default do driver) |
-
-Verificado no aparelho, ponta a ponta: com `Mux = HP` o selftest passou a
-reportar
+O `giochi-selftest` testava `MUX = HP → pass`, herdado da X55, e a §12.52 trocou
+o teste para "derivar do DTS". O resultado no R35S, medido em 15/11/2026, foi um
+`FAIL` **falso** mandando para o valor errado:
 
 ```text
 [FAIL] Playback Mux = HP — o DTS roteia 'Speaker -> SPKO', então precisa ser SPK
 ```
 
-e depois de `/etc/init.d/S51mixer start`, `[PASS] Playback Mux = SPK (casa com o
-DTS: Speaker -> SPKO)`. `tests/onboard-drivers.test.mjs` prende o par: o valor do
-`asound.state` tem de casar com o roteamento do DTSI no repositório.
+— num aparelho que tocava som naquele instante, e que ficava mudo se obedecido.
+
+| Peça | O que era (errado) | O que ficou |
+| --- | --- | --- |
+| `giochi-selftest` | derivava o Mux esperado do `simple-audio-card,routing` do DT | compara o mixer com o valor **declarado** em `/etc/giochi/asound.state`; divergir = `S51mixer` não aplicou |
+| `device/r35s/rootfs-overlay/etc/giochi/asound.state` | `Playback Mux = SPK` | `Playback Mux = HP` (o valor medido) |
+| `device/common/rootfs-overlay/etc/init.d/S51mixer` | — | igual; o comentário interno agora cita o "mesmo pino" do driver |
+
+A regra que substitui a antiga: **o estado declarado é a fonte da verdade, e ele
+vem de medição.** O selftest não tenta adivinhar o valor certo — ele verifica se
+o valor declarado está aplicado. Quem tem dúvida sobre o valor abre o
+`asound.state` do aparelho e lê o porquê no comentário do arquivo.
+
+`tests/onboard-drivers.test.mjs` prende as duas metades: o `asound.state` do
+R35S diz `HP`, e o selftest **não** volta a derivar mux do roteamento do DT.
 
 **Por que `alsactl restore` e não `amixer`:** na época da correção `amixer` não
 estava na imagem. A razão real é que ele é subopção desligada por padrão
@@ -4416,6 +4426,101 @@ Ou seja: o `rtl8821cs_config.bin` que o driver pede **existe e resolve** na
 imagem que foi publicada — que é exatamente o que o §12.67 tinha que garantir, e
 o único jeito de provar isso sem aparelho na mão.
 
+### 12.68 O mux do RK817: o falante do R35S toca em `HP`, não em `SPK`
+
+Medido no aparelho em 15/11/2026, depois de o dono do projeto relatar que **o
+áudio era a única coisa que não funcionava de forma evidente** — nem no fone,
+nem no alto-falante. O hardware estava confirmado bom em outro sistema (ROCKNIX).
+
+O rastro que existia apontava para longe da causa. Com a imagem no aparelho, o
+`audio-validar.sh` jogava um tom de 440 Hz em dois canais e reportava **0 fail,
+0 warn**:
+
+```text
+card:   0 [rk817int]  simple-card - rk817_int
+mux:    Playback Mux = SPK
+volume: Master = 255/255
+PCM:    /proc/asound/card0/pcm0p/sub0/status = RUNNING
+```
+
+Tudo verde, e nenhum som. A auditoria do mixer mostrou só **5 controles**, e o
+DAPM durante a reprodução estava inteiro `On`:
+
+```text
+Playback Mux On · SPKO On · Class D Mode On · Enable Class D On · DAC Mute Off On
+DDAC_VOLL/R = 0x00 (com xinvert=1, 0x00 é 0 dB — §12.56)
+DDAC_MUTE_MIXCTL (0x38) = 0xb0  → DACMT_DISABLE
+ACLASSD_CFG1 (0x40)     = 0xa9  → bit 7 = class-D ligado
+i2s pins claimed · mclk 12.288 MHz · pcm RUNNING
+```
+
+Ou seja: **a cadeia de software estava correta até o registrador** e o falante
+seguia mudo. O que resolveu foi trocar um valor à mão:
+
+```text
+amixer -c 0 sset 'Playback Mux' SPK   → silêncio
+amixer -c 0 sset 'Playback Mux' HP    → SOM
+```
+
+#### A causa está no driver, e a §12.52 tinha lido o DTS no lugar dele
+
+`sound/soc/codecs/rk817_codec.c` (6.12), na definição do controle:
+
+```c
+/* Since the speaker output and L headphone pin are internally the same, make
+ * audio path mutually exclusive with a mux. */
+```
+
+`SPKO` e `HPOL` são **o mesmo pino** dentro do codec. O mux não escolhe para onde
+o som vai — escolhe **qual estágio** alimenta aquele pino:
+
+| Valor | O que alimenta o pino | No R35S |
+| --- | --- | --- |
+| `HP` | estágio analógico de fone (DAC L/R → HPOL/HPOR) | **toca** |
+| `SPK` | estágio class-D (`SPK DAC` → SPKO) | **mudo**, com tudo `On` no DAPM |
+
+Disso saem duas conclusões que valem além desta placa:
+
+1. **Rota de DTS não decide mux.** "`Speaker -> SPKO`" é verdade nas duas
+   configurações, porque é o mesmo pino. A §12.52 usou essa rota para exigir
+   `SPK` e o teste passou a **reprovar o estado que funciona**.
+2. **Qual estágio o falante de uma placa toca é fato de hardware.** Não há
+   propriedade de DT, não há `compatible`, não há tabela no driver: é medido. A
+   X55 usa `HP` porque o amplificador dela está em HPOL/HPOR; o R35S usa `HP`
+   porque o class-D não entrega no falante dele. **Os dois iguais por motivos
+   diferentes** — e por isso o valor não pode ser derivado de nada além do
+   próprio aparelho.
+
+Consequência aceita, e é de hardware: em `HP` o fone e o falante recebem o mesmo
+sinal. `hp-det-gpios = <&gpio2 RK_PC6 GPIO_ACTIVE_HIGH>` lê `hi` **sempre**
+nesta placa, então `Headphones Jack = on` é permanente e não há chaveamento
+automático. Não é defeito a perseguir: é a mesma pinagem que faz o `HP` funcionar.
+
+#### O que mudou no código
+
+| Peça | Antes | Depois |
+| --- | --- | --- |
+| `device/r35s/.../etc/giochi/asound.state` | `Playback Mux = SPK` | `Playback Mux = HP`, com o "mesmo pino" do driver citado no cabeçalho |
+| `giochi-selftest` | derivava o mux do `simple-audio-card,routing` do DT | compara o mixer com o **declarado** em `asound.state`; divergir = `S51mixer` não aplicou |
+| `S51mixer` (comentário) | "`Speaker -> SPKO` ⇒ SPK" | cita `rk817_codec.c` e a medição |
+| `tests/onboard-drivers.test.mjs` | exigia `SPK` casando com o DTSI | exige `HP` no `asound.state` **e** que o selftest não volte a derivar do DT |
+
+A inversão do teste é o ponto: o teste antigo passava lendo o repositório e o
+aparelho estava mudo. O teste novo **falha se alguém devolver `SPK`** — e o
+`FAIL` diz a consequência (`o falante fica MUDO`), não o valor.
+
+A regra que fica, e é a mesma do §12.30/§12.34/§12.51 numa terceira roupa: **o
+teste tem de perguntar pela consequência.** "O mixer casa com o DTS?" é uma
+pergunta sobre o repositório. "O mixer casa com o que o aparelho foi medido
+tocando?" é a pergunta que distingue som de silêncio. Aqui não havia como medir
+som em teste automatizado — então a resposta medida foi **congelada num arquivo
+declarado** (`asound.state`), e o teste passou a comparar contra ele.
+
+Verificado no aparelho depois da correção:
+`PASS 41 · WARN 0 · FAIL 0 · SKIP 3`, e com o mixer forçado de volta a `SPK`:
+`[FAIL] Playback Mux = SPK — o declarado é HP; o S51mixer não aplicou (o falante
+fica MUDO)`.
+
 ## 13. Aparelhos
 
 | ID | Pasta | SoC | Arch | Status | Falta |
@@ -4781,7 +4886,7 @@ o cartão — não só no `target/`.
 
 | Item | Estado |
 | --- | --- |
-| Código e configuração | **pronto** — 512/512 testes |
+| Código e configuração | **pronto** — 542/542 testes |
 | Imagem X55 (`Image` + `rootfs.ext4` + DTB + bootloader) | **existe** em `out/powkiddy-x55/`, `built_at_utc=2026-11-04T21:05:13Z` |
 | `/etc/inittab` na imagem | **linha 30: `::respawn:/usr/bin/giochi-init`** — conferida com `debugfs` no `rootfs.ext4` |
 | `work/` do X55 | preservado em `~/.cache/giochi-system/work/powkiddy-x55` (17 GB, já com `target/` finalizado) |
@@ -4922,7 +5027,7 @@ Ordem sugerida para a próxima sessão (nada aqui precisa da X55):
 
 ```bash
 node scripts/validate-devices.mjs      # 7 devices, 1 habilitado
-node tests/run-all.mjs                 # 512/512
+node tests/run-all.mjs                 # 542/542 + 1 skip
 node scripts/list-devices.mjs --github-matrix
 ```
 
@@ -4988,7 +5093,7 @@ as duas correções (`uboot-patches/0001-…-adc-nao-fatal.patch` +
 
 ```bash
 cd /home/charles/Giochi/GIOCHI-SYSTEM
-node tests/run-all.mjs                                   # esperado: 512/512
+node tests/run-all.mjs                                   # esperado: 542/542
 git add device/r35s/README.md AGENTS.md
 git commit -m "r35s: o U-Boot mainline liga; a frase do README estava desatualizada
 

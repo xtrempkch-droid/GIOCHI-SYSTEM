@@ -200,10 +200,30 @@ ligá-lo. Não existe consulta para isso em DSI.
 | Item | X55 | R35S/R36S |
 | --- | --- | --- |
 | Card | `rk817_ext` | `rk817_int` |
-| Roteamento do falante | `Speaker Amp INL ← HPOL` (**HP**) | `Speaker → SPKO` |
+| Estágio que alimenta o falante | amplificador em HPOL/HPOR (**HP**) | também **HP** — o DTS diz `Speaker → SPKO`, mas isso não decide nada (ver abaixo) |
 
-A armadilha do "Playback Mux tem de ficar em HP" **é da X55**. Nesta placa o
-caminho é SPKO. Não copiar a configuração de áudio de um para o outro.
+**A armadilha aqui é a inversa da que este documento registrava.** Ele dizia
+que no R35S o caminho era SPKO e que `HP` deixaria o falante mudo. Medido em
+15/11/2026: é o contrário — com `SPK` o aparelho fica mudo; com `HP` toca.
+
+A causa está no próprio driver (`sound/soc/codecs/rk817_codec.c`, 6.12):
+
+```c
+/* Since the speaker output and L headphone pin are internally the same, make
+ * audio path mutually exclusive with a mux. */
+```
+
+`SPKO` e `HPOL` são **o mesmo pino** dentro do codec. O mux não escolhe o
+destino do som — escolhe **qual estágio** alimenta aquele pino:
+`HP` = estágio analógico de fone, `SPK` = estágio class-D. Qual dos dois o
+falante desta placa toca é fato de hardware, e **não** se deduz da rota
+`Speaker -> SPKO` do device tree (que continua correta: é o mesmo pino).
+
+Foi essa dedução — "rota SPKO, logo mux SPK" — que deixou o aparelho mudo sem
+deixar rastro: PCM em `RUNNING`, DAPM todo `On`, registradores `0x38=0xb0` e
+`0x40=0xa9` (class-D habilitado), dmesg limpo. Consequência aceita: em `HP` o
+fone e o falante recebem o mesmo sinal, porque é o mesmo pino — esta placa não
+tem chave mecânica que corte o falante.
 
 **Medido em 06/11/2026, e este parágrafo já estava certo antes do código estar:**
 o driver mainline não tem opinião sobre o mux — `Playback Mux` é
@@ -217,13 +237,14 @@ O que existe agora:
 
 | Peça | O que faz |
 | --- | --- |
-| `rootfs-overlay/etc/giochi/asound.state` | estado do mixer com `Playback Mux = SPK` |
+| `rootfs-overlay/etc/giochi/asound.state` | estado do mixer com `Playback Mux = HP` (o valor medido) |
 | `etc/init.d/S51mixer` (overlay comum) | restaura o estado **se o aparelho declarar um** |
-| `giochi-selftest` | deriva o Mux esperado do `simple-audio-card,routing` do DT, e o `FAIL` cita o roteamento |
+| `giochi-selftest` | compara o mixer com o valor **declarado** em `asound.state`; divergir = `S51mixer` não aplicou |
 
-Verificado no aparelho: com `HP` o selftest passa a **falhar** dizendo qual é o
-valor certo; depois de `/etc/init.d/S51mixer start`, `[PASS] Playback Mux = SPK
-(casa com o DTS: Speaker -> SPKO)`.
+Verificado no aparelho em 15/11/2026: com o mixer em `SPK` o selftest passa a
+**falhar** (`... o S51mixer não aplicou; o falante fica MUDO`), e com
+`alsactl -f /etc/giochi/asound.state restore` volta a
+`[PASS] Playback Mux = HP (igual ao declarado em /etc/giochi/asound.state)`.
 
 ### Como validar o som do zero (host + aparelho)
 

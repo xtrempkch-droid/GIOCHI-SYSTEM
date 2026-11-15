@@ -30,6 +30,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 const DEVICE = fileURLToPath(new URL("../device/", import.meta.url));
+const OVERLAY = fileURLToPath(new URL("../device/common/rootfs-overlay", import.meta.url));
 
 function read(device, file) {
   try {
@@ -103,54 +104,80 @@ test("os aparelhos x86_64 não entram na regra (hardware é o do PC)", () => {
   }
 });
 
-// ── áudio: o `Playback Mux` tem de casar com o roteamento do DTS ────────────
+// ── áudio: o `Playback Mux` é fato de HARDWARE, não do roteamento do DTS ────
 //
-// O `Playback Mux` do RK817 é `HP` | `SPK` e o default do driver é `HP`. Isso é
-// correto na X55 (o amplificador é alimentado por HPOL/HPOR) e ERRADO no R35S,
-// cujo DTS roteia `Speaker -> SPKO`: com `HP` o falante não recebe sinal.
+// Até 15/11/2026 estes testes exigiam que o `asound.state` do R35S pedisse
+// `SPK`, deduzido de o DTS rotear `Speaker -> SPKO`. A dedução parte de uma
+// premissa falsa, dita pelo próprio driver (6.12,
+// `sound/soc/codecs/rk817_codec.c`):
 //
-// Medido em 06/11/2026: o selftest dava `[PASS] Playback Mux = HP` no R35S
-// porque a regra era a da X55. Um PASS falso é pior que FAIL — encerra a
-// investigação. Estes dois testes prendem o par (DTS, estado do mixer) dos dois
-// lados, para que um não mude sozinho.
-function expectedMuxFromRouting(dtsi) {
-  // Pares "origem", "destino". Procura o par cuja origem cita Speaker.
-  const pairs = [...dtsi.matchAll(/"([^"]+)"\s*,\s*"([^"]+)"/g)].map((m) => [m[1], m[2]]);
-  for (const [src, dst] of pairs) {
-    if (!/speaker/i.test(src)) continue;
-    if (/^SPK/i.test(dst)) return "SPK";
-    if (/HPO/i.test(dst)) return "HP";
-  }
-  return null;
-}
+//   /* the speaker output and L headphone pin are internally the same */
+//
+// `SPKO` e `HPOL` são o MESMO pino; o mux escolhe o estágio que o alimenta
+// (analógico de fone, ou class-D). Qual dos dois o falante de uma placa toca é
+// fato de hardware e não sai do DTS.
+//
+// Medido no R35S em 15/11/2026, com o mesmo tom: `SPK` -> PCM em RUNNING, DAPM
+// ligado, registradores certos e **silêncio**; `HP` -> som no falante.
+//
+// O que os testes prendem agora é o que dá para provar sem aparelho:
+//   1. o `asound.state` do R35S declara um valor ÚNICO e válido (HP);
+//   2. o `S51mixer` existe e é executável (sem `+x` o estado não é aplicado);
+//   3. o `giochi-selftest` compara o mixer com o DECLARADO, não com o DTS —
+//      e não voltou a derivar expectativa da rota.
 
-test("R35S: o asound.state pede o Mux que o DTS exige (SPK, não HP)", async () => {
+test("R35S: o asound.state declara Playback Mux = HP (medido no aparelho)", async () => {
   const { readFileSync } = await import("node:fs");
-  const dtsi = readFileSync(`${DEVICE}r35s/dts/src/rk3326-gameconsole-r3xs.dtsi`, "utf8");
-  const expected = expectedMuxFromRouting(dtsi);
-  assert.equal(expected, "SPK", "o DTS do R35S roteia Speaker -> SPKO, logo Mux = SPK");
-
   const state = readFileSync(`${DEVICE}r35s/rootfs-overlay/etc/giochi/asound.state`, "utf8");
+
   const mux = state.match(/name 'Playback Mux'\s*\n\s*value (\w+)/);
   assert.ok(mux, "asound.state sem o controle Playback Mux");
-  assert.equal(mux[1], expected, "o estado do mixer tem de casar com o DTS");
+  assert.equal(
+    mux[1],
+    "HP",
+    "medido em 15/11/2026: com SPK o PCM roda, o DAPM fica On e o aparelho fica MUDO",
+  );
 });
 
-test("o DTS da X55 continua pedindo HP (o default do driver)", async () => {
-  // Não temos o DTS da X55 no repo (vem do mainline), mas o roteamento está na
-  // árvore do kernel. Este teste só guarda o FATO usado para justificar HP: se
-  // alguém trocar a rota, o comentário do S51mixer fica mentindo.
+test("o selftest compara o mixer com o DECLARADO, não com o roteamento do DTS", async () => {
+  // A regra antiga derivava a expectativa de `simple-audio-card,routing`. Ela
+  // produzia PASS falso na X55 e, depois de corrigida com a mesma lógica,
+  // produzia FAIL falso no R35S — porque a pergunta certa é outra: "o mixer
+  // está no estado que ESTE aparelho declara?".
   const { readFileSync } = await import("node:fs");
-  const kdts = `${process.env.HOME}/.cache/giochi-system/work/r35s/build/build/linux-6.12/arch/arm64/boot/dts/rockchip/rk3566-powkiddy-x55.dts`;
-  let text;
-  try {
-    text = readFileSync(kdts, "utf8");
-  } catch {
-    // Sem árvore do kernel nesta máquina (CI): o fato já está registrado no
-    // AGENTS.md §12.51 e no S51mixer. Não transformar ausência em falha.
-    return;
-  }
-  assert.equal(expectedMuxFromRouting(text), "HP", "X55: Speaker Amp <- HPOL exige Mux = HP");
+  const selftest = readFileSync(`${OVERLAY}/usr/bin/giochi-selftest`, "utf8");
+  assert.match(
+    selftest,
+    /DECLARED_MUX=.*asound\.state/s,
+    "o selftest tem de ler o estado declarado pelo aparelho",
+  );
+  assert.ok(
+    !/EXPECT_MUX=\$\{PARSED/.test(selftest),
+    "o selftest voltou a derivar o mux esperado do device tree",
+  );
+});
+
+test("o S51mixer aplica o estado declarado e é executável", async () => {
+  const { readFileSync, statSync } = await import("node:fs");
+  const caminho = `${OVERLAY}/etc/init.d/S51mixer`;
+  const script = readFileSync(caminho, "utf8");
+  assert.match(script, /alsactl -f "\$STATE" restore/, "o S51mixer tem de restaurar o estado");
+  assert.ok(
+    (statSync(caminho).mode & 0o111) !== 0,
+    "S51mixer sem bit de execução: o rcS não o roda e o som fica mudo (§12.50)",
+  );
+});
+
+test("a X55 não declara asound.state — fica no default do driver (HP)", async () => {
+  // A X55 nunca teve estado de mixer: o amplificador dela é alimentado por
+  // HPOL/HPOR, que é o caminho do default `HP`. O que este teste impede é
+  // alguém "resolver" o áudio de outro aparelho criando um asound.state aqui
+  // sem medir — o R35S passou por isso, ao contrário.
+  const { existsSync } = await import("node:fs");
+  assert.ok(
+    !existsSync(`${DEVICE}powkiddy x55/rootfs-overlay/etc/giochi/asound.state`),
+    "só declare estado de mixer quando o default do driver estiver errado no aparelho",
+  );
 });
 
 test("o S51mixer restaura só quando o aparelho declara estado", async () => {
