@@ -303,6 +303,7 @@ Giochi system/
 │   ├── build-in-container.sh           # build sem root no host (docker)
 │   ├── make-sd-image.sh                # imagem de cartão com offsets do RK3566
 │   ├── flash-sd.sh                     # grava com guarda de destino + SHA256
+│   ├── audio-validar.sh                # áudio medido no aparelho por SSH (§23)
 │   ├── assert-kernel-config.mjs         # CONFIG_* do kernel (o gap do §12.9)
 │   └── lib/{devices,assert-config,assert-kernel-config,fdt}.mjs
 ├── docker/{builder,serial,serial-logger}.Dockerfile + scripts de serial
@@ -467,6 +468,7 @@ bash scripts/gles-probe.sh powkiddy-x35h --run   # GLES/EGL reais, sem pacote no
 bash scripts/gpu-bench.sh powkiddy-x55 --run --repetir 3   # throughput: fill, ALU, textura, draw (§12.63)
 bash scripts/gpu-bench.sh powkiddy-x55          # só compila o benchmark
 bash scripts/audio-alerta.sh --alar             # tom pela via SDL2 -> ALSA
+bash scripts/audio-validar.sh                   # áudio medido: card, mux, volume, PCM RUNNING (§23)
 bash scripts/engine-build.sh r35s --instalar    # compila a GIOCHI-ENGINE
 python3 scripts/gles-probe.py                    # idem sem compilar (usa o python3 da imagem)
 docker run --rm --privileged -v /dev:/dev -v ./docker:/work/push:ro ... \
@@ -5148,3 +5150,65 @@ Verificado: `make psplash` no container gerou `BAR_IMG 312x14` e `POKY_IMG
 640x480` a partir dos nossos arquivos, e o framebuffer lido de dentro do QEMU
 (`-device virtio-gpu-pci`, `dd if=/dev/fb0`) mostra o lockup de 312 px com a
 barra de 312 px na mesma coluna.
+
+## 23. R35S habilitado e o cartão do som (15/11/2026)
+
+O X55 saiu da frente (release verde, §12.67), e a vez é do R35S. O aparelho
+entrou na matriz (`enabled: true`, `status: ready`) e o **primeiro build
+completo com Buildroot 2025.02** ficou verde — o item que o §12.66 listava como
+"não provado" para os handhelds, agora provado para este.
+
+```text
+run            43716046299  (commit 41428cf)
+Build r35s     sucesso, 1 h 45
+assert-config        87 símbolos de 3 fragmentos
+assert-kernel-config 79 símbolos (nenhum allow-drop)
+assert-busybox       51 applet(s)
+artefato       giochi-system-r35s (134,8 MB, 17 arquivos, até 29/11)
+sd.img         2,0 GiB  SHA256 c43baed199fbccf0ddc440a1b00d2ae158f91db893c0415ffbdd226563e41d92
+```
+
+O que o build provou, e que só o artefato mostra (lido do `.img`, não do
+`target/`):
+
+| Verificação | Resultado |
+| --- | --- |
+| firmware no setor 64 do `.img` | SHA256 idêntico a `u-boot-rockchip.bin` (caminho **mainline**, não legacy) |
+| p1 FAT `GIOCHI_BOOT` | `Image` 39,5 MB + `dtbs/rk3326-gameconsole-r36s-giochi.dtb` + `extlinux.conf` + `boot.scr` |
+| `extlinux.conf` | `timeout 30`, **sem `menu title`** (§12.38), cmdline `console=ttyS2,1500000n8` |
+| drivers de hardware onboard | `panfrost`, `rk817_charger`, `rockchip_thermal`, `rocknix-singleadc-joypad`, `panel-generic-dsi` todos em `modules.builtin` (**=y**, §12.51) |
+| cadeia de áudio | `snd-soc-rk817`, `snd-soc-rockchip-i2s`, `snd-soc-simple-card` **built-in** — o card nasce no boot sem depender de autoload |
+| mixer do aparelho | `/etc/giochi/asound.state` com `Playback Mux = SPK`, e `S51mixer` **0755** |
+| ferramentas de áudio | `speaker-test`, `aplay`, `amixer`, `alsamixer` em `/usr/bin`; `alsactl` em `/usr/sbin` |
+| radio ausente | **correto**: `rtl_bt/rtl8821cs_*` NÃO está no rootfs — o defconfig desliga `RTL_88XX_BT` neste aparelho, e o `+=` condicional do `package-overrides.mk` respeita isso (§12.17) |
+| inittab | linha 30 `::respawn:/usr/bin/giochi-init` |
+
+### A lição: mux certo + volume certo ainda pode ser silêncio
+
+O `giochi-selftest` pergunta "o card existe?" e "o mux casa com o roteamento do
+DT?", e as duas respostas podem ser `PASS` num aparelho onde **nenhum dado
+chegou ao DAC**. Faltava a pergunta que separa as duas coisas, e ela é a mesma
+do §12.56: `/proc/asound/card*/pcm0p/sub0/status` responde `state: RUNNING` com
+o `owner_pid` de quem está tocando **enquanto** há dados.
+
+Daí `scripts/audio-validar.sh` (host, SSH em `10.55.0.2`): card → mux derivado
+do DT (mesma heurística do selftest, de propósito) → volume → **PCM em RUNNING
+durante um tom de 440 Hz**. Se o PCM roda e não sai som, o script diz que o
+problema está **depois** do DAC — que é uma afirmação diferente, e acionável.
+
+Duas armadilhas fechadas na construção dele:
+
+- **`hw:<id>,0` não é a mesma coisa que `hw:<número>,0`.** O `speaker-test`
+  aceita o número; o id entre colchetes de `/proc/asound/cards` pode ser
+  recusado, e a falha aparece só na hora de tocar.
+- **`debugfs` do Alpine é `e2fsprogs-extra`** (§12.56) — de novo. Sem ele, todo
+  arquivo do cartão "não existe" e a conferência mente na direção tranquilizadora.
+
+### O que continua pendente neste aparelho
+
+- **Nada foi medido no hardware nesta rodada.** O cartão está gravado e
+  conferido; falta ligar o aparelho com ele e rodar o `audio-validar.sh`. É a
+  prova final, e ela é física.
+- **O `u-boot-legacy.bin` não é gerado** (o aparelho não declara
+  `bootloader: "rockchip-legacy"`), então o cartão leva o mainline — que é o
+  caminho que boota desde 06/11/2026 (§20).

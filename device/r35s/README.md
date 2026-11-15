@@ -225,6 +225,29 @@ Verificado no aparelho: com `HP` o selftest passa a **falhar** dizendo qual é o
 valor certo; depois de `/etc/init.d/S51mixer start`, `[PASS] Playback Mux = SPK
 (casa com o DTS: Speaker -> SPKO)`.
 
+### Como validar o som do zero (host + aparelho)
+
+O `giochi-selftest` prova o **registro** do card e o mux, e não prova que houve
+som: um card registrado com mux certo e volume zero tem exatamente o mesmo
+veredito. Quem fecha isso é `scripts/audio-validar.sh`, do host, pela rede USB:
+
+```bash
+bash scripts/audio-validar.sh              # aparelho em 10.55.0.2
+bash scripts/audio-validar.sh --duracao 2  # tom mais longo
+```
+
+Ele mede, em ordem: card em `/proc/asound/cards` → `Playback Mux` casando com o
+`simple-audio-card,routing` do DT → volume ≠ 0 → **PCM de reprodução em
+`RUNNING`** durante um `speaker-test` de 440 Hz (com o `owner_pid` de quem está
+tocando). O último item é o que separa "abriu o dispositivo" de "os dados
+chegaram ao DAC" (§12.56). Se o PCM rodou e **não** saiu som, o problema está
+depois do DAC — amp, conector ou falante — e o script diz isso em vez de deixar
+a conclusão ambígua.
+
+Fora do escopo dele, de propósito: o caminho **SDL2 → ALSA**, que é o do jogo.
+Esse é o `scripts/audio-alerta.sh`, que cross-compila o probe com o sysroot do
+build.
+
 Backlight: PWM1, período 25 µs, 256 níveis.
 
 ## Medido no aparelho — 06/11/2026, pela console serial
