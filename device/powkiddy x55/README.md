@@ -56,7 +56,9 @@ copiado sem conferência, e o que não foi verificado está marcado como tal.
    `/dev/dri/card0`, tela preta, nenhuma mensagem ligando sintoma à causa.
 2. **`Playback Mux` do RK817 tem de ficar em `HP`.** O amplificador do falante é
    alimentado por `HPOL`/`HPOR`; em `SPK` o aparelho fica **mudo** (o `SPK DAC` é
-   o class-D interno do RK817 e não está roteado nesta placa).
+   o class-D interno do RK817 e não está roteado nesta placa). É o default do
+   driver, então esta placa **não** declara `asound.state` — só o R35S declara,
+   e lá também é `HP` (§12.68).
 3. **O `tc` do busybox não compila contra os headers do 6.12.** `TCA_CBQ_*` e
    `struct tc_cbq_lssopt` foram removidos junto com o qdisc CBQ, e o erro sai
    como uma parede de "undeclared identifier" em `networking/tc.c` que não cita

@@ -20,7 +20,7 @@
 # O script NÃO conclui que o falante está bom só porque o PCM rodou — ele diz
 # o que mediu. A cadeia que ele cobre:
 #
-#   card registrado -> roteamento (Playback Mux) casa com o DTS
+#   card registrado -> Playback Mux igual ao declarado em /etc/giochi/asound.state
 #   -> volume != 0 -> PCM em RUNNING durante a reprodução
 #
 # O que fica fora, de propósito: se o som SAI do falante. Isso é físico, e a
@@ -50,7 +50,7 @@ while (($#)); do
 Uso: bash scripts/audio-validar.sh [opções]
 
 Mede o áudio do aparelho pela rede USB (SSH em root@10.55.0.2):
-card registrado, Playback Mux casando com o DTS, volume, e PCM de
+card registrado, Playback Mux igual ao declarado pelo aparelho, volume, e PCM de
 reprodução em RUNNING durante um tom de 440 Hz.
 
   --ip <endereço>    IP do aparelho (padrão 10.55.0.2 ou $GIOCHI_DEVICE_IP)
@@ -118,45 +118,31 @@ echo "card:     hw:${CARD_NUM:-0} (${CARD_ID:-?})"
 
 echo
 echo "=== roteamento (Playback Mux) ==="
-# O valor certo NÃO é universal: depende de como o DTS liga o falante.
-#   R35S  — "Speaker -> SPKO"    => SPK   (com HP o falante fica mudo)
-#   X55   — "Speaker Amp INL <- HPOL" => HP
+# O valor certo NÃO se deduz do device tree. `SPKO` e `HPOL` são o MESMO pino
+# dentro do RK817 — o próprio driver diz isso em `rk817_codec.c`:
 #
-# Mesma heurística do `giochi-selftest`, de propósito: duas ferramentas com
-# opiniões diferentes sobre o mux esperado seriam confusão nova, e o parser de
-# lá cobre "Speaker Amp INL" e "Speaker" na mesma regra.
+#   /* the speaker output and L headphone pin are internally the same */
 #
-# Globs, e NÃO `find`: o `find` do busybox não desce em `/proc/device-tree`
-# (§12.52). Dois níveis cobrem o nó na raiz e sob um pai.
-EXPECT_MUX=""
-EXPECT_WHY=""
-for rota in /proc/device-tree/*/simple-audio-card,routing \
-            /proc/device-tree/*/*/simple-audio-card,routing; do
-    [ -r "$rota" ] || continue
-    PARSED=$(tr '\0' '\n' < "$rota" 2>/dev/null | awk '
-        NR % 2 == 1 { src = $0; next }
-        {
-            if (src ~ /[Ss]peaker/) {
-                if ($0 ~ /^SPK/) { print "SPK|" src " -> " $0; exit }
-                if ($0 ~ /HPO/)  { print "HP|"  src " -> " $0; exit }
-            }
-        }
-    ' 2>/dev/null)
-    if [ -n "$PARSED" ]; then
-        EXPECT_MUX=${PARSED%%|*}
-        EXPECT_WHY=${PARSED#*|}
-        break
-    fi
-done
+# O mux escolhe o ESTÁGIO que alimenta aquele pino (analógico de fone, ou
+# class-D), e qual dos dois o falante de uma placa toca é fato de HARDWARE.
+# Medido no R35S em 15/11/2026: `SPK` = silêncio, `HP` = som.
+#
+# Então a conferência é contra o que o PRÓPRIO APARELHO declara em
+# `/etc/giochi/asound.state` (aplicado pelo `S51mixer` no boot), nunca contra o
+# DTS. Sem declaração, vale o default do driver e não há o que conferir.
+DECLARED_MUX=""
+if [ -r /etc/giochi/asound.state ]; then
+    DECLARED_MUX=$(awk '/name .Playback Mux./ {achou = 1; next}
+                        achou && /value/ {gsub(/[[:space:]]/, "", $0); sub(/^value/, "", $0); print; exit}' \
+                   /etc/giochi/asound.state 2>/dev/null)
+fi
 
 MUX=""
 if command -v amixer >/dev/null 2>&1; then
     MUX=$(amixer sget "Playback Mux" 2>/dev/null | sed -n "s/.*Item0: '\([A-Z]*\)'.*/\1/p" | head -n 1)
 fi
-if [ -z "$MUX" ] && [ -r /etc/giochi/asound.state ]; then
-    MUX=$(awk '/name .Playback Mux./ {achou = 1; next}
-               achou && /value/ {gsub(/[[:space:]]/, "", $0); sub(/^value/, "", $0); print; exit}' \
-          /etc/giochi/asound.state 2>/dev/null)
+if [ -z "$MUX" ] && [ -n "$DECLARED_MUX" ]; then
+    MUX=$DECLARED_MUX
 fi
 
 if [ -z "$MUX" ]; then
@@ -165,12 +151,12 @@ if [ -z "$MUX" ]; then
     else
         warn "sem 'amixer' e sem /etc/giochi/asound.state — o mux não pôde ser lido"
     fi
-elif [ -z "$EXPECT_MUX" ]; then
-    warn "Playback Mux = $MUX — o 'Speaker' do DT não permitiu decidir o esperado"
-elif [ "$MUX" = "$EXPECT_MUX" ]; then
-    pass "Playback Mux = $MUX (casa com o DTS: $EXPECT_WHY)"
+elif [ -z "$DECLARED_MUX" ]; then
+    pass "Playback Mux = $MUX (sem /etc/giochi/asound.state: vale o default do driver)"
+elif [ "$MUX" = "$DECLARED_MUX" ]; then
+    pass "Playback Mux = $MUX (igual ao declarado em /etc/giochi/asound.state)"
 else
-    fail "Playback Mux = $MUX — o DTS roteia '$EXPECT_WHY', então precisa ser $EXPECT_MUX (em $MUX o falante fica MUDO)"
+    fail "Playback Mux = $MUX, mas o aparelho declara $DECLARED_MUX — o S51mixer não aplicou (com o valor errado o falante fica MUDO)"
 fi
 
 echo

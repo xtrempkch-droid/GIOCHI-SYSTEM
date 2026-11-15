@@ -168,6 +168,30 @@ test("o S51mixer aplica o estado declarado e é executável", async () => {
   );
 });
 
+test("nenhuma ferramenta deriva o mux do device tree", async () => {
+  // A classe, não o caso: `giochi-selftest` E `audio-validar.sh` tinham a mesma
+  // dedução errada, e cada um foi corrigido na sua vez. O que este teste impede
+  // é a terceira ferramenta nascer com ela.
+  const { readFileSync } = await import("node:fs");
+  const ferramentas = [
+    `${OVERLAY}/usr/bin/giochi-selftest`,
+    fileURLToPath(new URL("../scripts/audio-validar.sh", import.meta.url)),
+  ];
+  for (const caminho of ferramentas) {
+    const texto = readFileSync(caminho, "utf8");
+    const curto = caminho.split("/").pop();
+    assert.ok(
+      !/EXPECT_MUX|expectedMuxFromRouting/.test(texto),
+      `${curto}: voltou a derivar o mux esperado (o mux é fato de hardware, §12.68)`,
+    );
+    assert.match(
+      texto,
+      /DECLARED_MUX/,
+      `${curto}: tem de comparar com /etc/giochi/asound.state`,
+    );
+  }
+});
+
 test("a X55 não declara asound.state — fica no default do driver (HP)", async () => {
   // A X55 nunca teve estado de mixer: o amplificador dela é alimentado por
   // HPOL/HPOR, que é o caminho do default `HP`. O que este teste impede é

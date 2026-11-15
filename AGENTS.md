@@ -86,7 +86,7 @@ Repositório: `https://github.com/xtrempkch-droid/GIOCHI-SYSTEM` — branch `mai
 
 | Verificação | Resultado |
 | --- | --- |
-| `node tests/run-all.mjs` | **542/542 + 1 skip** (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, devices 13, assert-config 12, fdt 11, gpu-bench 16, …) |
+| `node tests/run-all.mjs` | **543/543 + 1 skip** (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, devices 13, assert-config 12, fdt 11, gpu-bench 16, …) |
 | `node scripts/validate-devices.mjs` | OK — 7 devices, 1 habilitado |
 | `node scripts/list-devices.mjs --github-matrix` | matriz com `qemu-aarch64` |
 | matriz com `--device powkiddy-x55 --allow-draft` | devolve **só** o X55 |
@@ -449,7 +449,7 @@ si (§12.4), mas provavelmente **não** era a causa dos 3 s.
 
 ```bash
 node scripts/validate-devices.mjs
-node tests/run-all.mjs                          # 543 testes
+node tests/run-all.mjs                          # 544 testes
 node scripts/list-devices.mjs
 node scripts/list-devices.mjs --github-matrix
 node scripts/list-devices.mjs --github-matrix --device powkiddy-x55 --allow-draft
@@ -494,7 +494,7 @@ absoluto** do host — §12.40).
 
 ## 10. Testes
 
-`node tests/run-all.mjs` → **542/542 + 1 skip**, em **59 arquivos**. A tabela abaixo é uma
+`node tests/run-all.mjs` → **543/543 + 1 skip**, em **59 arquivos**. A tabela abaixo é uma
 seleção dos que prendem contratos de projeto; a lista completa é `ls tests/` e
 `tests/runner-coverage.test.mjs` **falha** se algum arquivo existir sem estar
 importado no `run-all.mjs` — foi assim que dois testes desta revisão quase
@@ -4521,6 +4521,31 @@ Verificado no aparelho depois da correção:
 `[FAIL] Playback Mux = SPK — o declarado é HP; o S51mixer não aplicou (o falante
 fica MUDO)`.
 
+#### A cadeia de boot foi provada declarando o valor ERRADO
+
+Um reboot com `asound.state = HP` **não prova nada**: `HP` é o default do driver,
+então o mux fica `HP` mesmo que o `S51mixer` nunca rode. O teste que separa os
+dois casos é declarar o valor que se sabe errado e reiniciar:
+
+```text
+1. asound.state := SPK   → reboot → amixer: Item0 'SPK'   ← o S51mixer aplicou
+2. asound.state := HP    → reboot → amixer: Item0 'HP'    ← idem, e o som volta
+```
+
+Passo 1 é o que importa: o valor só podia ter vindo do arquivo. Ou seja, **o que
+estiver no cartão é o que vale depois de reiniciar** — e é por isso que o valor
+errado da §12.52 deixava o aparelho mudo *em todo boot*, não só no primeiro.
+
+Ordem de grandeza que vale registrar: o RK3326 volta em **~10 s** (uptime 9 s
+quando o SSH respondeu), então esse teste custa menos que um café. Não há motivo
+para pular a prova.
+
+`audio-validar.sh` também passou a comparar com o declarado — e o `[FAIL]` que
+ele dava no estado correto (`... o DTS roteia 'Speaker -> SPKO'`) é a terceira
+ferramenta com a mesma dedução errada. `tests/onboard-drivers.test.mjs` passou a
+varrer **as duas** por texto: nenhuma pode conter `EXPECT_MUX`, e as duas têm de
+ler `DECLARED_MUX`. A classe inteira, não o caso (§12.34 e §12.50).
+
 ## 13. Aparelhos
 
 | ID | Pasta | SoC | Arch | Status | Falta |
@@ -4886,7 +4911,7 @@ o cartão — não só no `target/`.
 
 | Item | Estado |
 | --- | --- |
-| Código e configuração | **pronto** — 542/542 testes |
+| Código e configuração | **pronto** — 543/543 testes |
 | Imagem X55 (`Image` + `rootfs.ext4` + DTB + bootloader) | **existe** em `out/powkiddy-x55/`, `built_at_utc=2026-11-04T21:05:13Z` |
 | `/etc/inittab` na imagem | **linha 30: `::respawn:/usr/bin/giochi-init`** — conferida com `debugfs` no `rootfs.ext4` |
 | `work/` do X55 | preservado em `~/.cache/giochi-system/work/powkiddy-x55` (17 GB, já com `target/` finalizado) |
@@ -5027,7 +5052,7 @@ Ordem sugerida para a próxima sessão (nada aqui precisa da X55):
 
 ```bash
 node scripts/validate-devices.mjs      # 7 devices, 1 habilitado
-node tests/run-all.mjs                 # 542/542 + 1 skip
+node tests/run-all.mjs                 # 543/543 + 1 skip
 node scripts/list-devices.mjs --github-matrix
 ```
 
@@ -5093,7 +5118,7 @@ as duas correções (`uboot-patches/0001-…-adc-nao-fatal.patch` +
 
 ```bash
 cd /home/charles/Giochi/GIOCHI-SYSTEM
-node tests/run-all.mjs                                   # esperado: 542/542
+node tests/run-all.mjs                                   # esperado: 543/543
 git add device/r35s/README.md AGENTS.md
 git commit -m "r35s: o U-Boot mainline liga; a frase do README estava desatualizada
 

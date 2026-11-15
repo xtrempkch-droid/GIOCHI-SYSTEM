@@ -21,10 +21,10 @@
 #
 # ## O que ele confere antes de tocar
 #
-# Se o `Playback Mux` estiver errado (HP num aparelho com alto-falante em SPK),
-# o som sai para o fone e ninguém ouve nada — sintoma que já custou uma rodada
-# (§12.52). O script lê o valor e avisa, sem mudar: qual mux é o certo é decisão
-# do aparelho, registrada no `asound.state`.
+# Se o `Playback Mux` estiver em `SPK` no R35S, o som não sai em lugar nenhum e o
+# sintoma não deixa rastro (§12.68, medido em 15/11/2026). O script lê o valor e
+# avisa, sem mudar: qual mux é o certo é fato do aparelho, registrado no
+# `asound.state`.
 
 set -uo pipefail
 

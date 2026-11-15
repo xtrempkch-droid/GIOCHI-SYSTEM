@@ -271,11 +271,20 @@ O controle `Playback Mux` do RK817 (`HP` | `SPK`) é virtual: nenhum registrador
 guarda o valor e o driver não lê nada do device tree — quem escolhe é userspace,
 e o default é `HP`.
 
-No **R35S** isso está errado: o DTS roteia `Speaker -> SPKO`, e em `HP` só
-HPOL/HPOR recebem o DAC, então o falante fica mudo. Corrigido com
-`/etc/giochi/asound.state` por aparelho + `/etc/init.d/S51mixer`, que restaura o
-estado **se o aparelho declarar um** (X55 e X35H não declaram e ficam no default,
-que é o certo neles).
+**Não dá para deduzir o valor do device tree.** `SPKO` e `HPOL` são o mesmo pino
+dentro do codec — o próprio driver diz isso (`rk817_codec.c`: *"the speaker output
+and L headphone pin are internally the same"*). O mux escolhe o **estágio** que
+alimenta aquele pino (analógico de fone, ou class-D), e qual dos dois o falante
+de uma placa toca é fato de hardware.
+
+Medido no R35S em 15/11/2026, com o mesmo tom: `SPK` = silêncio (PCM em
+`RUNNING`, DAPM todo `On`, registradores certos), `HP` = som. Apesar de o DTS
+rotear `Speaker -> SPKO`. Por isso o MESMO valor (`HP`) vale na X55 e no R35S —
+por motivos diferentes.
+
+Mecanismo: `/etc/giochi/asound.state` por aparelho + `/etc/init.d/S51mixer`, que
+restaura o estado **se o aparelho declarar um** (X55 e X35H não declaram e ficam
+no default do driver).
 
 Para o launcher e o app:
 
