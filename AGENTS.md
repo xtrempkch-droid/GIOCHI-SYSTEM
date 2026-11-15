@@ -44,6 +44,70 @@ Repositório: `https://github.com/xtrempkch-droid/GIOCHI-SYSTEM` — branch `mai
 > foi movido para dentro de `plataforma sistema\` e os três repos passaram a ser
 > inicializados no Git.
 
+### 2-A. Repositório alheio é SOMENTE LEITURA
+
+O layout real da máquina é maior que os três do diagrama acima:
+
+```text
+/home/charles/Giochi/
+├── GIOCHI-SYSTEM/      ← este repo. Alterar é o trabalho.
+├── GIOCHI-APP/         ┐
+├── GIOCHI-OS/          │
+├── GIOCHI-ENGINE/      ├─ de outra equipe. LER, nunca escrever.
+├── GIOCHI-ENGINE-3D/   │
+├── GIOCHI-GAMES/       │
+└── giochi-engine/      ┘
+```
+
+**Regra:** só o `GIOCHI-SYSTEM` é escrito por este agente. Em qualquer outro
+repositório, a única operação permitida é **leitura** (e, quando fizer sentido,
+`git log`/`git diff` para entender o que a outra equipe fez).
+
+Quando o diagnóstico concluir que a correção mora em repo alheio:
+
+1. **não edite** — nem uma linha, nem comentário, nem doc;
+2. abra uma **issue** no repositório responsável, com o que foi medido, o
+   arquivo e a linha, a consequência e o que a correção provavelmente é;
+3. registre aqui (ou em `docs/mensagem-giochi-system.md`) o número da issue, para
+   que a conversa aponte para ela em vez de repetir a análise.
+
+**Estado do mecanismo, medido em 15/11/2026:** esta máquina **não tem token do
+GitHub**. `gh` não está instalado, `GITHUB_TOKEN` não existe, e a única
+credencial é a chave SSH (`~/.ssh/id_ed25519`), que serve para `push` de git e
+não para a API. Medido:
+
+```text
+GET  /repos/.../issues          -> 200   (repo público: ler funciona)
+POST /repos/.../issues          -> 401   Requires authentication
+GET  .../actions/artifacts/<id>/zip -> 401
+```
+
+Consequência prática: quando a issue for necessária, o entregável desta sessão é
+o **corpo dela pronto**, com o comando que reproduz a medição, para ser colado em
+`https://github.com/xtrempkch-droid/<repo>/issues/new`. Não anuncie "issue
+criada" sem ter criado — é o §12.1 aplicado à conversa entre equipes.
+
+O MCP do GitHub também não está utilizável neste ambiente: qualquer chamada
+devolve `header mismatch: missing Mcp-Param-owner header`. A API REST de leitura
+funciona sem token; a de escrita, não.
+
+Por que a regra existe, e não é só cortesia:
+
+- os repos vizinhos **já têm trabalho não commitado** de outra pessoa. Um
+  `git status` desta máquina em 15/11/2026 mostrava alterações pendentes em
+  `GIOCHI-APP`, `GIOCHI-ENGINE` e `GIOCHI-GAMES`. Escrever ali mistura o meu
+  diff com o trabalho de alguém, e nem o `git diff` consegue separar depois;
+- o commit de outra equipe é assinado por quem entende do produto. Mudança que
+  eu faço "de passagem" chega sem revisão de quem responde pelo launcher;
+- a fronteira do §1 já é esta: **não há import de código entre os repos**, a
+  comunicação é por artefato declarado. Editar o repo alheio quebra essa
+  fronteira exatamente onde ela é mais útil.
+
+Corolário para diagnóstico: se a investigação terminar em "o defeito é no
+`compilar-launcher.sh` deles", o resultado desta sessão é **um relatório**, não
+um patch. Foi o formato usado nos §12.58 e §12.66 — medir no hardware, escrever
+o que foi medido, e deixar a decisão com quem responde pelo código.
+
 ## 3. Estado atual
 
 ### Concluído e verificado
