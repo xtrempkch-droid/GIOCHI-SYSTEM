@@ -67,3 +67,10 @@ CONFIG_CHARGER_RK817=y
 CONFIG_THERMAL=y
 CONFIG_ROCKCHIP_THERMAL=y
 CONFIG_COMMON_CLK_ROCKCHIP=y
+
+# ── controle sem fio ─────────────────────────────────────────
+# Sem UHID não existe /dev/uhid, e o BlueZ não cria dispositivo HID para um
+# controle BLE: ele pareia, conecta e nunca aparece em /dev/input/event*.
+# Medido em 15/11/2026: `# CONFIG_UHID is not set` no defconfig arm64.
+CONFIG_HID=y
+CONFIG_UHID=y

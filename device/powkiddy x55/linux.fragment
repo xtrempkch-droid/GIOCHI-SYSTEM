@@ -222,3 +222,24 @@ CONFIG_BT=m
 CONFIG_BT_HCIUART=m
 CONFIG_BT_HCIUART_RTL=y
 CONFIG_BT_HCIUART_3WIRE=y
+
+# ── controle sem fio: HID sobre Bluetooth ───────────────────
+#
+# Medido na imagem do R35S (mesmo defconfig arm64) em 15/11/2026:
+# `# CONFIG_UHID is not set`. Sem `/dev/uhid` o BlueZ não cria o dispositivo
+# HID de um controle **BLE** — ele pareia, conecta e nunca vira
+# `/dev/input/event*`. Por isso o `=y` explícito: não é herança, é o que a
+# placa precisa para aceitar o acessório do usuário (§12.31).
+#
+# `CONFIG_HID` NÃO entra aqui porque já é `=y` builtin (`hid.ko` está em
+# `modules.builtin`) — conferido em `/proc/config.gz` no aparelho.
+CONFIG_UHID=y
+
+# Controle **Bluetooth classic** usa o `hidp`, que fala com o core HID pelo
+# `hid_ll_driver` (`net/bluetooth/hidp/core.c:742`) e cria o `hid_device` por
+# `hid_add_device`. Carrega sob demanda: o kernel pede
+# `request_module("bt-proto-6")` quando o BlueZ negocia HID, e o
+# `MODULE_ALIAS("bt-proto-6")` do módulo resolve — desde que o `modprobe` leia
+# `modules.alias`, que é o caso do kmod (`BR2_PACKAGE_KMOD_TOOLS=y` nesta placa).
+# Declarado para não depender de herança silenciosa do defconfig (§12.9).
+CONFIG_BT_HIDP=m

@@ -4702,6 +4702,98 @@ o kmscube em todo defconfig que ligue `MESA3D_OPENGL_EGL` (invariante, não list
 e proíbe o símbolo no `common.fragment`; `tests/selftest-contract.test.mjs`
 verifica a **ordem** — o guarda do launcher antes do `kmscube` rodar.
 
+### 12.70 A issue de Bluetooth estava certa no sintoma e errada nas cinco provas
+
+Recebidas três issues idênticas no GitHub em 15/11/2026 (criadas com 11 s e 49 s
+de diferença — retentativa do mesmo agente). O título acusa "falta o transporte
+HID do kernel (`CONFIG_HID` / `BT_HIDP` / `UHID`)". Fui conferir comando por
+comando no aparelho, e **quatro das cinco evidências não se sustentam**.
+
+| Evidência da issue | Medido no R35S | Veredito |
+| --- | --- | --- |
+| `modinfo hidp` → `depends: bluetooth` (sem `hid`) | `modinfo: not found` — a imagem não tem o comando | **impossível de ter sido medida aqui** |
+| `strings /lib/modules/*/kernel/net/bluetooth/hidp.ko` vazio | o arquivo mora em `…/hidp/hidp.ko`; o glob não expande | o vazio era **glob que não casou** |
+| `/sys/bus/hid/drivers/` sem `hidp` | lista `hid-generic`, `logitech`, 16 drivers | `hidp` **não é** driver de dispositivo |
+| `CONFIG_HID` ausente | `CONFIG_HID=y` e `hid.ko` em `modules.builtin` | **está lá desde sempre** |
+| `hci0 existe`, `bluetoothd` no ar | `/sys/class/bluetooth/` vazio, `bluetoothd` não roda | o aparelho do relato **não é o R35S** |
+
+#### O que a fonte do kernel diz, e que derruba a premissa central
+
+`net/bluetooth/hidp/core.c` (6.12):
+
+```c
+742: static const struct hid_ll_driver hidp_hid_driver = {
+766: 	hid = hid_allocate_device();
+856: 	ret = hid_add_device(session->hid);
+1479: MODULE_ALIAS("bt-proto-6");
+```
+
+`hidp` registra um **`hid_ll_driver`** — o *transporte* de baixo nível — e cria o
+`hid_device` com `hid_add_device`. `hid_register_driver()` é para *driver* de
+dispositivo, que nunca foi o papel dele. Procurar essa string no módulo é
+procurar o que **não deveria** estar lá: o `strings` devolve sete outras funções
+do core (`hid_allocate_device`, `hid_add_device`, `hid_parse_report`…) e 56
+ocorrências de `hid`.
+
+E o autoload funciona pelo caminho normal: o kernel pede
+`request_module("bt-proto-%d")` (`net/bluetooth/af_bluetooth.c:125`) e o
+`MODULE_ALIAS("bt-proto-6")` do `hidp` resolve — **se** houver um `modprobe` que
+leia `modules.alias`, que é o do `kmod`.
+
+#### A única coisa verdadeira da issue, e ela é real
+
+```console
+$ zcat /proc/config.gz | grep UHID
+# CONFIG_UHID is not set
+```
+
+Sem `/dev/uhid` o BlueZ não cria dispositivo HID para controle **BLE (HOGP)**:
+pareia, conecta e nunca vira `/dev/input/event*`. Isso vale para os aparelhos
+**com** rádio. Corrigido com `CONFIG_UHID=y` no fragmento do X55 (o único com
+RTL8821CS + BlueZ) e `CONFIG_UHID=y` na `kernel-required.txt` dele; `CONFIG_HID=y`
+entrou junto como contrato, porque é o que o `uhid` usa e ninguém o estava
+verificando.
+
+`CONFIG_BT_HIDP=m` também passou a ser explícito: era herança silenciosa do
+defconfig arm64, e o §12.9 existe justamente para não depender disso.
+
+#### O defeito de verdade estava ao lado, e é de imagem
+
+```console
+$ command -v modinfo depmod
+(nada além do /bin/busybox)
+```
+
+O R35S não declarava `BR2_PACKAGE_KMOD_TOOLS`. X55 e X35H declaram; o R35S
+entrou na matriz em 15/11 e ficou de fora. E o teste que deveria pegar isso
+listava **dois aparelhos à mão**:
+
+```js
+// tests/defconfig-gate.test.mjs, antes
+for (const device of ["powkiddy x55", "powkiddy x35h"]) {
+```
+
+É o §12.50 na forma de teste — cobertura por caso num defeito de classe. Trocado
+por invariante: **todo aparelho cujo `linux.fragment` declara `CONFIG_*=m`
+precisa de `BR2_PACKAGE_KMOD_TOOLS=y` no `buildroot.fragment`**. Hoje isso casa
+com X55 (10 símbolos `=m`), X35H (4) e R35S (8). Verificado por mutação:
+comentar a linha do R35S derruba o teste com o nome do aparelho na mensagem.
+
+Consequência prática que a issue sofreu na pele: a ferramenta que ela usou para
+diagnosticar (`modinfo`) não existe na imagem que ela investiga, e o erro saiu
+como "sem dependência" em vez de "sem comando".
+
+#### A regra de método, e é a quarta vez que ela aparece
+
+Evidência que não reproduz é **afirmação**, não medição. Os cinco comandos da
+issue rodados aqui deram resultado diferente — e o único jeito de separar
+"diagnóstico" de "dedução" foi rodar cada um. Vale para issue de terceiro, vale
+para comentário meu de seis dias atrás: a mensagem de 06/11 que eu publiquei no
+canal dizia que `HP` era **errado** no R35S, o oposto do medido (§12.68).
+
+Quando o relato vier de outro repo e o repo for somente leitura (§2-A), o
+entregável é **a análise com a medição**, não o patch e não o silêncio.
+
 ## 13. Aparelhos
 
 | ID | Pasta | SoC | Arch | Status | Falta |
@@ -4710,7 +4802,7 @@ verifica a **ordem** — o guarda do launcher antes do `kmscube` rodar.
 | `powkiddy-x55` | `powkiddy x55/` | RK3566 | arm64 | **ready (habilitado)** | **boota com tela, áudio, Wi-Fi, BT e 16 botões + 4 eixos**; alvo da build de release desde 14/11/2026 — a interface de jogos é do `Giochi app` e entra por overlay |
 | `powkiddy-x35s` | `powkiddy x35s/` | **RK3566** | arm64 | draft | DTS (compartilha com o X35H) e build |
 | `powkiddy-x35h` | `powkiddy x35h/` | **RK3566** | arm64 | draft | **boota com tela 640x480, `usb0` e SSH**; imagem de 04/11 já tem o `respawn`. Falta o launcher, o teste A/B de cartão e os eixos analógicos |
-| `r35s` | `r35s/` | RK3326 | arm64 | **ready (habilitado)** | **BOOTOU em 06/11/2026 e testado por SSH**: tela 640x480, `r36s_Gamepad` com 16 botões + 4 eixos, áudio (`rk817_int`, `Playback Mux = SPK`), bateria, térmica e GPU (§12.51, §12.52). Habilitado em 15/11/2026 para a rodada de validação do som |
+| `r35s` | `r35s/` | RK3326 | arm64 | **ready (habilitado)** | **BOOTOU em 06/11/2026 e testado por SSH**: tela 640x480, `r36s_Gamepad` com 16 botões + 4 eixos, áudio (`rk817_int`, `Playback Mux = HP` — §12.68), bateria, térmica e GPU (§12.51). Habilitado em 15/11/2026 para a rodada de validação do som |
 | `steamdeck` | `steamdeck/` | x86_64 | x86_64 | draft | kernel, firmware, áudio, Wi-Fi, controle |
 | `generic-x64` | `generic-x64/` | x86_64 | x86_64 | draft | **nunca compilado**; `pc_x86_64_efi_defconfig` declarado para permitir dispatch com `allow_draft` |
 
@@ -5464,7 +5556,7 @@ O que o build provou, e que só o artefato mostra (lido do `.img`, não do
 | `extlinux.conf` | `timeout 30`, **sem `menu title`** (§12.38), cmdline `console=ttyS2,1500000n8` |
 | drivers de hardware onboard | `panfrost`, `rk817_charger`, `rockchip_thermal`, `rocknix-singleadc-joypad`, `panel-generic-dsi` todos em `modules.builtin` (**=y**, §12.51) |
 | cadeia de áudio | `snd-soc-rk817`, `snd-soc-rockchip-i2s`, `snd-soc-simple-card` **built-in** — o card nasce no boot sem depender de autoload |
-| mixer do aparelho | `/etc/giochi/asound.state` com `Playback Mux = SPK`, e `S51mixer` **0755** |
+| mixer do aparelho | `/etc/giochi/asound.state` com `Playback Mux = SPK`, e `S51mixer` **0755** — **valor errado**, medido em 15/11: esta placa só toca em `HP` (§12.68) |
 | ferramentas de áudio | `speaker-test`, `aplay`, `amixer`, `alsamixer` em `/usr/bin`; `alsactl` em `/usr/sbin` |
 | radio ausente | **correto**: `rtl_bt/rtl8821cs_*` NÃO está no rootfs — o defconfig desliga `RTL_88XX_BT` neste aparelho, e o `+=` condicional do `package-overrides.mk` respeita isso (§12.17) |
 | inittab | linha 30 `::respawn:/usr/bin/giochi-init` |
@@ -5517,6 +5609,11 @@ aviso**:
          reprodução: PCM RUNNING (owner_pid 561) durante o tom de 440 Hz
          dmesg:    nenhuma mensagem de erro de rk817/i2s/asoc
 ```
+
+> **Correção posterior (15/11/2026, §12.68):** a saída acima fica como registro
+> desta rodada, mas `Playback Mux = SPK` **é o valor errado** — e o `(casa com o
+> DTS)` era justamente a dedução que o produzia. O falante desta placa toca em
+> `HP`; em `SPK` fica mudo. Card e volume da tabela continuam corretos.
 
 E `giochi-selftest`: **PASS 39 · WARN 1 · FAIL 0 · SKIP 4**, com o único WARN
 sendo `/opt/giochi/apps/index.json` ausente — que é do `Giochi app`, não do

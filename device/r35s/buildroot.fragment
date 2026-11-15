@@ -60,3 +60,20 @@ BR2_PACKAGE_WPA_SUPPLICANT_CLI=y
 BR2_PACKAGE_WPA_SUPPLICANT_NL80211=y
 BR2_PACKAGE_IW=y
 BR2_PACKAGE_WIRELESS_REGDB=y
+
+# ── utilitários de módulo (kmod) ────────────────────────────
+# O fragmento de kernel deste aparelho declara 8 símbolos `=m` (dongle Wi-Fi,
+# amplificador, pilha BT). Com o `modprobe` do busybox eles carregam por nome,
+# mas sem `modules.dep.bin` não há dependência, softdep nem blacklist — e
+# `modinfo`/`depmod` simplesmente não existem.
+#
+# Ficou de fora até 15/11/2026 e o custo foi medido no aparelho: `command -v
+# modinfo` não responde, e uma investigação de Bluetooth tentou usar `modinfo
+# hidp` numa imagem que não tem o comando. O teste que deveria pegar isso
+# (`tests/defconfig-gate.test.mjs`) listava dois aparelhos à mão — X55 e X35H —
+# e o R35S, que entrou na matriz em 15/11, nunca foi incluído. Virou invariante.
+#
+# O símbolo mora no FRAGMENTO e não no defconfig: `depends on
+# BR2_PACKAGE_BUSYBOX_SHOW_OTHERS`, que só é satisfeita pelo
+# `config/common.fragment`, aplicado depois do defconfig.
+BR2_PACKAGE_KMOD_TOOLS=y

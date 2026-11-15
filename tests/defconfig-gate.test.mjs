@@ -104,12 +104,39 @@ test("nenhum defconfig de aparelho pede símbolo que depende do common.fragment"
 test("quem usa os utilitários de módulo declara KMOD_TOOLS no fragmento", () => {
   // Não basta remover do defconfig: o `modprobe` do kmod é o que resolve
   // `modules.dep.bin`/softdeps/blacklist, e o `S15modules` da X55 depende disso.
-  for (const device of ["powkiddy x55", "powkiddy x35h"]) {
-    const fragmento = readFileSync(path.join(ROOT, "device", device, "buildroot.fragment"), "utf8");
+  //
+  // A versão anterior listava dois aparelhos à mão — `["powkiddy x55",
+  // "powkiddy x35h"]` — e o R35S, que entrou na matriz em 15/11/2026, ficou de
+  // fora sem ninguém notar. É o §12.50 aplicado a teste: cobertura por caso num
+  // defeito de classe. Medido no aparelho depois disso: `command -v modinfo`
+  // não responde, e uma investigação de Bluetooth tentou usar `modinfo hidp`
+  // numa imagem que não tem o comando.
+  //
+  // A invariante que substitui a lista: **quem tem módulo precisa de kmod**. Se
+  // o `linux.fragment` do aparelho declara algum `CONFIG_*=m`, o rootfs tem de
+  // trazer quem resolve as dependências desses módulos.
+  const pasta = path.join(ROOT, "device");
+  const comModulo = [];
+  for (const device of readdirSync(pasta)) {
+    let fragmentoKernel;
+    try {
+      fragmentoKernel = readFileSync(path.join(pasta, device, "linux.fragment"), "utf8");
+    } catch {
+      continue; // aparelho sem fragmento de kernel: não pede módulo nenhum
+    }
+    if (!/^CONFIG_[A-Z0-9_]+=m$/m.test(fragmentoKernel)) continue;
+    comModulo.push(device);
+  }
+
+  assert.ok(comModulo.length > 0, "nenhum aparelho com `=m`? a detecção quebrou");
+
+  for (const device of comModulo) {
+    const fragmento = readFileSync(path.join(pasta, device, "buildroot.fragment"), "utf8");
     assert.match(
       fragmento,
       /^BR2_PACKAGE_KMOD_TOOLS=y$/m,
-      `${device}: KMOD_TOOLS saiu do defconfig e não entrou no fragmento`,
+      `${device}: o kernel tem módulos (=m) e o rootfs não tem kmod-tools; ` +
+        `o modprobe do busybox não resolve modules.dep.bin nem softdeps`,
     );
   }
 });
