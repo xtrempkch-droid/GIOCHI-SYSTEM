@@ -976,3 +976,29 @@ Conferido **lendo o cartão**, não o `out/`:
 | `asound.state` | `Playback Mux = SPK` |
 | `e2fsck -fn` na p2 | limpo, 3423/65536 arquivos |
 | p1 FAT | `Image` + `dtbs/` + `extlinux/` + `boot.scr` |
+
+### Validação da imagem de 15/11/2026 com o cartão novo
+
+Bootou de primeira. Os três scripts são **idênticos** aos fontes do repo
+(`md5sum` conferido dos dois lados), a chave de host do sshd é nova (primeiro
+boot de imagem nova), e o `build-info.txt` diz `patched_from=18789ea`.
+
+| Verificação | Resultado |
+| --- | --- |
+| console de texto | **assume em 8,8 s** — `(M) frame buffer device`, `80x30`, `fbcon: Taking over console` |
+| `audio-validar.sh` | **0 falha, 0 aviso** — card, mux `SPK`, `Master 100%`, PCM `RUNNING`, dmesg limpo |
+| `giochi-selftest` | **PASS 39 · WARN 1 · FAIL 0 · SKIP 4** (o WARN é o `index.json` do launcher) |
+| `giochi-buttons` | gamepad `event2` (17 botões), eixos `event2`, volume `event1` |
+| `giochi-usb --status` | "nenhum papel forçado", UDC `configured` |
+| GPU | panfrost `mali-g31 id 0x7093`, `renderD128` |
+| rede USB | `usb0 10.55.0.2/24`, `udhcpd` pid 156 |
+| energia/térmica | bateria 60 % (Discharging), `soc 49 °C` / `gpu 47 °C` |
+| RTC | 2026-11-15 06:22 |
+
+E, com o marcador `/etc/giochi/boot-log` ativo, o `giochi-bootlog` gravou
+**26 KB** na FAT depois de um `reboot` de verdade: seções `versao`, `cmdline`,
+`uptime`, `dmesg` (312 linhas, já comprimidas pelo agrupamento do §12.62-C),
+`DRM`, `entrada`, `armazenamento`, `rede`, e o veredito
+`PASS 39 · WARN 1 · FAIL 0`. **É o rastro que faltou** quando o aparelho
+reiniciou sozinho durante o teste de modo HOST — sem ele, "reiniciou" não deixa
+nada para investigar.
