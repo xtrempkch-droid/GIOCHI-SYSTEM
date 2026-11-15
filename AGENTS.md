@@ -4398,6 +4398,22 @@ patches de DTS aplicados, `overrides: config/package-overrides.mk` presente. Ou
 seja, o `enabled: true` e o `status: ready` do X55 estavam corretos — o que
 faltava era o firmware do rádio sobreviver ao upgrade do Buildroot.
 
+**A correção foi medida no CI, não deduzida.** Run #130 (`bc928c1`) e #131
+(`d8f544a`), os dois **verdes** para `qemu-aarch64` **e** `powkiddy-x55`:
+
+| Verificação no run #131 | Resultado |
+| --- | --- |
+| `assert-config` | OK — 100 símbolos de 3 fragmentos |
+| `assert-kernel-config` | OK — 72 símbolos (2 `allow-drop` nomeados) |
+| `assert-busybox-config` | OK — 51 applet(s) |
+| firmware obrigatório do rádio | passou — e aqui o gate **prova o link**: `firmware-required.txt` lista `rtl_bt/rtl8821cs_config.bin`, o teste é `[[ -e ]]` (segue symlink) e roda **depois** do `make`; link pendurado reprovaria o build |
+| artefato | `giochi-system-powkiddy-x55`, 152 MB, 17 arquivos, válido até 29/11 |
+| imagem de cartão | `giochi-system-powkiddy-x55-sd.img` (2,0 GiB), SHA256 `89b3f8ff…`, `u-boot-rockchip.bin` no setor 64, p1 com `Image`/DTB/`extlinux.conf`/`boot.scr`, p2 `PARTUUID=47494f43-02` |
+
+Ou seja: o `rtl8821cs_config.bin` que o driver pede **existe e resolve** na
+imagem que foi publicada — que é exatamente o que o §12.67 tinha que garantir, e
+o único jeito de provar isso sem aparelho na mão.
+
 ## 13. Aparelhos
 
 | ID | Pasta | SoC | Arch | Status | Falta |
