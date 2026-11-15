@@ -44,6 +44,9 @@
   motivo de `size` ser (lado curto, lado longo). Ferramenta:
   `node scripts/panel-inspect.mjs`.
 - `giochi-buttons` — ferramenta de teste de botões e eixos (`giochi-buttons --list`).
+- `scripts/audio-validar.sh` — áudio **medido** no aparelho por SSH: card, mux
+  derivado do DT, volume e PCM em `RUNNING` durante um tom. Responde "o som
+  chegou ao DAC?", que o `giochi-selftest` não responde.
 - [`giochi-init`](giochi-init.md) — a camada de boot e o que falta para ligá-la.
 
 ## Estado atual
