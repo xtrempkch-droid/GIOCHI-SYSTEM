@@ -2,6 +2,10 @@
 
 Índice da documentação técnica do projeto.
 
+- **[Baixar imagens (ou compilar)](baixar-imagens.md)** — a imagem pronta numa
+  página, sem login e sem expirar; ou build na nuvem; ou build no seu PC. Comece
+  por aqui se o que você quer é **gravar e usar**. Não precisa pedir para
+  ninguém compilar.
 - [Notas da versão v0.2.0](release-v0.2.0.md) — o que mudou, o que foi **provado** e o
   que **não** foi. Comece por aqui se está chegando agora.
 - [Arquitetura](architecture.md) — como o Buildroot, os devices e o workflow se encaixam.

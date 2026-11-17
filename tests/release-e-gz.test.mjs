@@ -258,3 +258,34 @@ ler_imagem | sha256sum | awk '{print $1}'
         rmSync(tmp, { recursive: true, force: true });
     }
 });
+
+test("o caminho de download está indexado — doc que ninguém acha não serve", () => {
+    // O `docs/baixar-imagens.md` responde "como eu baixo/compilo sozinho", que é
+    // a pergunta mais frequente de quem só quer a imagem no cartão. Ele nasceu
+    // pronto e **não estava indexado em lugar nenhum**: nem no `docs/README.md`,
+    // nem no `README.md` da raiz. Documento fora do índice é documento que só
+    // existe para quem já sabe o nome do arquivo.
+    const docsIdx = readFileSync(join(RAIZ, "docs/README.md"), "utf8");
+    assert.match(docsIdx, /baixar-imagens\.md/,
+        "docs/README.md tem de apontar para o guia de download");
+
+    const raiz = readFileSync(join(RAIZ, "README.md"), "utf8");
+    assert.match(raiz, /baixar-imagens\.md/,
+        "o README da raiz é a primeira página que alguém abre: precisa dizer " +
+        "que existe imagem pronta, senão a pessoa começa compilando sem precisar");
+    assert.match(raiz, /releases\/tag\/imagens/,
+        "e precisa dar o link da página de download, não só o do guia");
+});
+
+test("o README não descreve mais o workflow terminando no artefato", () => {
+    // O artefato do Actions exige login e expira em 14 dias. Descrever o
+    // workflow como se ele terminasse ali é a informação que faz alguém abrir o
+    // GitHub, achar a execução certa e descobrir que não consegue baixar sem
+    // conta. O passo de Release tem de aparecer na lista.
+    const raiz = readFileSync(join(RAIZ, "README.md"), "utf8");
+    assert.match(raiz, /publicar_release/,
+        "o README tem de mencionar o input que publica o release");
+    assert.match(raiz, /expira em 14 dias/,
+        "e a limitação do artefato, para a escolha entre os dois caminhos ser " +
+        "informada");
+});

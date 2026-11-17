@@ -65,7 +65,13 @@ A lista oficial é [`device/devices.json`](./device/devices.json). A pasta `qemu
 
 ## Começar
 
-Requisitos para validação/scripts: **Node.js 20+**. Para compilar: **Linux ou WSL2** com as dependências de Buildroot.
+**Só quer a imagem para gravar no cartão?** Não precisa compilar nada:
+[Releases → tag `imagens`](../../releases/tag/imagens). É uma página com o
+`.img.gz` de cada aparelho, download sem login e sem prazo de validade. O passo a
+passo — conferir o hash, escolher o cartão certo, gravar — está em
+[docs/baixar-imagens.md](./docs/baixar-imagens.md).
+
+Para **validar/scripts**: **Node.js 20+**. Para **compilar você mesmo**: **Linux ou WSL2** com as dependências de Buildroot.
 
 ```bash
 node scripts/validate-devices.mjs
@@ -87,7 +93,12 @@ O primeiro build compila a toolchain interna do Buildroot e pode levar de dezena
 1. **Validate** roda o validador e os testes.
 2. **Discover** transforma `device/devices.json` em uma matriz JSON, filtrando arquitetura e devices habilitados.
 3. **Build** roda um job por device, instala dependências, baixa o Buildroot fixado, aplica o defconfig, mescla os fragmentos, compila e publica o artefato.
-4. **Upload** disponibiliza `giochi-system-<device>` no GitHub Actions.
+4. **Upload** disponibiliza `giochi-system-<device>` como artefato do Actions —
+   que **exige login** e **expira em 14 dias**.
+5. **Release** (opcional, com `publicar_release: true` no dispatch) publica as
+   imagens numa **tag móvel** `imagens`: uma página só, sempre a mais recente,
+   download anônimo e sem expiração. É o caminho recomendado para quem só quer
+   gravar — ver [docs/baixar-imagens.md](./docs/baixar-imagens.md).
 
 O workflow padrão é **ARM64**. Também aceita `arch=x86_64` e `arch=arm` para devices que vierem a ser habilitados com essas arquiteturas.
 
