@@ -67,3 +67,4 @@ import "./buildroot-upgrade.test.mjs";
 import "./fontes-idiomas.test.mjs";
 import "./input-diag.test.mjs";
 import "./input-joystick.test.mjs";
+import "./sdl-input-probe.test.mjs";

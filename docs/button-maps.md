@@ -148,6 +148,33 @@ Para o R35S os códigos vieram da documentação que já os tinha lido do DTB
 Sem ele compilado, os códigos não existem — nenhum botão funciona. O mesmo vale
 para o painel: esta placa não tem DTS no mainline.
 
+## A convenção do projeto e a do SDL2 são opostas
+
+O mapa adota a convenção do **plástico**: `a = BTN_EAST` (o botão da direita) e
+`b = BTN_SOUTH` (o de baixo), estilo Nintendo. O SDL2, quando gera sozinho o
+mapeamento de um gamepad, faz o contrário: chama de `a` o `BTN_SOUTH`.
+
+Consequência medida no R35S em 17/11/2026: um app que usa `SDL_GameController`
+recebe `A` onde o plástico diz `B`, e o mesmo botão faz coisas diferentes
+conforme o caminho (SDL ou evdev). Detalhe e tabela completa em
+[`AGENTS.md` §12.74](../AGENTS.md).
+
+Duas leituras que ficam:
+
+- **não existe** ajuste de DTS que faça o SDL2 concordar sozinho; quem quiser
+  concordância tem de fornecer o mapeamento (`SDL_GAMECONTROLLERCONFIG` ou um
+  `gamecontrollerdb.txt`) ou derivar do `buttons.map` no app;
+- no `X55` e no `X35H`, o DTS mainline **separa** botões (`gpio-keys`) e eixos
+  (`adc-joystick`) em dois nós. O SDL2 exige `BTN_SOUTH` **e** `ABS_X`/`ABS_Y` no
+  mesmo nó, então nesses dois aparelhos **nenhum app SDL encontra controle** —
+  o que funciona neles é o `evdev`.
+
+Para ver o que o SDL de um aparelho enxerga, sem instalar nada nele:
+
+```bash
+bash scripts/sdl-input-probe.sh r35s --run 10.55.0.2
+```
+
 ## Por que o R35S não pode herdar mapa de RK3566
 
 É outro SoC, outro driver e outra placa. Preencher por analogia daria botão

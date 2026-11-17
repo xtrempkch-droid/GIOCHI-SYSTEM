@@ -150,7 +150,7 @@ o que foi medido, e deixar a decisão com quem responde pelo código.
 
 | Verificação | Resultado |
 | --- | --- |
-| `node tests/run-all.mjs` | **546/546 + 1 skip** (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, devices 13, assert-config 12, fdt 11, gpu-bench 16, …) |
+| `node tests/run-all.mjs` | **567/567 + 1 skip** (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, devices 13, assert-config 12, fdt 11, gpu-bench 16, …) |
 | `node scripts/validate-devices.mjs` | OK — 7 devices, 1 habilitado |
 | `node scripts/list-devices.mjs --github-matrix` | matriz com `qemu-aarch64` |
 | matriz com `--device powkiddy-x55 --allow-draft` | devolve **só** o X55 |
@@ -533,6 +533,8 @@ bash scripts/gpu-bench.sh powkiddy-x55 --run --repetir 3   # throughput: fill, A
 bash scripts/gpu-bench.sh powkiddy-x55          # só compila o benchmark
 bash scripts/audio-alerta.sh --alar             # tom pela via SDL2 -> ALSA
 bash scripts/audio-validar.sh                   # áudio medido: card, mux, volume, PCM RUNNING (§23)
+bash scripts/sdl-input-probe.sh r35s --run      # o que o SDL vê como controle, e com qual mapa (§12.74)
+bash scripts/input-diag.sh                      # o que o KERNEL classificou: joystick/teclado/ponteiro (§12.73)
 bash scripts/engine-build.sh r35s --instalar    # compila a GIOCHI-ENGINE
 python3 scripts/gles-probe.py                    # idem sem compilar (usa o python3 da imagem)
 docker run --rm --privileged -v /dev:/dev -v ./docker:/work/push:ro ... \
@@ -558,7 +560,7 @@ absoluto** do host — §12.40).
 
 ## 10. Testes
 
-`node tests/run-all.mjs` → **546/546 + 1 skip**, em **59 arquivos**. A tabela abaixo é uma
+`node tests/run-all.mjs` → **567/567 + 1 skip**, em **63 arquivos**. A tabela abaixo é uma
 seleção dos que prendem contratos de projeto; a lista completa é `ls tests/` e
 `tests/runner-coverage.test.mjs` **falha** se algum arquivo existir sem estar
 importado no `run-all.mjs` — foi assim que dois testes desta revisão quase
@@ -589,6 +591,7 @@ ficaram fora da contagem.
 | `tests/help-sentinels.test.mjs` | 4 | nenhum script fatia `--help` por número de linha (a classe que quebrou em 2 de 13) |
 | `tests/bootlog-dmesg-spam.test.mjs` | 4 | o `awk` REAL do `giochi-bootlog` sobre 300 repetições do charger: agrupa, conta, e **preserva** as duas linhas de `fbcon` que estavam no meio |
 | `tests/hardware-x55.test.mjs` | 5 | o que o X55 desmentiu: `model`×`compatible` normalizados, `present=0` ≠ 0%, fbcon ausente ≠ `CONFIG_ROTATION` desligado, sem `dropbear` no status, `giochi-usb` sem role-switch |
+| `tests/sdl-input-probe.test.mjs` | 4 | o probe pergunta `SDL_IsGameController` e imprime o mapeamento (não só conta joysticks), não abre vídeo sem `--video` (não rouba o DRM master), e a convenção `a = BTN_EAST` dos mapas contra a do SDL2 (§12.74) |
 
 ## 10-A. O sistema base — acesso antes de interface
 
@@ -4984,6 +4987,237 @@ pelo timeout" é processo quebrado. Todas as três seriam pegas por **uma
 execução no alvo** — que é exatamente o que o aparelho na bancada permite e o
 desktop não.
 
+### 12.73 "Os botões viram teclado e aparece um mouse" — o kernel estava certo
+
+Relato do dono do projeto em 17/11/2026, no R35S com o launcher rodando. A
+investigação inteira foi feita no aparelho ligado, com ele apertando os botões.
+
+#### O que o kernel declara
+
+```console
+$ awk '/^N: Name=/{n=$0} /^H: Handlers=/{print n " -> " $0}' /proc/bus/input/devices
+rk817_int Headphones -> event0      # jack de fone, sem classe
+gpio-keys-vol        -> kbd event1  # TECLADO (KEY_VOLUMEUP/DOWN) — legítimo
+r36s_Gamepad         -> event2      # o controle
+```
+
+`gpio-keys-vol` ser `kbd` **está certo**: são teclas de volume, que são um
+teclado por definição. O gamepad não tem classe porque `CONFIG_INPUT_JOYDEV`
+estava desligado (ver abaixo).
+
+#### Não existe ponteiro no kernel
+
+```console
+$ ls /dev/input/mouse*        -> nenhum
+$ capabilities/rel do event2  -> 0
+$ CONFIG_INPUT_MOUSEDEV       -> not set
+$ CONFIG_INPUT_UINPUT         -> not set
+```
+
+Nenhum `/dev/input/mouse*`, nenhum eixo relativo, e o kernel nem compila o
+`mousedev` nem o `uinput`. **O cursor na tela não vem de `/dev/input`.**
+
+#### O gamepad entrega gamepad
+
+Com o usuário apertando, `evtest` no `event2`:
+
+```text
+BTN_DPAD_UP/DOWN/LEFT/RIGHT  = 1 / 0
+BTN_SOUTH, BTN_EAST, BTN_SELECT = 1 / 0
+grep -c "KEY_" /tmp/ev.log  ->  0
+```
+
+**Zero eventos de teclado.** E as capabilities completas são 13 `BTN_*` + 4
+`BTN_DPAD_*` + `ABS_X/Y/RX/RY` (−1800..1800). O DTS também confere: 17 `BTN_*`
+e só `KEY_VOLUMEUP`/`KEY_VOLUMEDOWN`.
+
+#### Armadilha que quase me fez acusar o aparelho errado
+
+Li o bitmap de `capabilities/key` e decodifiquei na ordem errada:
+
+```text
+f00000000 0 0 0 7fdb000000000000 0 0 0 0
+```
+
+O kernel imprime as palavras **da MAIS ALTA para a mais baixa**. Lendo da
+esquerda como palavra 0, os bits 32-35 viram `KEY_D`/`KEY_F`/`KEY_G`/`KEY_H` — e
+eu quase reportei "o gamepad declara teclas de letras". Na ordem certa,
+`0xf00000000` é a **última** palavra, bits 544-547 = `BTN_DPAD_UP/DOWN/LEFT/RIGHT`.
+
+O que desmentiu foi o `evtest`, que imprime os nomes: 544-547 aparecem como
+`BTN_DPAD_*`. Regra que fica: **para bitmap de input, prefira o `evtest`, que
+traduz; decodificar à mão erra a ordem em silêncio.**
+
+#### A lacuna que era nossa: nenhum aparelho tinha `/dev/input/js0`
+
+`CONFIG_INPUT_JOYDEV` estava desligado nos **três** aparelhos (herdado do
+defconfig arm64). Sem ele não existe `/dev/input/js0` em aparelho nenhum.
+
+A distinção que importa:
+
+| Símbolo | O que entrega |
+| --- | --- |
+| `INPUT_EVDEV` | os **eventos** (`/dev/input/event*`) — é o que `giochi-buttons` e o `giochi-selftest` leem |
+| `INPUT_JOYDEV` | a **identidade** (`/dev/input/js*`) — é o kernel afirmando "isto é um joystick" |
+
+São complementares; nenhum substitui o outro. Corrigido nos três fragmentos de
+kernel e nas três `kernel-required.txt` (commit `4018875`), com invariante em
+`tests/input-joystick.test.mjs` — invariante, não lista de nomes, e verificada
+por mutação. O mesmo teste proíbe `BTN_LEFT`/`BTN_TOUCH` no DTS, que é o que
+faria o kernel classificar o controle como ponteiro.
+
+#### A causa do sintoma é do launcher, e foi medida
+
+```console
+$ ls -l /proc/505/fd | grep input
+/dev/input/event1  /dev/input/event2  /dev/input/event0
+```
+
+O launcher abre os **três**: o jack de fone (`event0`), o **teclado de volume**
+(`event1`) e o controle (`event2`). Ler `event1` e tratar como navegação é
+literalmente "os botões viram teclado" — só que são as teclas de volume.
+
+O cursor é o SDL2 com `kmsdrm` desenhando um ponteiro que não tem o que mover.
+
+**Os dois são do `GIOCHI-APP`** (§2-A: repo alheio é somente leitura). O
+entregável é a issue, com a medição e o controle negativo, em
+`files/issue-giochi-app-input-event-errado.md`.
+
+#### Ferramenta que fica
+
+`scripts/input-diag.sh` responde a pergunta pelo dado do kernel, não por
+dedução: lê `H: Handlers=` e classifica cada device em joystick / teclado /
+ponteiro, mostrando a linha crua ao lado para o operador poder discordar. Lista
+também nodes de mouse, eixos `REL`, o que o `giochi-buttons` encontra e quantos
+fds cada processo `giochi` tem em `/dev/input`.
+
+`tests/input-diag.test.mjs` (6 casos) roda o script contra um
+`/proc/bus/input/devices` sintético com os quatro dispositivos de um handheld,
+e inclui o controle negativo: sem `mouse0` na entrada, o veredito não pode
+acusar ponteiro.
+
+### 12.74 "O jogo trata os botões como teclado" — era o mapa que o SDL2 **inventa**
+
+Pergunta do dono do projeto em 17/11/2026, sobre o jogo `neon-drift` do
+`GIOCHI-GAMES`: *"no R35S os botões são interpretados parecido com teclado;
+na X55 está tudo certinho"*. A pergunta era se o defeito é **do sistema ou do
+jogo**, e a resposta só podia sair de medição: o `evtest` já tinha mostrado, em
+15/11, `BTN_DPAD_*`/`BTN_SOUTH`/`BTN_EAST` corretos e **zero `KEY_*`** (§12.73).
+
+#### O que faltava medir: o que o SDL2 vê
+
+Entre o kernel e o `SDL_GameController` do jogo há **três portões**, e um nó pode
+passar no `evtest` e fechar os três:
+
+| # | Portão | Onde | Reprova quando |
+| --- | --- | --- | --- |
+| 1 | `SDL_EVDEV_GuessDeviceClass` | `src/core/linux/SDL_evdev_capabilities.c` | o nó não tem `EV_ABS`+`ABS_X`+`ABS_Y`, ou não tem nenhum de `BTN_TRIGGER`/`BTN_A`/`ABS_RX`… |
+| 2 | `LINUX_JoystickGetGamepadMapping` | `src/joystick/linux/SDL_sysjoystick.c` | **não tem `BTN_GAMEPAD`** (`BTN_SOUTH`, 0x130) |
+| 3 | `SDL_IsGameController` | `src/joystick/SDL_gamecontroller.c` | não há mapeamento — nem da DB embutida, nem `gamecontrollerdb.txt`, nem o automático do portão 2 |
+
+`scripts/sdl-input-probe.c` (+ `scripts/sdl-input-probe.sh`) pergunta isso ao
+SDL do **aparelho**. Medido no R35S em 17/11/2026, com o launcher no ar:
+
+```text
+joysticks vistos pelo SDL: 1
+  [0] r36s_Gamepad
+      guid=19003982010000008811000088010000  tipo=gamecontroller
+      botoes=17  eixos=4  hats=0
+      SDL_IsGameController = SIM
+      mapeamento: 19003982010000008811000088010000,r36s_Gamepad,a:b0,b:b1,x:b2,
+        y:b3,back:b8,guide:b10,start:b9,leftstick:b11,rightstick:b12,
+        leftshoulder:b4,rightshoulder:b5,dpup:b13,dpdown:b14,dpleft:b15,
+        dpright:b16,leftx:a0,lefty:a1,rightx:a2,righty:a3,
+        lefttrigger:b6,righttrigger:b7,crc:8239,
+```
+
+Ou seja: no R35S o caminho SDL do jogo **funciona** — e é justamente aí que ele
+divergiu.
+
+#### A divergência, botão por botão
+
+O índice `bN` é atribuído pelo SDL em ordem crescente de código; cruzando com o
+`capabilities/key` do aparelho (`f00000000 0 0 0 7fdb000000000000 0 0 0 0`) e
+com o `device/r35s/buttons.map`, dá:
+
+| Físico | código evdev | mapa do projeto | SDL chama de | jogo faz no caminho SDL | bate? |
+| --- | --- | --- | --- | --- | --- |
+| **A** | `BTN_EAST` 305 | `acelerar` | `b1` = `Button::B` | **frear** | **não** |
+| **B** | `BTN_SOUTH` 304 | `frear` | `b0` = `Button::A` | **acelerar** | **não** |
+| X | `BTN_NORTH` 307 | `perfil` | `b2` = `X` | perfil | sim |
+| Y | `BTN_WEST` 308 | `voltar` | `b3` = `Y` | voltar | sim |
+| L1 | `BTN_TL` 310 | `freio de mão` | `b4` = `LeftShoulder` | freio de mão | sim |
+| R1 | `BTN_TR` 311 | `freio de mão` | `b5` = `RightShoulder` | **nitro** | **não** |
+| L2 | `BTN_TL2` 312 | `nitro` | `b6` = `LeftTrigger` | não é lido | **não** |
+| R2 | `BTN_TR2` 313 | `nitro` | `b7` = `RightTrigger` → `Axis::TriggerRight` | **acelerar** | **não** |
+| SELECT | 314 | `voltar` | `b8` = `Back` | voltar | sim |
+| START | 315 | `iniciar` | `b9` = `Start` | iniciar | sim |
+| D-pad | 544-547 | direções | `b13`-`b16` | direções | sim |
+
+O jogo faz `botoes.bits() | gamepad.bits()`: as duas máscaras são **somadas**.
+Com o A apertado, o evdev acende `acelerar` e o SDL acende `frear` — o carro
+recebe os dois ao mesmo tempo. É o "os botões estão trocados" que o dono do
+projeto viu.
+
+**A causa é de software, e é do jogo**: o próprio `gamepad.rs` do `neon-drift`
+documenta que *"o mapa é o mesmo do evdev, botão por botão"*, e **não é** — ele
+liga `Button::A` a acelerar, e o SDL chama de `A` o `BTN_SOUTH`, que no plástico
+é o **B**. A inversão que o comentário diz ter corrigido continua lá, do outro
+lado.
+
+#### Por que na X55 não aparece
+
+Medido sem o aparelho, rodando o `SDL_EVDEV_GuessDeviceClass` **real** do
+`SDL2 2.30.12` do nosso build contra as bitmaps das duas placas:
+
+| Device | classe que o SDL dá | vira joystick? |
+| --- | --- | --- |
+| R35S `r36s_Gamepad` (17 BTN + 4 eixos) | `cls=4` JOYSTICK | sim, e `BTN_SOUTH` existe → **gamecontroller** |
+| X55 `gpio-keys-control` (17 BTN, zero eixos) | `cls=0` nada | **não** — o SDL ignora |
+| X55 `adc-joystick` (4 eixos, zero botões) | `cls=4` JOYSTICK | sim, mas **sem botão** → portão 2 fecha → **não é gamecontroller** |
+
+Ou seja: **na X55 o jogo não tem caminho SDL nenhum** e obedece só ao `evdev`,
+que está certo. O R35S junta botões e eixos num device só (é o
+`rocknix-singleadc-joypad`), o SDL o reconhece, e o mapa inventado por ele entra
+na conta.
+
+Isso também é um **fato de sistema** que fica registrado: na X55 e na X35H, cujo
+DTS mainline separa `gpio-keys` e `adc-joystick`, **nenhum app que use
+`SDL_GameController` encontra controle** — o que funciona nesses aparelhos é o
+`evdev`. Latente hoje (o launcher e os jogos leem evdev), armadilha amanhã.
+
+#### O que NÃO é a causa (medido, para não voltar)
+
+| Suspeita | Medição | Veredito |
+| --- | --- | --- |
+| o kernel gera teclas nos botões | `evtest`: 0 `KEY_*`; `capabilities/rel` = 0 | não |
+| há mouse no sistema | nenhum `/dev/input/mouse*`; nenhum nó com classe MOUSE; `KMSDRM_InitMouse` **não** faz `SDL_AddMouse` | não — ponteiro na tela só se um app desenhar |
+| o `gpio-keys-vol` (teclado) atrapalha | `KEY_VOLUMEUP/DOWN` (114/115) não estão no mapa do jogo, que ignora código desconhecido | não |
+| falta `js0` / `CONFIG_INPUT_JOYDEV` | `IsJoystickDeviceNode` usa `event*` por padrão (`SDL_HINT_LINUX_JOYSTICK_CLASSIC` desliga) — `js` não muda o SDL2 | não |
+| o launcher segura o device | `evtest` recebe eventos com o launcher no ar | não |
+
+#### Regra que fica
+
+**App não mantém dois mapas de botão.** O `buttons.map` é a fonte da verdade do
+projeto, e qualquer caminho alternativo (SDL, gamepad, API de engine) tem de
+derivar dele ou não existir. Um segundo mapa diverge no dia em que o primeiro
+muda — e o sintoma aparece só no aparelho onde o segundo caminho está ativo, que
+foi exatamente aqui.
+
+A convenção do projeto (**A = `BTN_EAST`**, à direita, estilo Nintendo) é o
+**oposto** da que o SDL2 gera sozinho (**`a` = `BTN_SOUTH`**, a posição de
+baixo). Quem quiser que apps SDL concordem com o plástico tem de fornecer o
+mapeamento (`SDL_GAMECONTROLLERCONFIG` / `gamecontrollerdb.txt`) — o automático
+nunca vai concordar. `tests/sdl-input-probe.test.mjs` prende as duas pontas: os
+mapas medidos na convenção do plástico, e divergência só com aviso escrito.
+
+#### Entregável para o `GIOCHI-GAMES`
+
+O `neon-drift` é de repo alheio (§2-A): o resultado daqui é a issue pronta em
+`files/issue-giochi-games-gamepad-sdl-diverge.md`, com a tabela acima e a
+correção provável (derivar o mapa SDL do `buttons.map`, ou desligar o caminho
+SDL quando o `evdev` já respondeu).
+
 ## 13. Aparelhos
 
 | ID | Pasta | SoC | Arch | Status | Falta |
@@ -6093,4 +6327,71 @@ E, com aparelho na mão e autorização de quem estiver usando:
 ```bash
 giochi-selftest                          # esperado: PASS 40 · WARN 1 · FAIL 0
 giochi-launcher --fontes --idioma zh     # a prova que falta: 8/8
+```
+
+## 27. Handoff: 17/11/2026 — o controle do R35S e o mapa que o SDL2 inventa
+
+Sessão curta, uma pergunta só: *"o neon-drift trata os botões do R35S parecido
+com teclado; na X55 está certo — é o sistema ou o jogo?"*
+
+**Resposta: o jogo** (§12.74). O kernel entrega `BTN_*` corretos nas duas placas
+(§12.73); o que muda é que o SDL2 reconhece o `r36s_Gamepad` do R35S como
+**gamecontroller** e gera um mapeamento com `a` no `BTN_SOUTH` — o `B` do
+plástico. O `neon-drift` soma a máscara do SDL à do `evdev`, e o mesmo botão
+acende acelerar e frear. Na X55 o SDL2 não consegue gamecontroller nenhum
+(`adc-joystick` tem eixos e **zero botões**), então o jogo obedece só ao `evdev`.
+
+### O que ficou no repositório
+
+| Arquivo | Para quê |
+| --- | --- |
+| `scripts/sdl-input-probe.c` | pergunta ao SDL do **aparelho**: quantos joysticks, `SDL_IsGameController`, e o mapeamento completo |
+| `scripts/sdl-input-probe.sh` | compila com a toolchain do `work/<device>` e roda por SSH; **não** abre vídeo sem `--video` (KMSDRM rouba o DRM master) |
+| `tests/sdl-input-probe.test.mjs` | 4 casos: o probe pergunta a coisa certa, não abre vídeo por padrão, e prende a convenção `a = BTN_EAST` dos `buttons.map` |
+| `docs/button-maps.md` | seção nova: a convenção do projeto é o **oposto** da que o SDL2 gera sozinho |
+
+Medição que vale a pena guardar, do aparelho:
+
+```text
+joysticks vistos pelo SDL: 1
+  [0] r36s_Gamepad  botoes=17 eixos=4  SDL_IsGameController = SIM
+```
+
+E a que explica a X55, rodando o `SDL_EVDEV_GuessDeviceClass` real contra as
+bitmaps das duas: `r36s_Gamepad` → JOYSTICK (e com `BTN_SOUTH`, vira
+gamecontroller); `gpio-keys-control` → classe 0; `adc-joystick` → JOYSTICK **sem
+botão**, reprovado no segundo portão.
+
+### Pendências
+
+1. **Postar a issue do `GIOCHI-GAMES`** — o corpo está pronto em
+   `files/issue-giochi-games-gamepad-sdl-diverge.md` (desta sessão). Esta máquina
+   não tem token: `POST /issues` → 401 (§2-A). Enquanto ela não for postada, o
+   defeito continua no jogo, com a tabela completa no §12.74.
+2. **Nada disso foi provado no jogo rodando.** A conclusão sai do mapeamento que
+   o SDL imprime × o mapa do jogo; o passo que falta é abrir o `neon-drift` no
+   R35S e apertar A/B com o log de inicialização à vista (`neon-drift: gamepad
+   aberto: r36s_Gamepad`).
+3. **`SDL_GAMECONTROLLERCONFIG` não foi adotado.** Seria a forma de o *sistema*
+   fazer todo app SDL concordar com o plástico, mas ele consertaria só A/B (o R1
+   e o R2 continuariam divergentes) — meia correção que esconde a outra metade.
+   Se algum dia entrar, tem de entrar com a tabela inteira derivada do
+   `buttons.map`.
+4. **X55 e X35H não têm gamecontroller para o SDL** (botões e eixos em nós
+   separados). Latente: hoje todo mundo lê `evdev`. Registrado no §12.74 e no
+   `docs/button-maps.md`.
+5. **CI do `0bd9383` no r35s continua sem diagnóstico** (§26) — o log exige
+   token.
+
+### Estado do ambiente no fim desta sessão
+
+O R35S respondeu em `10.55.0.2` a sessão inteira (SSH por senha, sem chave na
+imagem). O launcher está no ar (pid 505) e **nada foi interrompido**: o probe roda
+sem tocar no DRM. Nenhum arquivo foi gravado no aparelho, só `/tmp`.
+
+Suíte: **567/567 + 1 skip**, em 63 arquivos.
+
+```bash
+node tests/run-all.mjs                          # 567/567 + 1 skip
+bash scripts/sdl-input-probe.sh r35s --run      # a medição do §12.74
 ```
