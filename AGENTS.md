@@ -6625,11 +6625,54 @@ Detalhe de método: o daemon é `/bin/sh` rodando o script, então `pidof` casar
 pelo **nome** e diria "ausente" com ele vivo (o caso do `giochi-init` no
 §12.62-D). A leitura é de `/proc/*/cmdline`.
 
+### Medido no R35S em 17/11/2026 — o daemon roda, e falha alto
+
+O aparelho estava disponível e a imagem é a de **15/11** (`commit=58510df`),
+anterior a tudo isto. Ou seja: deu para medir a **ferramenta**, não o contrato.
+
+| Verificação | Resultado |
+| --- | --- |
+| `giochi-gamepad --listar` compilado pelo cross-toolchain, rodando no aparelho | **17 de 17 botões do contrato resolvidos** pelo `buttons.map`; eixos `SEM calibracao no mapa` (o mapa da imagem é anterior à seção de eixos) |
+| `giochi-gamepad` sem `/dev/uinput` | falha **alto**: `falta CONFIG_INPUT_UINPUT. Sem ele o controle virtual nao existe e cada aparelho responde do seu jeito (AGENTS §12.74)` — exit 1 |
+| `S52gamepad start` com daemon mas sem `uinput` | avisa e **sai 0** (não derruba o boot); `status` → `0 processo(s)`, `device virtual: AUSENTE` |
+| `giochi-selftest` novo, rodado no aparelho | `[SKIP] sem controle virtual — imagem anterior ao contrato de entrada`, e `PASS 41 · WARN 0 · FAIL 0 · SKIP 4` |
+
+O `SKIP` é o comportamento projetado: a imagem não **prometeu** o contrato, então
+não pode reprovar por não cumpri-lo. O `FAIL` existe para o caso oposto — serviço
+instalado e não funcionando — e é o que pega o "verde e errado".
+
+#### `/dev/uinput` aparece sozinho, e isso é uma dependência invisível
+
+Medido no aparelho: `/proc/devices` **não** registra `uinput`, `/sys/class/misc/uinput`
+não existe e não há `.ko` — o kernel de 15/11 não tem `CONFIG_INPUT_UINPUT` (já
+estava registrado como pendência de rebuild).
+
+Quando ele entrar, quem cria o node é o **kernel**, não um daemon de `/dev`:
+
+```text
+$ grep " /dev " /proc/mounts
+devtmpfs /dev devtmpfs rw,relatime,size=475812k,nr_inodes=118953,mode=755 0 0
+$ ls -l /dev/fb0        → crw------- 1 root root 29, 0    (node criado pelo kernel)
+$ pidof mdev            → (não roda)
+```
+
+`BR2_ROOTFS_DEVICE_CREATION_DYNAMIC_DEVTMPFS=y` nos três aparelhos, e **`mdev`
+não está rodando**. Com devtmpfs, o `/dev/uinput` nasce no instante em que o
+módulo registra o misc device — sem regra de udev, sem mdev.
+
+A armadilha é a opção ser um `choice`: ligar `BR2_ROOTFS_DEVICE_CREATION_DYNAMIC_EUDEV`
+(como o `config/godot.fragment` faz, opt-in com `GIOCHI_WITH_GODOT=1`) troca o
+gerenciador de `/dev` inteiro. Nenhum aparelho declara aquele fragmento hoje, mas
+quem ligar precisa saber que o `/dev/uinput` passa a depender de regra do eudev em
+vez do kernel. O `selftest` pega a consequência (daemon não roda → `FAIL`), não a
+causa — que é o certo: ele roda no aparelho, onde a config já virou realidade.
+
 ### Estado e pendências
 
 ```text
-suíte   599/599 + 1 skip
+suíte   607/607 + 1 skip
 imagem  NENHUMA gravada contém o daemon ainda — precisa de rebuild
+        (medido: a do R35S é de 15/11, sem uinput no kernel e com o mapa sem eixos)
 ci      build de 93ce76a em andamento com os três aparelhos (qemu, x55, r35s)
 ```
 
