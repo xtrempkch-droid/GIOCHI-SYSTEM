@@ -6687,7 +6687,19 @@ O pedido do OS é o que mais importa a longo prazo: se a imagem sair sem
 `S52gamepad` ou sem `CONFIG_INPUT_UINPUT`, o contrato **não existe** e nada
 avisa. É o "verde e errado" clássico deste repositório, agora no repo vizinho.
 
-### Pendência registrada
+### Pendência registrada, e é de um clique
 
-- Confirmar o fechamento de `GAMES#3`, `#4`, `#5` como duplicata de `#2`.
-- Abrir as duas issues restantes (APP e OS) a partir dos arquivos acima.
+- ~~Confirmar o fechamento de `GAMES#3`, `#4`, `#5`~~ — **resolvido**: #3 e #4
+  deletadas (HTTP 410), #5 fechada como duplicata.
+- **Substituir o corpo de `APP#1` e `OS#1`** pelos recortes por equipe. As duas
+  chamadas de atualização foram submetidas e dependem de confirmação na
+  interface (o mesmo formulário que causou as duplicatas). Medido às 20:52 UTC:
+  os dois continuam com `md5=36446c266e62`, HTML e o texto do GAMES.
+
+Se o formulário falhar de novo, o caminho manual é abrir a issue no navegador,
+clicar em *Edit* e colar o corpo de `files/issues-prontas/APP-contrato-de-entrada.md`
+ou `OS-contrato-de-entrada.md` (o conteúdo **depois** do primeiro `---`).
+
+**O que já está certo e não precisa de nada:** `GAMES#1` (o defeito do
+`neon-drift`, 6417 B) e `GAMES#2` (o contrato, 3609 B) — os dois em markdown, com
+o texto completo. A equipe de jogos tem o que precisa para corrigir.
