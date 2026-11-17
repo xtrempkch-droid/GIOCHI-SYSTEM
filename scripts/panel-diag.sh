@@ -8,6 +8,7 @@
 #   bash scripts/panel-diag.sh 10.55.0.3        # outro endereço
 #   bash scripts/panel-diag.sh --log <arquivo>  # analisa um giochi-boot.log do cartão
 #   bash scripts/panel-diag.sh --local          # rodar dentro do aparelho
+#   bash scripts/panel-diag.sh --iface usb0     # dois aparelhos plugados (§12.64)
 #
 # Responde "o painel foi inicializado neste boot?" com o que o kernel registrou,
 # em vez de deduzir do que a tela mostra.
@@ -43,10 +44,12 @@ set -euo pipefail
 ALVO="10.55.0.2"
 LOCAL=0
 ARQUIVO_LOG=""
+IFACE=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --local) LOCAL=1; shift ;;
+    --iface) IFACE="${2:-}"; [ -n "$IFACE" ] || { echo "ERRO: --iface sem interface" >&2; exit 2; }; shift 2 ;;
     --log) ARQUIVO_LOG="${2:-}"; [ -n "$ARQUIVO_LOG" ] || { echo "ERRO: --log sem arquivo" >&2; exit 2; }; shift 2 ;;
     -h|--help)
       awk '/^# giochi-system:help:begin$/ { d=1; next } /^# giochi-system:help:end$/ { exit } d { sub(/^# ?/, ""); print }' "${BASH_SOURCE[0]}"
@@ -183,7 +186,23 @@ echo "=== lendo em root@$ALVO"
 # nenhum — três dos quatro modos analisavam e um não, e o que não analisava era
 # justamente o do aparelho ao vivo. É o §12.49 na forma de caminho alternativo:
 # o mesmo trabalho repetido em N pontos, e um deles esquece um passo.
-SAIDA="$(ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 "root@$ALVO" \
+#
+# `--iface` existe por causa do §12.64: todo aparelho atende em 10.55.0.2 com o
+# mesmo MAC do gadget, então com dois plugados o diagnóstico leria o dmesg do
+# OUTRO aparelho e daria um veredito confiante sobre ele — o pior tipo de erro
+# para uma ferramenta de diagnóstico. Quem distingue é a interface USB, e o
+# vínculo é por `SO_BINDTODEVICE` (scripts/ssh-por-iface.py).
+#
+# `UserKnownHostsFile=/dev/null` sempre: o endereço é compartilhado entre
+# aparelhos, então cada troca de placa acusa "HOST IDENTIFICATION HAS CHANGED" —
+# verdadeiro e inútil aqui, porque o link é um cabo USB direto.
+SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=10"
+if [ -n "$IFACE" ]; then
+  SSH_OPTS="$SSH_OPTS -o ProxyCommand=python3 $(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ssh-por-iface.py --iface $IFACE %h %p"
+  echo "=== interface: $IFACE (dois aparelhos no mesmo PC respondem ao mesmo IP)"
+fi
+
+SAIDA="$(ssh $SSH_OPTS "root@$ALVO" \
   'GIOCHI_DIAG=1 sh -s' <<'REMOTO'
 TMP=/tmp/.panel-diag.$$
 dmesg >"$TMP" 2>/dev/null || echo "(dmesg vazio)" >"$TMP"

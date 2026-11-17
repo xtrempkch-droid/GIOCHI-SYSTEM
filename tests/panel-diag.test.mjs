@@ -174,3 +174,26 @@ FIM
         "o estado vivo continua sendo impresso, depois da análise");
     assert.match(saida, /card0-DSI-1: connected/);
 });
+
+test("--iface existe, e por causa de §12.64", () => {
+    // Todo aparelho atende em 10.55.0.2 com o mesmo MAC do gadget. Com dois
+    // plugados, sem `--iface` o diagnóstico leria o dmesg do OUTRO aparelho e
+    // daria um veredito confiante sobre ele — o pior erro possível para uma
+    // ferramenta de diagnóstico, porque parece certo.
+    //
+    // `ssh -o BindInterface=` não resolve (medido: o tráfego continua saindo
+    // pela interface do primeiro); o que funciona é SO_BINDTODEVICE, que é o
+    // que scripts/ssh-por-iface.py faz.
+    assert.match(FONTE, /--iface/,
+        "sem --iface o script aponta para o aparelho errado quando há dois plugados");
+    assert.match(FONTE, /ssh-por-iface\.py/,
+        "o vínculo à interface tem de ser por SO_BINDTODEVICE, não por BindInterface");
+    assert.match(FONTE, /UserKnownHostsFile=\/dev\/null/,
+        "o IP é compartilhado entre aparelhos: a host key muda a cada troca, e " +
+        "sem isso o SSH recusa a conexão com 'HOST IDENTIFICATION HAS CHANGED'");
+});
+
+test("--iface sem valor é erro, não silêncio", () => {
+    assert.throws(() => execFileSync("bash", [SCRIPT, "--iface"], { encoding: "utf8", stdio: "pipe" }),
+        /./, "`--iface` sem argumento não pode seguir com a interface vazia");
+});

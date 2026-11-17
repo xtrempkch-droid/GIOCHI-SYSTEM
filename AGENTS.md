@@ -536,6 +536,7 @@ bash scripts/audio-alerta.sh --alar             # tom pela via SDL2 -> ALSA
 bash scripts/audio-validar.sh                   # áudio medido: card, mux, volume, PCM RUNNING (§23)
 bash scripts/panel-diag.sh                       # por que a tela não acendeu neste boot (§31)
 bash scripts/panel-diag.sh --log giochi-boot.log # o mesmo, sobre o log de um boot que falhou
+bash scripts/panel-diag.sh --iface usb0          # dois aparelhos plugados (§12.64)
 bash scripts/sdl-input-probe.sh r35s --run      # o que o SDL vê como controle, e com qual mapa (§12.74)
 bash scripts/../device/common/rootfs-overlay/etc/init.d/S52gamepad status   # o controle virtual subiu? (§29)
 bash scripts/input-diag.sh                      # o que o KERNEL classificou: joystick/teclado/ponteiro (§12.73)
@@ -6836,6 +6837,7 @@ bash scripts/panel-diag.sh                    # aparelho em 10.55.0.2, ao vivo
 bash scripts/panel-diag.sh 10.55.0.3          # outro endereço
 bash scripts/panel-diag.sh --local            # rodando dentro do aparelho
 bash scripts/panel-diag.sh --log giochi-boot.log   # o log de um boot que falhou
+bash scripts/panel-diag.sh --iface usb0       # dois aparelhos plugados (§12.64)
 ```
 
 Cinco seções (DSI, PAINEL, BACKLIGHT, DRM/VOP, ALIMENTAÇÃO) e um veredito que
