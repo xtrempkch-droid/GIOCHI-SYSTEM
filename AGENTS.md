@@ -6025,10 +6025,28 @@ O único `WARN` é `/opt/giochi/apps/index.json` ausente — arquivo do
    não afirmo causa** — os candidatos são concorrência de cache e um limite do
    runner, não o código.
 
-2. **As fontes novas não foram vistas na tela.** Verificadas por leitura da
-   tabela `cmap` (6/6 devanágari, 5/5 bengali, 0/2 CJK de propósito) e por
-   `BR2_PACKAGE_WQY_ZENHEI=y` nos três defconfigs. O `giochi-launcher --fontes`
-   com a imagem nova é a prova que falta.
+2. ~~**As fontes novas não foram vistas na tela.**~~ **Verificadas na imagem,
+   glifo por glifo.** Não há tela nem launcher nesta máquina, mas a pergunta
+   "a fonte cobre a escrita?" foi respondida nas fontes **extraídas do
+   `rootfs.ext4` do X55**, não nas do repositório:
+
+   ```text
+   zh  中文         wqy.ttc    2/2   OK
+   zh  中文界面      wqy.ttc    4/4   OK
+   ja  日本語        wqy.ttc    3/3   OK
+   ko  한국어        wqy.ttc    3/3   OK
+   hi  हिन्दी         dev.ttf    6/6   OK
+   bn  বাংলা         ben.ttf    5/5   OK
+   pt  Português    dev.ttf    0/9   ← correto: quem desenha latim é o DejaVu
+   ```
+
+   O `0/9` do português é o **controle negativo**: a Noto Devanágari não pode
+   cobrir latim, senão roubaria o texto latino do DejaVu na cadeia de fontes.
+
+   O que continua sem acontecer é o `giochi-launcher --fontes` rodando com a
+   imagem nova — as duas pontas estão certas (o arquivo está no diretório que o
+   `DIRETORIOS_FONTE` deles lista, e ele cobre a escrita), mas a execução do
+   app no aparelho é a prova final.
 
 3. **O áudio da X55 em 2025.02 não foi medido.** O do R35S foi.
 
@@ -6049,14 +6067,17 @@ O único `WARN` é `/opt/giochi/apps/index.json` ausente — arquivo do
 ```text
 ~/.cache/giochi-system/work/r35s/          2025.02, completo, commit 0bd9383
 ~/.cache/giochi-system/work/powkiddy-x55/  2025.02, completo, commit 0e6d5bd
-out/r35s/              Image + rootfs + sd.img (commit 0bd9383)
-out/powkiddy-x55/      Image + rootfs + sd.img (commit 0e6d5bd, SEM as fontes)
+out/r35s/              Image + rootfs + sd.img (commit 0bd9383, SEM as fontes)
+out/powkiddy-x55/      Image + rootfs + sd.img (commit e3b72b8, COM as fontes)
 out/_anterior-*        quatro imagens antigas, para rollback
 ```
 
-O X55 **precisa de rebuild** para levar as fontes (`e3b72b8`). O `work/` dele já
-tem `WQY_ZENHEI=y` no `.config` — basta retomar com
-`GIOCHI_SYSTEM_KEEP_WORK=1` (acrescentar pacote é seguro, §12.27).
+**O X55 está com as fontes** (`commit=e3b72b8`, `sd.img` = `fcab0e00…`,
+2,0 GiB, firmware no setor 64 conferido). O R35S **não** — ele é anterior ao
+`e3b72b8`; para levar as fontes lá, retomar com `GIOCHI_SYSTEM_KEEP_WORK=1`
+(acrescentar pacote é seguro, §12.27) e regravar o cartão.
+
+O cartão em `/dev/sdd` tem a imagem do R35S de `0bd9383`, **sem** as fontes.
 
 ### Como retomar
 

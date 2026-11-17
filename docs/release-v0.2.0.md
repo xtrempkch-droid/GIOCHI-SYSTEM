@@ -130,9 +130,11 @@ sempre, que num handheld é indistinguível de "não ligou".
 
 Isto é a parte que importa tanto quanto a de cima:
 
-- **As fontes novas não foram vistas na tela.** Foram verificadas por leitura da
-  tabela `cmap` e pelo pacote estar na imagem; o `--fontes` do launcher rodando
-  no aparelho com a imagem nova ainda não aconteceu.
+- **O `--fontes` do launcher não rodou com a imagem nova.** As fontes estão
+  verificadas glifo por glifo **nas extraídas do `rootfs.ext4`** (cmap lido das
+  próprias fontes da imagem: zh/ja/ko 100%, hi 6/6, bn 5/5, e 0/9 em latim, que
+  é o controle negativo correto), e moram nos diretórios que o `DIRETORIOS_FONTE`
+  do app lista. Mas a execução do app no aparelho é a prova final.
 - **O áudio da X55 com a imagem 2025.02 não foi medido.** O áudio do R35S foi. A
   X55 tocou numa imagem de Buildroot 2024.02; os símbolos do codec são os mesmos,
   mas "os mesmos símbolos" não é medição.
