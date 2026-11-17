@@ -169,6 +169,69 @@ test("o gamecontrollerdb cobre o GUID que o daemon realmente cria", () => {
         "o GUID do DB tem de ser o do device criado pelo daemon");
 });
 
+test("o GUID é recalculado a partir do nome — não é literal copiado", () => {
+    // O teste acima confere o literal do DB, e isso NÃO basta: se o nome do
+    // device mudar, o `crc16` muda, o GUID muda, e o literal antigo continua
+    // casando consigo mesmo. O SDL então não acha a linha, volta ao mapeamento
+    // automático e `a`/`b` trocam de lado — sem erro em lugar nenhum.
+    //
+    // A conta foi lida do fonte do SDL 2.30.12 que a imagem usa
+    // (`src/joystick/SDL_joystick.c`):
+    //
+    //   crc = SDL_crc16(crc, product_name, strlen(product_name));  /* vendor_name == NULL */
+    //   *guid16++ = bus;  *guid16++ = crc;
+    //   if (vendor) { *guid16++ = vendor; *guid16++ = 0;
+    //                 *guid16++ = product; *guid16++ = 0;
+    //                 *guid16++ = version; guid.data[14] = sig; data[15] = data; }
+    //
+    // e o crc16 do SDL é o CRC-16/ARC bit a bit:
+    //   crc = crc16_for_byte((Uint8)crc ^ byte) ^ crc >> 8
+    //   crc16_for_byte: 8× crc = ((crc ^ r) & 1 ? 0xA001 : 0) ^ crc >> 1
+    function crc16ParaByte(r) {
+        let crc = 0;
+        for (let i = 0; i < 8; i++) {
+            crc = (((crc ^ r) & 1) * 0xA001) ^ (crc >> 1);
+            r >>= 1;
+        }
+        return crc & 0xFFFF;
+    }
+    function crc16(dados) {
+        let crc = 0;
+        for (const b of dados) {
+            crc = crc16ParaByte((crc & 0xFF) ^ b) ^ (crc >> 8);
+        }
+        return crc & 0xFFFF;
+    }
+
+    // O nome tem de ser o mesmo que o daemon passa ao kernel. Ele é escrito
+    // num `snprintf` para `setup.name`, então é de lá que sai.
+    const literal = FONTE.match(/snprintf\(\s*setup\.name[^,]*,[^,]*,\s*"([^"]+)"/);
+    assert.ok(literal, "o fonte do daemon perdeu o `snprintf(setup.name, ...)`");
+    const nomeDevice = literal[1];
+
+    const crc = crc16(Buffer.from(nomeDevice, "utf8"));
+    const linha = MAPA_DB.split("\n").find((l) => l.includes(`,${nomeDevice},`));
+    assert.ok(linha, `o DB não tem linha para "${nomeDevice}"`);
+
+    const guid = linha.split(",")[0];
+    assert.equal(guid.length, 32, `GUID tem de ter 16 bytes: ${guid}`);
+    // Bytes 2-3 são o crc, em little-endian (SDL_SwapLE16 numa máquina LE).
+    const crcGravado = parseInt(guid.slice(4, 6), 16) | (parseInt(guid.slice(6, 8), 16) << 8);
+    assert.equal(crcGravado, crc,
+        `o crc do GUID é 0x${crcGravado.toString(16)}, mas crc16("${nomeDevice}") ` +
+        `dá 0x${crc.toString(16)} — o SDL não vai casar a linha, e aí A e B ` +
+        `trocam de lado em silêncio (renomear o device exige regerar o GUID)`);
+
+    // E o resto do GUID tem de bater com o `uinput_setup.id`.
+    assert.equal(guid.slice(0, 4), "0600", "bus 0x0006 (BUS_VIRTUAL), LE");
+    assert.equal(guid.slice(8, 12), "0912", "vendor 0x1209, LE");
+    assert.equal(guid.slice(12, 16), "0000");
+    assert.equal(guid.slice(16, 20), "0100", "product 0x0001, LE");
+    assert.equal(guid.slice(20, 24), "0000");
+    assert.equal(guid.slice(24, 28), "0100", "version 1, LE");
+    assert.equal(guid.slice(28, 32), "0000", "driver_signature/driver_data = 0");
+});
+
 test("o DB mapeia `a` para b1, e não para o automático b0", () => {
     // Esta é a asserção que faz `Button::A` ser o A do plástico. O automático do
     // SDL liga `a` a b0 (BTN_SOUTH, o botão de baixo); o mapa do projeto diz que
