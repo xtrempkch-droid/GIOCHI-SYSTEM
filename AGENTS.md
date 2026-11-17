@@ -6623,15 +6623,28 @@ O contrato de entrada (§29) precisa chegar às três equipes: **jogos**, **app*
 planejado, e o registro fica aqui porque a próxima sessão vai querer saber o que
 existe e o que falta.
 
-### O estado real, medido na API às 20:36 UTC
+### O estado real, medido na API às 20:45 UTC
 
 | Repo | Issue | Estado |
 | --- | --- | --- |
-| `GIOCHI-GAMES` | **#1** — `neon-drift: gamepad.rs diverge do buttons.map` | **aberta, única, correta** |
-| `GIOCHI-GAMES` | #2 — `Contrato de entrada: mirar o Giochi Gamepad` | **aberta, correta** — é a que fica |
-| `GIOCHI-GAMES` | #3, #4, #5 | **cópias exatas da #2** (body 3609 B, md5 `14c04d459798`, os quatro) |
-| `GIOCHI-APP` | — | **não criada** |
-| `GIOCHI-OS` | — | **não criada** |
+| `GIOCHI-GAMES` | **#1** — `neon-drift: gamepad.rs diverge do buttons.map` | **aberta, correta** (6417 B, markdown) |
+| `GIOCHI-GAMES` | **#2** — `Contrato de entrada: mirar o Giochi Gamepad` | **aberta, correta** (3609 B, markdown) — é a que fica |
+| `GIOCHI-GAMES` | #3, #4 | **deletadas** (HTTP 410) |
+| `GIOCHI-GAMES` | #5 | **fechada** como duplicata da #2 |
+| `GIOCHI-APP` | **#1** | aberta, **com o corpo do GAMES** e em HTML — correção submetida |
+| `GIOCHI-OS` | **#1** | aberta, **com o corpo do GAMES** e em HTML — **falta corrigir** |
+
+O segundo defeito apareceu depois da limpeza: as issues do APP e do OS foram
+**criadas** (o que faltava), mas com o **texto do GAMES**. Medido pelo `md5` do
+body: `36446c266e62` nos dois, idêntico entre si e diferente do GAMES #2. E o
+corpo veio em **HTML renderizado** (`<h2 dir="auto">…`), não em markdown — o
+formulário converteu antes de enviar.
+
+O conteúdo essencial (o contrato de entrada) está lá nos três repos, então
+ninguém fica sem a informação. O que falta é o **recorte por equipe**: o APP
+precisa ler sobre `EvdevInput::open` e o `Vigia`, o OS sobre `docs/juncao.md` e a
+verificação da imagem. Os corpos certos estão em
+`files/issues-prontas/` e a correção do APP foi submetida.
 
 ### O que deu errado
 
