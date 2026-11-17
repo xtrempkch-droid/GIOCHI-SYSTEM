@@ -6606,16 +6606,36 @@ com **mapeamentos diferentes** — e é exatamente isso que o virtual elimina.
 
 `tests/gamepad-virtual.test.mjs` falha se `EVIOCGRAB` aparecer no código.
 
+### Como saber, no aparelho, se o contrato está valendo
+
+O `giochi-selftest` passou a verificar o **virtual**, e não só o hardware — são
+perguntas diferentes. A de hardware ("os botões existem?") já existia; a nova é
+"os jogos veem o layout fixo?", e ela é a que a promessa significa.
+
+| Estado medido | Veredito |
+| --- | --- |
+| `S52gamepad` instalado, daemon vivo, nó com ≥ 16 botões | `PASS controle virtual: Giochi Gamepad — N botões, M eixos (layout fixo)` |
+| serviço instalado, daemon morto | **`FAIL`** — o contrato foi prometido e não vale |
+| daemon vivo, sem `/dev/uinput` | **`FAIL`** — falta `CONFIG_INPUT_UINPUT=y` |
+| nada instalado (imagem anterior) | `SKIP` — não foi prometido, então não reprova |
+
+O `FAIL` do meio é o que importa: sem ele, um `S52gamepad` que não sobe deixa a
+imagem verde e os jogos no hardware cru — a divergência volta e ninguém sabe.
+Detalhe de método: o daemon é `/bin/sh` rodando o script, então `pidof` casaria
+pelo **nome** e diria "ausente" com ele vivo (o caso do `giochi-init` no
+§12.62-D). A leitura é de `/proc/*/cmdline`.
+
 ### Estado e pendências
 
 ```text
-suíte   582/582 + 1 skip
+suíte   599/599 + 1 skip
 imagem  NENHUMA gravada contém o daemon ainda — precisa de rebuild
+ci      build de 93ce76a em andamento com os três aparelhos (qemu, x55, r35s)
 ```
 
 | Pendência | Por quê |
 | --- | --- |
-| rebuild dos três aparelhos | o daemon e o `UINPUT` não estão em imagem nenhuma |
+| rebuild dos três aparelhos | o daemon e o `UINPUT` não estão em imagem nenhuma — o build do CI valida a compilação, não substitui a imagem no cartão |
 | `js0` idem | `CONFIG_INPUT_JOYDEV` de `4018875` também não |
 | multi-controle | o daemon funde todos os devices que casem o mapa num único gamepad; jogador 2 com controle USB entra como jogador 1. Resolver exige um virtual por device físico |
 | a faixa do X35H | herdada da X55; não medida no aparelho |
