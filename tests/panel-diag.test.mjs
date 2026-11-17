@@ -197,3 +197,214 @@ test("--iface sem valor é erro, não silêncio", () => {
     assert.throws(() => execFileSync("bash", [SCRIPT, "--iface"], { encoding: "utf8", stdio: "pipe" }),
         /./, "`--iface` sem argumento não pode seguir com a interface vazia");
 });
+
+// ── O falso negativo que o hardware denunciou (17/11/2026, R35S) ───────────
+//
+// A primeira versão procurava "st7703" no log — o driver do X35H. Rodada no
+// R35S, cujo painel é `panel-generic-dsi`, ela imprimiu:
+//
+//   (nenhuma linha do st7703 — o painel não foi inicializado neste boot)
+//   -> o veredito era "o painel NÃO aparece no log deste boot"
+//
+// num aparelho com `card0-DSI-1: connected`, `backlight 63/255` e a tela
+// desenhando a interface. Falso negativo na direção mais cara: manda caçar um
+// probe que não existe num aparelho que está funcionando.
+//
+// É o §12.30 pela enésima vez — o teste perguntou pelo NOME do driver em vez da
+// CONSEQUÊNCIA. E listar nomes não resolveria, porque o que cada driver
+// imprime também varia (medido nos fontes do 6.12):
+//
+//   hx8394 (X55)              dev_dbg("... ready")   -> NÃO aparece sem dyndbg
+//   st7703 (X35H)             dev_info("... ready")  -> aparece
+//   panel-generic-dsi (R35S)  dev_info("lanes ...")  -> aparece, com outro texto
+//
+// O X55 acende a tela sem imprimir UMA LINHA sobre o painel. A pergunta que
+// funciona nos três é "o DRM chegou a ter framebuffer / o conector está
+// connected?", e é ela que o veredito passou a fazer.
+
+test("o log real do R35S (panel-generic-dsi) dá PASS, não 'não inicializou'", () => {
+    const log = `[    0.773848] dw-mipi-dsi-rockchip ff450000.dsi: Fixed dependency cycle(s) with /dsi@ff450000/panel@0
+[    1.139177] panel-generic-dsi ff450000.dsi.0: lanes 4, format 0, mode e03
+[    1.143125] rockchip-drm display-subsystem: bound ff450000.dsi (ops dw_mipi_dsi_rockchip_ops)
+[    1.149824] rockchip-drm display-subsystem: [drm] fb0: rockchipdrmfb frame buffer device
+[    2.524617] Console: switching to colour frame buffer device 80x30
+=== estado
+  card0-DSI-1/status: connected
+  backlight/brightness: 63
+`;
+    const saida = analisar("r35s.log", log);
+    assert.match(saida, /driver detectado no log[\s\S]*panel-generic-dsi/,
+        "o script tem de reconhecer o driver do R35S, não só o do X35H");
+    assert.match(saida, /O painel inicializou NESTE boot/,
+        "fb0 + conector connected = o painel inicializou; dizer o contrário é " +
+        "falso negativo num aparelho com a tela acesa");
+    assert.match(saida, /framebuffer \(fb0\)/,
+        "o veredito tem de citar a prova, não só afirmar");
+    assert.doesNotMatch(saida.split("=== veredito")[1].split("=== detecção")[0],
+        /NÃO aparece no log/,
+        "não pode continuar dizendo que o painel não apareceu");
+});
+
+test("o X55 acende a tela SEM imprimir linha de painel — e não pode reprovar", () => {
+    // `panel-himax-hx8394.c` só tem `dev_dbg` para o caminho feliz: num kernel
+    // sem dynamic debug, o boot bom do X55 não tem NENHUMA linha sobre o
+    // painel. Um diagnóstico que exigisse a linha daria "não inicializou" no
+    // aparelho que mais roda no projeto.
+    const log = `[    1.141954] rockchip-drm display-subsystem: bound ff460000.vop (ops vop_component_ops)
+[    1.143125] rockchip-drm display-subsystem: bound ff450000.dsi (ops dw_mipi_dsi_rockchip_ops)
+[    1.149824] rockchip-drm display-subsystem: [drm] fb0: rockchipdrmfb frame buffer device
+=== estado
+  card0-DSI-1/status: connected
+  backlight/brightness: 833
+`;
+    const saida = analisar("x55.log", log);
+    assert.match(saida, /O painel inicializou NESTE boot/,
+        "sem linha de painel mas com fb0 + connected, o painel inicializou");
+    assert.match(saida, /Ausência de linha aqui NÃO significa painel quebrado/,
+        "e o script tem de AVISAR que ausência de linha não prova nada — senão " +
+        "o próximo leitor do log tira a conclusão errada por conta própria");
+});
+
+test("sem fb0 e sem conector, aí sim não inicializou", () => {
+    // O outro lado: se o veredito passasse a dar PASS sempre, viraria um
+    // teste-verde inútil. Sem framebuffer e sem conector connected, o DRM
+    // subiu e o painel não concluiu — é FAIL de verdade.
+    const log = `[    1.143125] rockchip-drm display-subsystem: bound ff450000.dsi (ops dw_mipi_dsi_rockchip_ops)
+=== estado
+  card0-DSI-1/status: disconnected
+`;
+    const saida = analisar("ruim.log", log);
+    assert.match(saida, /NÃO concluiu a inicialização|NÃO aparece no log/,
+        "sem prova de framebuffer nem de conector, não pode dar PASS");
+    assert.doesNotMatch(saida, /O painel inicializou NESTE boot/);
+});
+
+test("--iface chega ao ssh como UM argumento, não seis", () => {
+    // Defeito real, medido no R35S em 17/11/2026: eu montei as opções numa
+    // variável (`SSH_OPTS="... -o ProxyCommand=python3 ... --iface usb0 %h %p"`)
+    // e chamei `ssh $SSH_OPTS`. Sem aspas, o shell parte em palavras e o
+    // `--iface` vira opção do ssh:
+    //
+    //   unknown option -- -
+    //   usage: ssh [-46AaCfGgKkMNnqsTtVvXxYy] [-B bind_interface] ...
+    //
+    // É exatamente o defeito que o `gpu-bench.sh` já documenta ter corrigido, e
+    // o comentário dele explica a causa. Repeti mesmo assim.
+    //
+    // O teste anterior só olhava o TEXTO do script (`/ssh-por-iface\.py/`) e por
+    // isso passou verde com o script quebrado. Este executa com um `ssh` falso
+    // que grava os próprios argv: se o ProxyCommand não chegar inteiro num
+    // único argumento, o `--iface` aparece solto e o teste reprova.
+    const lixo = join(TMP, "fake-bin-iface");
+    mkdirSync(lixo, { recursive: true });
+    const registro = join(TMP, "argv.txt");
+    writeFileSync(join(lixo, "ssh"), `#!/bin/sh
+: > ${registro}
+for a in "$@"; do
+    printf '%s\\n' "$a" >> ${registro}
+done
+cat >/dev/null
+cat <<'FIM'
+=== dmesg
+[    1.1] dw-mipi-dsi ff450000.dsi: ok
+=== fim-dmesg
+=== estado
+drm card0-DSI-1: connected
+FIM
+`, { mode: 0o755 });
+
+    execFileSync("bash", [SCRIPT, "--iface", "usb0", "10.0.0.9"], {
+        encoding: "utf8",
+        env: { ...process.env, PATH: `${lixo}:${process.env.PATH}` },
+    });
+
+    const argv = readFileSync(registro, "utf8").split("\n").filter(Boolean);
+
+    // O ProxyCommand tem de ser UM argumento só, com o `--iface usb0` dentro.
+    const proxy = argv.filter((a) => a.startsWith("ProxyCommand="));
+    assert.equal(proxy.length, 1,
+        `esperava um único argumento ProxyCommand, achei ${proxy.length}:\n` +
+        argv.map((a) => `  [${a}]`).join("\n"));
+    assert.match(proxy[0], /ssh-por-iface\.py --iface usb0 %h %p/,
+        `o ProxyCommand perdeu pedaços: ${proxy[0]}`);
+
+    // E nada de `--iface` solto: seria interpretado pelo ssh, não pelo proxy.
+    assert.equal(argv.includes("--iface"), false,
+        `o "--iface" vazou como argumento do ssh — é o "unknown option" medido:\n` +
+        argv.map((a) => `  [${a}]`).join("\n"));
+
+    // O alvo continua sendo o último argumento, e as opções usuais estão lá.
+    assert.ok(argv.includes("root@10.0.0.9"), "o alvo do ssh se perdeu");
+    assert.ok(argv.includes("UserKnownHostsFile=/dev/null"),
+        "o IP é compartilhado entre aparelhos; sem isso o ssh recusa a conexão");
+});
+
+test("sem --iface, nenhum ProxyCommand é montado", () => {
+    const lixo = join(TMP, "fake-bin-sem-iface");
+    mkdirSync(lixo, { recursive: true });
+    const registro = join(TMP, "argv2.txt");
+    writeFileSync(join(lixo, "ssh"), `#!/bin/sh
+: > ${registro}
+for a in "$@"; do printf '%s\\n' "$a" >> ${registro}; done
+cat >/dev/null
+cat <<'FIM'
+=== dmesg
+[    1.1] dw-mipi-dsi ok
+=== fim-dmesg
+=== estado
+drm card0-DSI-1: connected
+FIM
+`, { mode: 0o755 });
+
+    execFileSync("bash", [SCRIPT, "10.0.0.9"], {
+        encoding: "utf8",
+        env: { ...process.env, PATH: `${lixo}:${process.env.PATH}` },
+    });
+    const argv = readFileSync(registro, "utf8").split("\n").filter(Boolean);
+    assert.equal(argv.filter((a) => a.startsWith("ProxyCommand=")).length, 0,
+        "o caminho padrão (um aparelho) não precisa de proxy, e ele custa um " +
+        "processo python por conexão");
+});
+
+test("o log de boot bom do X35H (st7703) é reconhecido — e é OUTRO aparelho", () => {
+    // R35S e X35H são aparelhos diferentes, e o teste anterior (R35S) não cobre
+    // este. Aqui o painel é `panel-sitronix-st7703`, no RK3566, e o driver TEM
+    // `dev_info` no caminho feliz:
+    //
+    //   drivers/gpu/drm/panel/panel-sitronix-st7703.c:895
+    //     dev_info(dev, "%ux%u@%u %ubpp dsi %udl - ready\n", ...)
+    //
+    // O log abaixo é MONTADO a partir desse formato — não é de um boot medido,
+    // porque nenhum log do X35H foi lido ainda (AGENTS §31.3-A). Ele prende o
+    // reconhecimento do driver; a medição no aparelho continua pendente.
+    const log = `[    1.140000] dw-mipi-dsi-rockchip fe060000.dsi: Fixed dependency cycle(s)
+[    2.310000] panel-sitronix-st7703 fe060000.dsi.0: 640x480@60 24bpp dsi 4dl - ready
+[    2.315000] rockchip-drm display-subsystem: [drm] fb0: rockchipdrmfb frame buffer device
+=== estado
+  card0-DSI-1/status: connected
+  backlight/brightness: 128
+`;
+    const saida = analisar("x35h-bom.log", log);
+    assert.match(saida, /driver: st7703/, "o st7703 tem de ser reconhecido pelo nome");
+    assert.match(saida, /O painel inicializou NESTE boot/);
+    // E o script não pode atribuir este log ao R35S: o diagnóstico é do
+    // aparelho de onde o log veio, e quem diz qual é é o `device=` do
+    // build-info, não o script.
+    assert.doesNotMatch(saida, /panel-generic-dsi/,
+        "st7703 e generic-dsi são de aparelhos diferentes; misturar os dois é o " +
+        "erro que o alerta de 17/11 pediu para evitar");
+});
+
+test("o log de boot RUIM do X35H diz onde parou, e não 'detecção falhou'", () => {
+    // O caso do relato: boot frio, tela apagada. `st7703_enable()` devolve
+    // `dsi_ctx.accum_err`, então um comando DCS que expira aparece como erro.
+    const log = `[    2.310000] panel-sitronix-st7703 fe060000.dsi.0: Failed to write init sequence: -110
+[    2.315000] rockchip-drm display-subsystem: failed to enable panel: -110
+`;
+    const saida = analisar("x35h-ruim.log", log);
+    assert.match(saida, /REPORTou erro ao inicializar/);
+    assert.match(saida, /não de detecção/,
+        "a resposta à pergunta de origem: o defeito não é detecção de painel");
+    assert.doesNotMatch(saida, /O painel inicializou NESTE boot/,
+        "com erro de init não pode dar PASS");
+});

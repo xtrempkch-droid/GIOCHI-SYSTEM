@@ -6847,6 +6847,35 @@ que expira no boot frio (`-110`) devolve erro pelo `accum_err` e derruba o
 comando passa. **As duas produzem exatamente o sintoma descrito**, e elas se
 separam no log.
 
+### 31.3-A R35S e X35H são aparelhos DIFERENTES — não misture os dois
+
+Vale escrever porque a sessão de 17/11/2026 usou os dois, e o nome é parecido o
+bastante para confundir quem ler depois:
+
+| | **R35S** | **X35H** |
+| --- | --- | --- |
+| SoC | RK3326 (Cortex-A35, Mali-G31) | **RK3566** (Cortex-A55, Mali-G52) |
+| Painel | 640x480, `rocknix,generic-dsi` (driver **fora da árvore**) | 640x480, `powkiddy,x35h-panel` → `st7703` (mainline + nosso patch) |
+| Trilho do LCD | LDO do PMIC `rk817`, com `regulator-ramp-delay` | `regulator-fixed` por GPIO (`gpio0 RK_PC7`), **sem** `startup-delay-us` |
+| DTS | próprio (`rk3326-gameconsole-r36s`), patch de 988 linhas | **herda o da X55** (`#include "rk3566-powkiddy-x55.dts"`) e troca `compatible`/`rotation` |
+| Tem o bug da tela? | **não relatado** | **é o aparelho do relato** |
+
+**O R35S foi usado nesta sessão para uma coisa só: validar o INSTRUMENTO.** O
+script nasceu para o X35H, e o R35S era o único aparelho ligado — então ele
+serviu de cobaia para descobrir que o `panel-diag.sh` procurava o nome de UM
+driver (`st7703`) e dava falso negativo nos outros dois. Isso corrigiu o script;
+**não** mediu o X35H.
+
+O que continua sem medição, e é o que importa para o bug:
+
+- **nenhum log de boot do X35H foi lido** — nem bom, nem ruim;
+- a causa da intermitência continua **não decidida** (§31.3: pista, não veredito);
+- o `startup-delay-us` **não** foi aplicado, e não deve ser sem a medição.
+
+Ler o §31.4 e concluir "o painel do X35H foi diagnosticado" seria o §12.26 com
+outro nome: herdar a conclusão de um aparelho para o outro. A cobaia valida a
+ferramenta; a ferramenta é o que falta rodar **no X35H**.
+
 ### 31.4 O que foi construído: `scripts/panel-diag.sh`
 
 Responde "o painel foi inicializado neste boot?" com o que o kernel registrou,
