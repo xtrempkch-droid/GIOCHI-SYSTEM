@@ -79,6 +79,20 @@ CONFIG_SQUASHFS=y
 # existe e não gera evento — o pior tipo de falha (AGENTS §12.15).
 CONFIG_INPUT=y
 CONFIG_INPUT_EVDEV=y
+# `JOYDEV` é o que cria `/dev/input/js0` — a interface canônica de joystick do
+# Linux. Sem ele o controle só existe como `event*`, que é um fluxo cru e
+# indistinguível de teclado para qualquer coisa que não leia capabilities.
+#
+# Medido no R35S em 17/11/2026: `r36s_Gamepad -> event2`, sem `js0`, porque o
+# defconfig arm64 deixa `CONFIG_INPUT_JOYDEV` desligado. O kernel então não
+# rotula o dispositivo como joystick em `/proc/bus/input/devices`, e um app que
+# procure "o joystick" pelo caminho clássico não acha nada.
+#
+# Não é o mesmo que o `evdev`: os dois são complementares. `EVDEV` entrega os
+# eventos (é o que `giochi-buttons` e o `giochi-selftest` leem), `JOYDEV` dá a
+# identidade — `/dev/input/js0` existir é a afirmação do kernel de que aquele
+# dispositivo é um joystick.
+CONFIG_INPUT_JOYDEV=y
 CONFIG_INPUT_JOYSTICK=y
 CONFIG_JOYSTICK_ADC=y
 CONFIG_KEYBOARD_GPIO=y

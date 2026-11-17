@@ -57,6 +57,12 @@ CONFIG_FRAMEBUFFER_CONSOLE_ROTATION=y
 # eixos analógicos vêm de `adc-joystick`, que precisa deste driver. Sem ele o
 # nó do DTS fica sem driver e os eixos não existem.
 CONFIG_INPUT_EVDEV=y
+
+# `/dev/input/js0`: a interface canônica de joystick. Sem ela o controle existe
+# só como `event*`, e o kernel não o rotula como joystick em
+# /proc/bus/input/devices — medido no R35S em 17/11/2026. É complementar ao
+# EVDEV, não substituto: EVDEV entrega os eventos, JOYDEV dá a identidade.
+CONFIG_INPUT_JOYDEV=y
 CONFIG_INPUT_JOYSTICK=y
 CONFIG_JOYSTICK_ADC=y
 CONFIG_ROCKCHIP_SARADC=y

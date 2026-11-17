@@ -66,3 +66,4 @@ import "./requisitos-engine.test.mjs";
 import "./buildroot-upgrade.test.mjs";
 import "./fontes-idiomas.test.mjs";
 import "./input-diag.test.mjs";
+import "./input-joystick.test.mjs";
