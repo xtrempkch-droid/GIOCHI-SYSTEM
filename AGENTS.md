@@ -7054,6 +7054,52 @@ o que aponta para estado físico (carga do trilho, estado do painel) e não para
 configuração. Configuração errada dá o mesmo resultado em todo boot; o que muda
 entre boot frio e reset é o **estado analógico da placa**.
 
+### 31.5-A Dongle: o Wi-Fi entrou, o Bluetooth não — e a frase que eu escrevi mentia
+
+Ao liberar o X35H para a equipe do OS (17/11/2026), comparei os conjuntos de
+pacotes dos três handhelds. A diferença legítima é o rádio onboard: a X55 tem o
+RTL8821CS e por isso leva `RTL_88XX_BT` e `RTW88`; o X35H não tem o chip e não
+leva — correto.
+
+O que **não** era legítimo é o Bluetooth por dongle. Medido nos `.config` dos
+três:
+
+```text
+CONFIG_BT=m                 (todos)
+CONFIG_BT_HCIBTUSB=m        (todos — é o driver de dongle USB)
+CONFIG_BT_HCIBTUSB_RTL=y    (todos)
+```
+
+Ou seja: o **kernel já suporta** dongle BT em qualquer um deles. Falta só o
+userspace no X35H — sem `BLUEZ5_UTILS` não há `bluetoothd`, e o `hci0` aparece em
+`/sys/class/bluetooth/` sem ninguém para usá-lo. É o §12.15 na prática: nó que
+existe e não funciona é pior que nó ausente.
+
+E a frase que **eu** tinha escrito no `device.json` — "sem Wi-Fi, sem Bluetooth —
+dongle USB é suportado (RTL8XXXU/MT7601U/ATH9K_HTC =m)" — induzia ao erro: os
+três nomes citados são drivers de **Wi-Fi**. Quem lesse concluiria que dongle BT
+também funciona. Corrigido, e a lacuna está no README do aparelho com as duas
+linhas exatas que a fecham.
+
+**Por que não liguei agora:** `bluez5` faz `select BR2_PACKAGE_DBUS`, então o
+custo não são duas linhas, é um daemon de IPC inteiro num aparelho de 1 GB, para
+um rádio que não está lá. O Wi-Fi de dongle entrou porque havia **relato de uso
+da comunidade** (a correção veio do dono do projeto, §12.31); o BT de dongle não
+tem relato. O número fica escrito para a decisão ser tomada com ele à vista, em
+vez de "alguém decide depois" sem dado.
+
+Corolário de método: **a regra do §12.31 foi aplicada pela metade** — ao
+acrescentar suporte a dongle, olhei o Wi-Fi (que tinha relato) e não o Bluetooth
+(que não tinha). Regra aplicada por caso é cobertura aparente, a mesma lição do
+§12.50 e do §12.59.
+
+E o erro menor do caminho, que virou teste: escrevi `BT_HCITUSB_RTL` na doc. O
+símbolo não existe — é `BT_HCIBTUSB_RTL`. Nome de símbolo errado em doc não
+quebra build; faz quem seguir a doc procurar um fantasma e concluir "este kernel
+não tem". `tests/dongle.test.mjs` passou a extrair todo `CONFIG_*` citado no
+README do aparelho e conferir contra o Kconfig real do kernel, quando a árvore
+está em cache.
+
 ### 31.6-A O erro de processo que eu cometi nesta sessão
 
 Fica registrado porque o §8 avisa e eu fiz assim mesmo: **empurrei em

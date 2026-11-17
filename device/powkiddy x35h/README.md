@@ -16,6 +16,40 @@ tela e o mesmo DTS.
 | U-Boot | mainline 2024.10, `anbernic-rgxx3-rk3566` |
 | Status | **`ready`** — bootou em hardware (tela, `usb0`, SSH) e entra na matriz do CI |
 
+## Dongle USB: Wi-Fi funciona, Bluetooth não (lacuna conhecida)
+
+O aparelho não tem rádio onboard, mas tem **duas portas USB** — uma delas
+(`usb@fd000000`, `dr_mode=host`) é livre para acessório. Pela regra do §12.31 do
+`AGENTS.md` — *hardware fornecido pelo usuário também se empacota, porque a
+imagem é gravada uma vez e o hardware chega depois* — o suporte precisa estar na
+imagem, não ser acrescentado depois.
+
+| Acessório | Kernel | Userspace | Estado |
+| --- | --- | --- | --- |
+| Dongle **Wi-Fi** | `RTL8XXXU=m`, `RTL8192CU=m`, `MT7601U=m`, `ATH9K_HTC=m` | `wpa_supplicant`, `iw`, `wireless-regdb` | **OK** |
+| Dongle **Bluetooth** | `BT_HCIBTUSB=m`, `BT_HCIBTUSB_RTL=y` (vem do defconfig arm64) | **ausente** | **lacuna** |
+
+Medido nos `.config` dos três aparelhos: o kernel tem `CONFIG_BT=m`,
+`CONFIG_BT_HCIBTUSB=m` e `CONFIG_BT_HCIBTUSB_RTL=y` em **todos** — inclusive neste.
+O que falta é o **userspace**: sem `BLUEZ5_UTILS` não há `bluetoothd`, e um dongle
+plugado cria `hci0` em `/sys/class/bluetooth/` sem ninguém para usá-lo. É o
+§12.15 (nó que existe e não funciona é pior que ausente) na prática.
+
+**Decisão pendente, e o custo é o motivo.** Ligar custa duas linhas no
+`defconfig` **mais `dbus`**, que o `bluez5` seleciona — um daemon de IPC inteiro
+num aparelho de 1 GB, para um rádio que não está lá. O Wi-Fi de dongle entrou
+porque havia relato de uso da comunidade; o Bluetooth de dongle não tem relato.
+Fica registrado com o número, para a decisão ser tomada com ele à vista:
+
+```make
+# device/powkiddy x35h/defconfig — se for ligar
+BR2_PACKAGE_BLUEZ5_UTILS=y
+BR2_PACKAGE_BLUEZ5_UTILS_CLIENT=y
+```
+
+Depois de ligar, `giochi-selftest` num aparelho **com** dongle deve mostrar
+`hci0` e `Powered: yes`; sem dongle, nada muda.
+
 ## Defeito conhecido: a tela não acende em alguns boots frios
 
 **Sintoma.** Em alguns boots a tela fica apagada; apertar o botão de reset faz a

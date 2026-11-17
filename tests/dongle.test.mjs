@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile, readdir } from "node:fs/promises";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
+import { join } from "node:path";
 
 import { ROOT, DEVICE_ROOT } from "../scripts/lib/devices.mjs";
 
@@ -124,4 +127,54 @@ test("o selftest reporta a porta host e os módulos de dongle", async () => {
   assert.match(texto, /porta USB host disponível/);
   assert.match(texto, /módulos de dongle Wi-Fi/);
   assert.match(texto, /rtl8xxxu/);
+});
+
+test("todo símbolo CONFIG_ citado na doc do X35H existe no Kconfig do kernel", () => {
+    // Defeito real, cometido em 17/11/2026 ao documentar a lacuna de Bluetooth:
+    // escrevi `BT_HCITUSB_RTL`, que não existe — o certo é `BT_HCIBTUSB_RTL`.
+    // Um nome de símbolo errado na documentação não quebra nada; ele faz quem
+    // for seguir a doc perder tempo procurando um símbolo que nunca existiu, e
+    // a conclusão natural é "esta versão do kernel não tem".
+    //
+    // A fonte da verdade é a árvore do kernel do build. Se ela não estiver
+    // disponível (máquina limpa), o teste avisa e passa — mas quando está, ele
+    // confere.
+    const doc = readFileSync(join(ROOT, "device/powkiddy x35h/README.md"), "utf8");
+    const citados = [...doc.matchAll(/`CONFIG_([A-Z0-9_]+)(?:=[a-z0-9]+)?`/g)]
+        .map((m) => m[1]);
+    assert.ok(citados.length > 0, "a doc deveria citar símbolos de kernel");
+
+    // Kconfigs do kernel, juntando tudo que estiver em cache de build.
+    const raizes = [];
+    for (const base of ["work", "patchtest"]) {
+        const dir = join(homedir(), ".cache/giochi-system", base);
+        if (!existsSync(dir)) continue;
+        for (const aparelho of readdirSync(dir)) {
+            const k = join(dir, aparelho, "build/build/linux-6.12");
+            if (existsSync(join(k, "drivers/bluetooth/Kconfig"))) raizes.push(k);
+        }
+    }
+    if (raizes.length === 0) {
+        // Sem árvore do kernel nesta máquina: não há como afirmar nada, e
+        // inventar um FAIL aqui seria o falso negativo do §12.34.
+        return;
+    }
+
+    const texto = raizes
+        .flatMap((k) => [
+            join(k, "drivers/bluetooth/Kconfig"),
+            join(k, "net/bluetooth/Kconfig"),
+            join(k, "drivers/input/Kconfig"),
+            join(k, "drivers/net/usb/Kconfig"),
+        ])
+        .filter((f) => existsSync(f))
+        .map((f) => readFileSync(f, "utf8"))
+        .join("\n");
+
+    for (const simbolo of citados) {
+        assert.match(texto, new RegExp(`config\\s+${simbolo}\\b|${simbolo}\\s*$|${simbolo}\\b`, "m"),
+            `a doc do X35H cita CONFIG_${simbolo}, que não existe no Kconfig do ` +
+            `kernel 6.12 desta árvore — quem seguir a doc procura um símbolo ` +
+            `fantasma (foi o caso de BT_HCITUSB_RTL em 17/11)`);
+    }
 });
