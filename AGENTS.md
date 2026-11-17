@@ -6670,13 +6670,41 @@ quem ligar precisa saber que o `/dev/uinput` passa a depender de regra do eudev 
 vez do kernel. O `selftest` pega a consequência (daemon não roda → `FAIL`), não a
 causa — que é o certo: ele roda no aparelho, onde a config já virou realidade.
 
+### As imagens com o contrato existem (run 44184129584, commit 87c8422)
+
+O build que carrega tudo isto — `panel-diag.sh`, o `selftest` novo, o daemon, o
+`gamecontrollerdb.txt`, `CONFIG_INPUT_UINPUT=y` e `CONFIG_INPUT_JOYDEV=y` — passou
+**nos três aparelhos**:
+
+```text
+Build qemu-aarch64      success
+Build powkiddy-x55      success        giochi-system-powkiddy-x55   171,6 MB
+Build r35s              success        giochi-system-r35s           154,3 MB
+```
+
+**Por que "build verde" prova as duas metades** — e não é fé, é o desenho dos
+gates:
+
+| Metade | Quem reprova se faltar |
+| --- | --- |
+| o daemon compila e entra no rootfs | `post-build.sh` faz `exit 1` em `FALHOU compilar o giochi-gamepad` |
+| o kernel tem `CONFIG_INPUT_UINPUT` | `assert-kernel-config` compara o `.config` do kernel com `kernel-required.txt`, que lista o símbolo nos três aparelhos |
+| `js0` existe (leitura por joystick) | idem, via `CONFIG_INPUT_JOYDEV=y` |
+
+O que **não** se pôde conferir daqui: o conteúdo do artefato. O download exige
+token (`GET /actions/artifacts/<id>/zip` → **401**), como o §2-A já registrava.
+Quem quiser ver o binário: baixar pela interface, ou gravar a imagem e rodar
+`giochi-selftest` no aparelho — que agora tem o bloco do controle virtual.
+
 ### Estado e pendências
 
 ```text
-suíte   607/607 + 1 skip
-imagem  NENHUMA gravada contém o daemon ainda — precisa de rebuild
-        (medido: a do R35S é de 15/11, sem uinput no kernel e com o mapa sem eixos)
-ci      build de 93ce76a em andamento com os três aparelhos (qemu, x55, r35s)
+suíte   608/608 + 1 skip
+imagem  as imagens COM o contrato já existem (run 44184129584) — falta GRAVAR
+        no cartão e conferir no aparelho: `giochi-selftest` deve dar PASS no
+        controle virtual, não SKIP
+        (a que está no R35S é de 15/11: sem uinput no kernel, sem daemon,
+         e com o buttons.map anterior à seção de eixos)
 ```
 
 | Pendência | Por quê |
