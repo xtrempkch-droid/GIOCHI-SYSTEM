@@ -6643,8 +6643,15 @@ formulário converteu antes de enviar.
 O conteúdo essencial (o contrato de entrada) está lá nos três repos, então
 ninguém fica sem a informação. O que falta é o **recorte por equipe**: o APP
 precisa ler sobre `EvdevInput::open` e o `Vigia`, o OS sobre `docs/juncao.md` e a
-verificação da imagem. Os corpos certos estão em
-`files/issues-prontas/` e a correção do APP foi submetida.
+verificação da imagem.
+
+Os corpos certos estão **versionados** em
+[`docs/issues-para-outros-repos/`](docs/issues-para-outros-repos/README.md) —
+`APP-enumeracao-e-analogico.md` e `OS-documentar-na-juncao.md`, cada um com o
+título do seu repo na tabela do README. Sao corpo puro: selecionar tudo, colar no
+*Edit* da issue. Ficaram no repositorio, e nao no workspace da sessao, porque a
+ferramenta de issues falhou de forma nao deterministica duas vezes — o material
+nao pode depender dela.
 
 ### O que deu errado
 
@@ -6696,9 +6703,19 @@ avisa. É o "verde e errado" clássico deste repositório, agora no repo vizinho
   interface (o mesmo formulário que causou as duplicatas). Medido às 20:52 UTC:
   os dois continuam com `md5=36446c266e62`, HTML e o texto do GAMES.
 
-Se o formulário falhar de novo, o caminho manual é abrir a issue no navegador,
-clicar em *Edit* e colar o corpo de `files/issues-prontas/APP-contrato-de-entrada.md`
-ou `OS-contrato-de-entrada.md` (o conteúdo **depois** do primeiro `---`).
+**Caminho decidido: manual.** O dono do projeto autorizou, e é o certo — o
+formulário da ferramenta de issues não é confiável para isto (duplicou quatro
+vezes e trocou o corpo de duas). O material está em
+[`docs/issues-para-outros-repos/`](docs/issues-para-outros-repos/README.md):
+
+| Issue | Arquivo a colar |
+| --- | --- |
+| `GIOCHI-APP#1` | `APP-enumeracao-e-analogico.md` |
+| `GIOCHI-OS#1` | `OS-documentar-na-juncao.md` |
+
+Cada um é **corpo puro** — sem título, sem `---`, sem instrução. Abrir a issue,
+*Edit*, apagar tudo, colar o arquivo inteiro. O título de cada uma está na tabela
+do README daquela pasta.
 
 **O que já está certo e não precisa de nada:** `GAMES#1` (o defeito do
 `neon-drift`, 6417 B) e `GAMES#2` (o contrato, 3609 B) — os dois em markdown, com

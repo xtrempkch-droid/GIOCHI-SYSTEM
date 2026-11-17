@@ -209,6 +209,19 @@ funções.
 
 ---
 
+## A quem este contrato foi comunicado
+
+| Equipe | Issue | O pedido, em uma linha |
+| --- | --- | --- |
+| **jogos** | `GIOCHI-GAMES#1` e `#2` | não somar fontes de input; mirar `Giochi Gamepad` |
+| **app** | `GIOCHI-APP#1` | preferir o virtual na enumeração; o analógico tem faixa única |
+| **OS** | `GIOCHI-OS#1` | documentar na junção **e** verificar que a imagem carrega |
+
+Os corpos por equipe estão versionados em
+[`issues-para-outros-repos/`](issues-para-outros-repos/README.md), com o estado de
+cada um. As duas primeiras (`GAMES#1`, `#2`) estão completas e corretas; as do
+APP e do OS foram criadas com o texto trocado e precisam de substituição manual.
+
 ## Como verificar em um aparelho novo
 
 ```bash
