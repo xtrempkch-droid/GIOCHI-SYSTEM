@@ -6914,6 +6914,30 @@ o que aponta para estado físico (carga do trilho, estado do painel) e não para
 configuração. Configuração errada dá o mesmo resultado em todo boot; o que muda
 entre boot frio e reset é o **estado analógico da placa**.
 
+### 31.6-A O erro de processo que eu cometi nesta sessão
+
+Fica registrado porque o §8 avisa e eu fiz assim mesmo: **empurrei em
+`scripts/**` com o build de três aparelhos rodando**, e o `cancel-in-progress`
+matou esse build (`c0e7cce`, ~10 min de compilação em cada um dos três). O push
+era a correção do `--iface` do `panel-diag.sh` — melhoria real, mas que podia
+esperar 40 minutos.
+
+O que **não** se perdeu:
+
+- `BR2_DL_DIR` e o ccache são cache de CI, então o build novo não parte do zero
+  em downloads nem em objetos de host;
+- o run novo (`527f228`) é superset do cancelado — valida tudo o que o anterior
+  validaria, e mais o `--iface`.
+
+O que se perdeu: **tempo de parede**, e a chance de ter a resposta do build mais
+cedo. A regra do §8 não é sobre perder trabalho de build (o cache cobre boa parte)
+— é sobre o build levar 1–2 h a mais e a sessão acabar antes do resultado.
+
+Regra prática que sai daqui: **as duas últimas horas de qualquer sessão não são
+lugar para mexer em `scripts/`**. Correção de script entra no começo, quando há
+tempo de o CI responder. No fim, o que se faz é documentação e teste — que não
+disparam build (`tests/**` e `docs/**` não estão em `paths:`).
+
 ### 31.7 "Então não dá para suportar telas diferentes?" — dá, e é assim que se faz
 
 A conclusão "não há detecção" não significa "um painel por imagem". Significa que
