@@ -70,3 +70,4 @@ import "./input-joystick.test.mjs";
 import "./sdl-input-probe.test.mjs";
 import "./gamepad-virtual.test.mjs";
 import "./panel-diag.test.mjs";
+import "./issues-vizinhos.test.mjs";

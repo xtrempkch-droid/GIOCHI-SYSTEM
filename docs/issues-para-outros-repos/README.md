@@ -49,3 +49,21 @@ imagem.
 
 **Substituir é um `Edit` na issue**: abrir, *Edit*, apagar tudo, colar o arquivo
 daqui. Nada de formulário.
+
+E o **título também está errado** nas duas: as duas issues abertas se chamam
+
+```text
+Contrato de entrada: mirar o controle virtual "Giochi Gamepad", não enumerar /dev/input/event*
+```
+
+que é o título do `GAMES #2`. O título certo de cada uma está na coluna
+*Título* da tabela acima — trocar junto com o corpo, no mesmo `Edit`.
+
+## O que impede isso de apodrecer
+
+`tests/issues-vizinhos.test.mjs` (5 casos) lê **esta** tabela e confere os
+arquivos: existem, têm corpo inteiro (> 1500 B), não têm tag HTML, não começam
+com `#` nem `---`, e cada um fala do que *aquela* equipe tem de fazer
+(`EvdevInput`/`enumerar` para o APP, `junção`/`imagem` para o OS). Trocar dois
+arquivos de lugar reprova — verificado. Sem isso, um corpo trocado seria colado
+igual, e o erro só apareceria no repo de outra equipe.
