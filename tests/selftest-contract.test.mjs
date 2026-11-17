@@ -589,3 +589,114 @@ test("a leitura de /proc/*/cmdline silencia o processo que sumiu", async () => {
       `falha primeiro e o stderr ainda não está desviado.`,
   );
 });
+
+// ── Caso 4 (17/11): o controle VIRTUAL não era verificado ──────────────────
+//
+// O bloco de gamepad do selftest conta o HARDWARE (gpio-keys, adc-joystick,
+// r36s_Gamepad). Isso responde "os botões existem", não "os jogos veem o mesmo
+// layout em qualquer console" — que passou a ser a promessa do sistema quando o
+// `giochi-gamepad` entrou: um nó só, 17 códigos canônicos, 4 eixos.
+//
+// Se o daemon não sobe, nada quebra visivelmente: os jogos voltam a ver o
+// hardware cru e o `neon-drift` volta a divergir entre R35S e X55. Build verde,
+// contrato ausente, nenhum aviso — a classe do §12.29 aplicada a um serviço.
+test("o controle virtual é verificado pela consequência (nó + daemon)", async () => {
+  const texto = await read();
+  assert.match(texto, /Giochi Gamepad/,
+    "o selftest tem de olhar o nó virtual, não só o hardware");
+  assert.match(texto, /S52gamepad/,
+    "e tem de saber que o serviço existe, para distinguir 'não embarcado' de 'embarcado e quebrado'");
+  assert.match(texto, /\/proc\/\[0-9\]\*\/cmdline/,
+    "o daemon é `/bin/sh` rodando o script: `pidof` casaria pelo nome e diria " +
+    "'ausente' com ele vivo (§12.46)");
+});
+
+test("os três estados do controle virtual dão três vereditos distintos", async () => {
+  const sh = readFileSync(SELFTEST, "utf8");
+  const bruto = sh.slice(
+    sh.indexOf("# ── o controle VIRTUAL"),
+    sh.indexOf("# ── áudio"),
+  );
+  assert.ok(bruto.length > 500, `bloco não encontrado (${bruto.length} B)`);
+
+  const tmp = mkdtempSync(path.join(tmpdir(), "selftest-virt-"));
+  try {
+    const sysInput = path.join(tmp, "sys/class/input").replaceAll("\\", "/");
+    const proc = path.join(tmp, "proc").replaceAll("\\", "/");
+    const initd = path.join(tmp, "init.d/S52gamepad").replaceAll("\\", "/");
+    const bin = path.join(tmp, "usr/bin/giochi-gamepad").replaceAll("\\", "/");
+    mkdirSync(path.dirname(initd), { recursive: true });
+    mkdirSync(path.dirname(bin), { recursive: true });
+    mkdirSync(path.join(tmp, "proc"), { recursive: true });
+
+    const bloco = bruto
+      .replaceAll("/sys/class/input", sysInput)
+      .replaceAll("/proc/", `${proc}/`)
+      .replaceAll("/etc/init.d/S52gamepad", initd)
+      .replaceAll("/usr/bin/giochi-gamepad", bin);
+
+    // O caminho real é `input/eventN/device/name`: o DIRETÓRIO é `eventN`, e o
+    // nome do aparelho está dentro do arquivo. Criar a pasta com o nome do
+    // aparelho não casaria o glob `event*/device` — e foi o que aconteceu na
+    // primeira versão deste teste.
+    const no = (nome, keyBits, absBits, evento = "event21") => {
+      const d = path.join(tmp, "sys/class/input", evento, "device");
+      mkdirSync(path.join(d, "capabilities"), { recursive: true });
+      writeFileSync(path.join(d, "name"), `${nome}\n`);
+      writeFileSync(path.join(d, "capabilities/key"), `${keyBits}\n`);
+      if (absBits) writeFileSync(path.join(d, "capabilities/abs"), `${absBits}\n`);
+    };
+    const daemon = (vivo) => {
+      if (!vivo) return;
+      const d = path.join(tmp, "proc/4242");
+      mkdirSync(d, { recursive: true });
+      writeFileSync(path.join(d, "cmdline"), "/bin/sh\0/usr/bin/giochi-gamepad\0");
+    };
+    const instalar = () => writeFileSync(initd, "#!/bin/sh\n", { mode: 0o755 });
+
+    const roda = () => {
+      const script = `
+PASS=0; WARN=0; FAIL=0; SKIP=0
+pass() { echo "PASS $*"; }
+warn() { echo "WARN $*"; }
+fail() { echo "FAIL $*"; }
+skip() { echo "SKIP $*"; }
+say() { echo "     $*"; }
+head2() { :; }
+MAP_GAMEPAD=16
+read_or() { cat "$1" 2>/dev/null | tr -d '\\0'; }
+${sh.slice(sh.indexOf("count_bits() {"), sh.indexOf("# ## Três origens de gamepad"))}
+${bloco}
+`;
+      return execFileSync("sh", ["-c", script], { encoding: "utf8" });
+    };
+
+    // 1. Contrato valendo: serviço instalado, daemon vivo, nó com 17 botões.
+    instalar();
+    daemon(true);
+    no("Giochi Gamepad", "7fdbff0f0000000000000000000000000", "3003f00000000000");
+    const r1 = roda();
+    assert.match(r1, /PASS controle virtual: Giochi Gamepad/,
+      `serviço + daemon + nó certo tem de dar PASS; veio:\n${r1}`);
+
+    // 2. Daemon caiu: os jogos voltam ao hardware cru. É o defeito silencioso.
+    rmSync(path.join(tmp, "proc/4242"), { recursive: true, force: true });
+    assert.match(roda(), /FAIL giochi-gamepad NÃO está rodando/,
+      "serviço instalado e daemon morto tem de doer — é o contrato prometido e não cumprido");
+
+    // 3. Daemon vivo, mas sem /dev/uinput não há nó: o kernel não criou o device.
+    daemon(true);
+    rmSync(path.join(tmp, "sys/class/input"), { recursive: true, force: true });
+    mkdirSync(path.join(tmp, "sys/class/input"), { recursive: true });
+    assert.match(roda(), /FAIL giochi-gamepad roda mas o nó/,
+      "sem nó, o daemon está vivo e não entrega nada — FAIL, não PASS");
+
+    // 4. Nada instalado: imagem anterior ao contrato. SKIP, e não FAIL — senão
+    //    toda imagem antiga fica vermelha e o operador aprende a ignorar.
+    rmSync(initd, { force: true });
+    assert.match(roda(), /SKIP sem controle virtual/,
+      "imagem sem o serviço é SKIP: não foi prometido, não pode reprovar");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
