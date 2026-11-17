@@ -5230,12 +5230,22 @@ mapeamento (`SDL_GAMECONTROLLERCONFIG` / `gamecontrollerdb.txt`) — o automáti
 nunca vai concordar. `tests/sdl-input-probe.test.mjs` prende as duas pontas: os
 mapas medidos na convenção do plástico, e divergência só com aviso escrito.
 
-#### Entregável para o `GIOCHI-GAMES`
+#### Entregável para o `GIOCHI-GAMES` — **issue aberta**
 
-O `neon-drift` é de repo alheio (§2-A): o resultado daqui é a issue pronta em
-`files/issue-giochi-games-gamepad-sdl-diverge.md`, com a tabela acima e a
-correção provável (derivar o mapa SDL do `buttons.map`, ou desligar o caminho
+O `neon-drift` é de repo alheio (§2-A), então o resultado daqui é relatório, e a
+issue foi aberta em 17/11/2026:
+
+**[xtrempkch-droid/GIOCHI-GAMES#1](https://github.com/xtrempkch-droid/GIOCHI-GAMES/issues/1)**
+— *neon-drift: o mapa do caminho SDL (gamepad.rs) diverge do buttons.map — no
+R35S o A freia*. Aberta, 114 linhas, com as duas tabelas medidas (o mapeamento
+que o SDL gera e a divergência botão por botão), o motivo de a X55 não sofrer, e
+a correção sugerida (derivar o mapa SDL do `buttons.map`, ou desligar o caminho
 SDL quando o `evdev` já respondeu).
+
+O corpo também está versionado na cópia da sessão
+(`files/issue-giochi-games-gamepad-sdl-diverge.md`) — se alguém precisar
+acrescentar medição, edite os dois, ou só a issue, que é a fonte que a outra
+equipe lê.
 
 ## 13. Aparelhos
 
@@ -6405,10 +6415,11 @@ botão**, reprovado no segundo portão.
 
 ### Pendências
 
-1. **Postar a issue do `GIOCHI-GAMES`** — o corpo está pronto em
-   `files/issue-giochi-games-gamepad-sdl-diverge.md` (desta sessão). Esta máquina
-   não tem token: `POST /issues` → 401 (§2-A). Enquanto ela não for postada, o
-   defeito continua no jogo, com a tabela completa no §12.74.
+1. ~~**Postar a issue do `GIOCHI-GAMES`**~~ — **aberta**: [xtrempkch-droid/GIOCHI-GAMES#1](https://github.com/xtrempkch-droid/GIOCHI-GAMES/issues/1)
+   em 17/11/2026. Ela levou a tabela medida dos dois lados (o mapeamento que o SDL
+   gera no R35S e o `buttons.map` do projeto), a lista de cinco botões divergentes
+   e a correção sugerida. A bola está com a equipe do jogo; o que este repositório
+   pode fazer é o que já está feito e preso em teste.
 2. **O jogo rodando, com A/B apertados, ainda não foi observado.** A conclusão
    sai do mapeamento que o SDL imprime no aparelho × o mapa do jogo, e essa
    cadeia está fechada dos dois lados (`Button do SDL -> bN -> código evdev`
@@ -6439,3 +6450,67 @@ Suíte: **569/569 + 1 skip**, em 63 arquivos.
 node tests/run-all.mjs                          # 569/569 + 1 skip
 bash scripts/sdl-input-probe.sh r35s --run      # a medição do §12.74
 ```
+
+## 28. A issue do `GIOCHI-GAMES` e o que a medição corrigiu de quebra (17/11/2026)
+
+Fechamento da sessão do §27. A pergunta era "é o sistema ou o jogo", e a resposta
+— **o jogo** — virou issue aberta em repo alheio, não patch (§2-A).
+
+### A issue
+
+**[xtrempkch-droid/GIOCHI-GAMES#1](https://github.com/xtrempkch-droid/GIOCHI-GAMES/issues/1)**
+· aberta em 17/11/2026 · 114 linhas
+
+Leva o que a outra equipe precisa para corrigir sem refazer a investigação:
+
+| Seção | Conteúdo |
+| --- | --- |
+| sintoma | no R35S o A freia; na X55 funciona |
+| o que o SDL gera | a saída crua do `sdl-input-probe`, com `a:b0` **e** a tradução `Button do SDL -> bN -> código evdev` |
+| a divergência | tabela de 12 linhas, 5 divergentes (A, B, R1, L2, R2) |
+| por que só no R35S | as três classes de device medidas nas duas placas |
+| correção | derivar do `buttons.map`; **não** trocar A↔B (quebraria o PC com Xbox) |
+| reprodução | `bash scripts/sdl-input-probe.sh r35s --run 10.55.0.2` |
+
+O `--video` do probe fica de fora de propósito: KMSDRM é exclusivo e o launcher
+estava no ar (§12.72).
+
+### O que a medição corrigiu de quebra, e não estava no pedido
+
+`docs/entrada-sdl2.md` afirmava desde 11/11 que *"o SDL só reconhece um controle se
+houver entrada no `SDL_GameControllerDB`"*, e propunha
+`SDL_GameControllerAddMapping()` como primeira saída. **As duas coisas estavam
+erradas no mecanismo**, e o erro mandaria a equipe da engine para o caminho que
+não funciona.
+
+O que é medido:
+
+| Nó (X55, DTS mainline) | O que tem | Classe que o SDL dá | Vira gamecontroller? |
+| --- | --- | --- | --- |
+| `gpio-keys-control` | 17 `BTN_*`, **zero eixos** | **0** | nem entra na lista de joysticks |
+| `adc-joystick` | 4 eixos, **zero botões** | JOYSTICK | reprova no `BTN_GAMEPAD` |
+
+E no R35S, onde botões e eixos estão no **mesmo** nó, o SDL2 gera o mapeamento
+**sozinho** (`LINUX_JoystickGetGamepadMapping`) — sem DB, sem libudev.
+
+Consequência que muda a recomendação: no X55/X35H,
+`SDL_GameControllerAddMapping` **não resolve**. Registrar o GUID do `adc-joystick`
+faria `SDL_IsGameController` responder `SIM` e o controle sairia com eixos e
+**nenhum botão**. Um gamepad SDL não se monta colando dois nós. A opção foi
+riscada no doc, com o motivo escrito ao lado.
+
+É a mesma família do §12.22 e do §12.59: **a conclusão estava certa, a causa não**
+— e causa errada produz a correção errada na vez seguinte. Quem lesse o doc e
+tentasse o DB perderia a tarde num aparelho onde o device nem é joystick.
+
+### Estado no fim
+
+```text
+main        5ffb592
+suíte       569/569 + 1 skip, 63 arquivos
+CI          5ffb592: Validate OK, builds em andamento
+issue       GIOCHI-GAMES#1 aberta
+```
+
+Nada foi gravado no aparelho (só `/tmp`, já limpo), o launcher nunca foi parado, e
+o R35S segue respondendo em `10.55.0.2`.
