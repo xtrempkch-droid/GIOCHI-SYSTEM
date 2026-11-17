@@ -368,6 +368,7 @@ Giochi system/
 │   ├── make-sd-image.sh                # imagem de cartão com offsets do RK3566
 │   ├── flash-sd.sh                     # grava com guarda de destino + SHA256
 │   ├── audio-validar.sh                # áudio medido no aparelho por SSH (§23)
+│   ├── panel-diag.sh                   # tela apagada: DSI, painel, backlight, trilho (§31)
 │   ├── assert-kernel-config.mjs         # CONFIG_* do kernel (o gap do §12.9)
 │   └── lib/{devices,assert-config,assert-kernel-config,fdt}.mjs
 ├── docker/{builder,serial,serial-logger}.Dockerfile + scripts de serial
@@ -533,6 +534,8 @@ bash scripts/gpu-bench.sh powkiddy-x55 --run --repetir 3   # throughput: fill, A
 bash scripts/gpu-bench.sh powkiddy-x55          # só compila o benchmark
 bash scripts/audio-alerta.sh --alar             # tom pela via SDL2 -> ALSA
 bash scripts/audio-validar.sh                   # áudio medido: card, mux, volume, PCM RUNNING (§23)
+bash scripts/panel-diag.sh                       # por que a tela não acendeu neste boot (§31)
+bash scripts/panel-diag.sh --log giochi-boot.log # o mesmo, sobre o log de um boot que falhou
 bash scripts/sdl-input-probe.sh r35s --run      # o que o SDL vê como controle, e com qual mapa (§12.74)
 bash scripts/../device/common/rootfs-overlay/etc/init.d/S52gamepad status   # o controle virtual subiu? (§29)
 bash scripts/input-diag.sh                      # o que o KERNEL classificou: joystick/teclado/ponteiro (§12.73)
@@ -6720,3 +6723,191 @@ do README daquela pasta.
 **O que já está certo e não precisa de nada:** `GAMES#1` (o defeito do
 `neon-drift`, 6417 B) e `GAMES#2` (o contrato, 3609 B) — os dois em markdown, com
 o texto completo. A equipe de jogos tem o que precisa para corrigir.
+
+## 31. A tela do X35H que não acende no boot frio (17/11/2026)
+
+Pergunta do dono do projeto: *"o X35H está com uma intermitência — em alguns
+boots a tela não acende, e apertar o botão de reiniciar faz funcionar. Isso é
+detecção de painel, que assim suporta várias telas, ou é modelo fixo e pode ser
+um bug que mereça correção?"*
+
+**São duas perguntas e as duas têm resposta medida.** A primeira é **não** — não
+existe detecção, e a intermitência não pode ser "às vezes detectou". A segunda é
+**sim** — é bug de inicialização de verdade, e o sintoma tem três causas
+independentes que ninguém distingue olhando a tela.
+
+### 31.1 Detecção de painel MIPI-DSI não existe — e não é limitação nossa
+
+| O que existe | O que não existe |
+| --- | --- |
+| casamento `compatible` do device tree com a `of_device_id` do driver | qualquer anúncio do painel |
+| `struct drm_display_mode` escrita em C, devolvida por `st7703_get_modes()` | EDID, DDC, hotplug |
+| timing declarado no DTS e na sequência `init_sequence` | negociação de modo |
+
+Painel DSI **não tem canal de dados de volta para se identificar**. Quem tem
+EDID é HDMI/DisplayPort/VGA — e o `dw-hdmi` do RK3566 está `disabled` no nosso
+patch por isso mesmo. Então:
+
+- `compatible` errado ⇒ a tela **nunca** acende. Não é intermitente.
+- `compatible` certo ⇒ o mesmo modo, toda vez, para sempre.
+
+Corolário prático, e é o que o dono do projeto precisa saber ao planejar
+aparelhos novos: **painel diferente = DTS diferente**. Trocar o painel de uma
+unidade não é configuração, é patch de device tree (o X35H faz exatamente isso:
+`patches/0001` só troca `compatible` e `rotation` no nó herdado da X55).
+`video=DSI-1:...` na cmdline também não ajuda — ele escolhe entre os modos que o
+conector já anuncia, e o painel anuncia um só. É o **§12.23** pela terceira vez.
+
+### 31.2 A intermitência é real, e são três causas com o mesmo sintoma
+
+Tela apagada em handheld tem pelo menos quatro origens, e as quatro se parecem:
+
+| Onde parou | O que o kernel diz | Se a tela acende no reset |
+| --- | --- | --- |
+| controlador DSI (`dw-mipi-dsi`) | erro de PLL/lane/timeout | talvez — o PLL pode travar na segunda tentativa |
+| painel (`panel-sitronix-st7703`) | `Failed to write init sequence: -110` (o `accum_err` do `st7703_enable`) | talvez |
+| luz de fundo (`pwm-backlight`) | nada; o PWM liga e a tela fica preta | sim, sempre |
+| alimentação (`vcc_lcd`) | nada | **sim** — e é a assinatura descrita |
+
+O que separa os quatro é o **log do boot que falhou**. `dmesg` em memória se
+perde no reset, e é por isso que este aparelho tem o `S96bootlog` ligado
+(marcador `/etc/giochi/boot-log`): cada boot grava `giochi-boot.log` na FAT do
+cartão. O boot ruim deixa o dmesg dele lá.
+
+### 31.3 A pista que o código dá, e que NÃO é prova
+
+Medido no kernel 6.12 da árvore (não deduzido):
+
+```c
+/* drivers/gpu/drm/panel/panel-sitronix-st7703.c */
+static int st7703_prepare(struct drm_panel *panel)
+{
+	gpiod_set_value_cansleep(ctx->reset_gpio, 1);   /* reset ASSERTADO */
+	regulator_enable(ctx->iovcc);                   /* liga o trilho     */
+	regulator_enable(ctx->vcc);                     /* o MESMO trilho    */
+	usleep_range(10000, 20000);                     /* 10–20 ms          */
+	gpiod_set_value_cansleep(ctx->reset_gpio, 0);   /* solta o reset     */
+	usleep_range(15000, 20000);
+	return 0;
+}
+```
+
+E o trilho, em `arch/arm64/boot/dts/rockchip/rk3566-powkiddy-x55.dts` (que o
+X35H herda):
+
+```dts
+vcc_lcd: regulator-vcc-lcd {
+	compatible = "regulator-fixed";
+	gpio = <&gpio0 RK_PC7 GPIO_ACTIVE_HIGH>;
+	regulator-min-microvolt = <3300000>;
+	regulator-max-microvolt = <3300000>;
+	/* sem startup-delay-us; sem regulator-always-on */
+};
+```
+
+Três fatos, e a assimetria entre eles é o que interessa:
+
+1. **10–20 ms é toda a margem** entre ligar o trilho e soltar o reset de um
+   `regulator-fixed` chaveado por GPIO — sem `startup-delay-us`, o
+   `regulator-fixed` não espera nada além do que o consumidor pedir. A rampa real
+   depende da capacitância da placa, que não está em lugar nenhum do repositório.
+2. **No R35S o mesmo trilho é outro tipo de fonte**: LDO de PMIC (`rk817`), com
+   rampa declarada (`regulator-ramp-delay`). Ou seja, o número de 10–20 ms foi
+   escolhido para um caso e é usado no outro.
+3. **`iovcc` e `vcc` são o mesmo regulador** neste DTS. Dois `regulator_enable`
+   do mesmo nó: o segundo é no-op. Não é bug, mas explica por que só há uma
+   espera para duas alimentações.
+
+**Isto é pista, não veredito.** Escrever "a causa é o `startup-delay-us`" e
+aplicar por analogia seria o §12.26 com outro nome — herdar a conclusão de outro
+aparelho sem medir. A hipótese concorrente é igualmente plausível: um comando DCS
+que expira no boot frio (`-110`) devolve erro pelo `accum_err` e derruba o
+`drm_panel_enable` inteiro; no reset, o painel já está energizado e o mesmo
+comando passa. **As duas produzem exatamente o sintoma descrito**, e elas se
+separam no log.
+
+### 31.4 O que foi construído: `scripts/panel-diag.sh`
+
+Responde "o painel foi inicializado neste boot?" com o que o kernel registrou,
+em vez de deduzir do que a tela mostra. Quatro modos, a mesma função de análise:
+
+```bash
+bash scripts/panel-diag.sh                    # aparelho em 10.55.0.2, ao vivo
+bash scripts/panel-diag.sh 10.55.0.3          # outro endereço
+bash scripts/panel-diag.sh --local            # rodando dentro do aparelho
+bash scripts/panel-diag.sh --log giochi-boot.log   # o log de um boot que falhou
+```
+
+Cinco seções (DSI, PAINEL, BACKLIGHT, DRM/VOP, ALIMENTAÇÃO) e um veredito que
+**nomeia a etapa onde parou**. E, no fim, a resposta à pergunta original com o
+dado na mão:
+
+```text
+=== detecção de painel: não existe, e não é defeito
+  Nenhuma linha de detecção, porque MIPI-DSI não se anuncia.
+  O kernel casa o `compatible` do device tree com a tabela do driver
+  e usa o modo escrito em C. Painel diferente = DTS diferente.
+```
+
+O `--log` também aceita o `dmesg` cru de um `ssh` — a análise não depende do
+formato do `S96bootlog`.
+
+#### O defeito que o próprio script tinha, e o teste que o prende
+
+A primeira versão tinha **três caminhos e dois analisavam**: `--log` e `--local`
+chamavam `analisar()`, e o caminho por SSH — o mais usado, `panel-diag.sh <ip>` —
+imprimia o dmesg cru e parava ali, sem veredito. É o §12.49 na forma de caminho
+alternativo: o mesmo trabalho em N pontos e um deles esquece um passo.
+
+Também reproduzi o §12.56 ao escrevê-lo: `erros_dsi=$(grep -c ... || echo 0)`
+produz `"0\n0"` e o `[ -gt ]` seguinte falha em silêncio — **o gate passaria
+justamente num boot bom**. O certo é `x=$(grep -ic ...) || x=0`.
+
+`tests/panel-diag.test.mjs` (7 casos) prende as três coisas, e o caso do SSH é
+**funcional**: um `ssh` falso no `PATH` devolve o formato que o script espera, e a
+asserção é sobre o veredito sair. Verificado por mutação — devolver o script ao
+estado "imprime e não analisa" reprova o teste.
+
+### 31.5 O que falta, e é uma coleta de 2 minutos
+
+O diagnóstico está pronto; **a causa não está decidida**, porque ela exige o log
+de um boot que falhou. Quando o aparelho estiver disponível:
+
+1. com o aparelho ligado e a tela apagada (o boot ruim), **tirar o cartão** sem
+   desligar, ou puxar o `giochi-boot.log` por SSH no boot seguinte;
+2. `bash scripts/panel-diag.sh --log <arquivo>` — o veredito diz a etapa;
+3. comparar com um boot bom:
+   ```bash
+   diff <(bash scripts/panel-diag.sh --log ruim.log) \
+        <(bash scripts/panel-diag.sh --log bom.log)
+   ```
+
+O que cada resultado significa para a correção:
+
+| Veredito | Correção provável | Onde |
+| --- | --- | --- |
+| `O painel REPORTou erro` | `startup-delay-us` no `vcc_lcd`, ou reset com espera maior | DTS (nosso patch) |
+| `O controlador DSI reportou erro` | PLL/lane/clock — ver `assigned-clock-rates` e `dsi,lanes` | DTS |
+| `inicializou sem erro` + tela apagada | backlight (PWM, `default-brightness-level`) ou VOP | DTS/`linux.fragment` |
+| `NÃO aparece no log` | probe não chegou: dependência, `-EPROBE_DEFER`, log truncado | log primeiro |
+
+**O que NÃO se faz:** aplicar `startup-delay-us` agora porque "é barato". Um
+atraso que ninguém mediu esconde a causa real e faz o sintoma mudar de
+intermitente para raro — que é pior de diagnosticar do que o estado atual. A
+regra deste repositório vale aqui como em todo lugar: **medir, depois corrigir,
+e prender num teste que pergunta pela consequência.**
+
+### 31.6 O que já se sabe que não é
+
+| Suspeita | Por que não |
+| --- | --- |
+| "detecção falhou" | não existe detecção (§31.1) |
+| `compatible` errado no X35H | se estivesse, a tela **nunca** acenderia — e o mesmo cartão acende no reset |
+| painel trocado de unidade | o aparelho é um só, e o mesmo DTS serve os dois boots |
+| `S96bootlog` mascarando o boot | ele roda depois do DRM subir; a tela já teria acendido |
+
+E uma nota de método que vale registrar: o relato diz "se clico no botão de
+reiniciar ele acende". Isso **descarta** qualquer causa que sobreviva ao reset —
+o que aponta para estado físico (carga do trilho, estado do painel) e não para
+configuração. Configuração errada dá o mesmo resultado em todo boot; o que muda
+entre boot frio e reset é o **estado analógico da placa**.
