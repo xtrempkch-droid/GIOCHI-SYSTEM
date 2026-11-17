@@ -216,3 +216,35 @@ test("o daemon não faz EVIOCGRAB — o diagnóstico continua funcionando", () =
         "decisão registrada e de um jeito de liberar para diagnóstico");
     assert.ok(existsSync(S52), "o script de init tem de existir");
 });
+
+test("o bloco do gamepad não depende do bloco do verificador (post-build)", () => {
+    // DEFEITO QUE EU INTRODUZI E CORRIGI NESTA MESMA SESSÃO, e é a classe do
+    // §12.49: a derivação de `HOST_DIR` estava DENTRO do
+    // `if [ -f "$VERIFICADOR_SRC" ]`. Num build sem o fonte do verificador
+    // (árvore parcial, aparelho que não empacota a loja), `HOST_DIR` ficava
+    // vazia e o bloco do gamepad sumia EM SILÊNCIO — a imagem sairia sem o
+    // controle virtual e sem uma linha de aviso.
+    const pb = readFileSync(join(RAIZ, "scripts/post-build.sh"), "utf8");
+    const linhas = pb.split("\n");
+
+    const iVerif = linhas.findIndex((l) => /VERIFICADOR_SRC=/.test(l));
+    const iHost = linhas.findIndex((l) => /^\s*HOST_DIR="\$O\/host"/.test(l) || /^HOST_DIR="\$O\/host"/.test(l));
+    const iGamepad = linhas.findIndex((l) => /GAMEPAD_SRC=/.test(l));
+    assert.ok(iVerif > 0 && iHost > 0 && iGamepad > 0,
+        "post-build perdeu um dos três marcadores: VERIFICADOR_SRC, HOST_DIR, GAMEPAD_SRC");
+
+    assert.ok(iHost < iVerif,
+        `HOST_DIR é derivada na linha ${iHost + 1} e o bloco do verificador ` +
+        `começa na ${iVerif + 1}. Se a derivação voltar para dentro do ` +
+        `condicional, todo bloco que a usa some quando aquele fonte faltar.`);
+
+    assert.ok(iGamepad > iHost,
+        "o bloco do gamepad vem depois da derivação de HOST_DIR");
+
+    // E a derivação não pode ser duplicada: uma cópia dentro de um condicional
+    // reintroduziria o defeito com a primeira passando no teste de ordem.
+    const copias = (pb.match(/HOST_DIR="\$O\/host"/g) || []).length;
+    assert.equal(copias, 1,
+        `a derivação de HOST_DIR aparece ${copias} vez(es); uma cópia dentro de ` +
+        `um bloco condicional é o defeito do §12.49 de volta`);
+});

@@ -62,32 +62,39 @@ fi
 # binário: assim o `libcrypto` que ele pede é o que está nesta imagem, e não o de
 # uma máquina que compilou meses antes. Fonte em device/common/verificador/,
 # cedido pela equipe do app (única peça em C do repo deles).
+# ── a toolchain do build ───────────────────────────────────
+#
+# ARMADILHA MEDIDA: o Buildroot NÃO exporta HOST_DIR, STAGING_DIR nem
+# TARGET_CROSS para post-build. O `EXTRA_ENV` dele (package/Makefile.in:342)
+# tem só PATH, BR2_DL_DIR, BUILD_DIR, CONFIG_DIR e O. A primeira versão
+# procurava TARGET_CROSS e o script avisava "toolchain ausente (…/host/bin/gcc)"
+# a cada build — o aviso funcionou, a variável é que nunca existia.
+#
+# O que existe é `O` (o diretório de saída) e `BUILD_DIR` (= $O/build, um nível
+# fundo demais: usar ele dava "…/build/build/host"). A árvore é
+#   <O>/target   <O>/host   <O>/host/<triple>/sysroot
+# então dá para derivar tudo daí. O triple vem do nome do gcc, em vez de
+# adivinhar a arquitetura.
+#
+# Esta derivação mora AQUI, na raiz do script, e não dentro de nenhum bloco.
+#
+# DEFEITO CORRIGIDO (§12.49): ela estava dentro do
+# `if [ -f "$VERIFICADOR_SRC" ]`, então um build sem o fonte do verificador
+# deixava `HOST_DIR` vazia — e todo bloco que depende dela sumia EM SILÊNCIO,
+# inclusive o do `giochi-gamepad`. Trabalho que depende de outro item não pode
+# morar dentro do bloco daquele item.
+if [ -n "${O:-}" ]; then
+    HOST_DIR="$O/host"
+elif [ -n "${BUILD_DIR:-}" ]; then
+    HOST_DIR="$BUILD_DIR/../host"
+else
+    HOST_DIR="$(cd "$TARGET_DIR/../.." && pwd)/host"
+fi
+STAGING_DIR="$(echo "$HOST_DIR"/*-buildroot-linux-gnu/sysroot 2>/dev/null | awk '{print $1}')"
+GCC_BIN="$(echo "$HOST_DIR"/bin/*-buildroot-linux-gnu-gcc 2>/dev/null | awk '{print $1}')"
+
 VERIFICADOR_SRC="$POST_BUILD_DIR/verificador/verificador-ed25519.c"
 if [ -f "$VERIFICADOR_SRC" ]; then
-    # ARMADILHA MEDIDA: o Buildroot NÃO exporta HOST_DIR, STAGING_DIR nem
-    # TARGET_CROSS para post-build. O `EXTRA_ENV` dele (package/Makefile.in:342)
-    # tem só PATH, BR2_DL_DIR, BUILD_DIR, CONFIG_DIR e O. Eu tinha escrito a
-    # busca por TARGET_CROSS e o script avisou "toolchain ausente
-    # (…/host/bin/gcc)" a cada build — o aviso funcionou, a variável é que nunca
-    # existiu.
-    #
-    # O que existe é `BUILD_DIR` (e `$O`, o mesmo valor). A árvore é
-    #   <build>/target   <build>/host   <build>/host/<triple>/sysroot
-    # então dá para derivar tudo daí. O triple é descoberto pelo nome do gcc, em
-    # vez de adivinhar a arquitetura.
-    # `O` é o diretório de saída do Buildroot (…/build), e é a variável certa:
-    # HOST_DIR = $O/host. `BUILD_DIR` é $O/build, um nível fundo demais — usar
-    # ele dava "…/build/build/host" e o gcc não existia lá.
-    # `${TARGET_DIR}/../..` cobre o caso de rodar o script à mão.
-    if [ -n "${O:-}" ]; then
-        HOST_DIR="$O/host"
-    elif [ -n "${BUILD_DIR:-}" ]; then
-        HOST_DIR="$BUILD_DIR/../host"
-    else
-        HOST_DIR="$(cd "$TARGET_DIR/../.." && pwd)/host"
-    fi
-    STAGING_DIR="$(echo "$HOST_DIR"/*-buildroot-linux-gnu/sysroot 2>/dev/null | awk '{print $1}')"
-    GCC_BIN="$(echo "$HOST_DIR"/bin/*-buildroot-linux-gnu-gcc 2>/dev/null | awk '{print $1}')"
     DESTINO="$TARGET_DIR/opt/giochi/apps/bin"
     if [ ! -x "$GCC_BIN" ]; then
         echo "post-build: toolchain ausente ($GCC_BIN) — verificador não compilado" >&2
@@ -120,39 +127,38 @@ fi
 # Compilado aqui, e não versionado como binário, pela mesma razão do
 # verificador: assim ele linka contra a libc DESTA imagem.
 #
-# Depende de `HOST_DIR`, que o bloco do verificador já derivou acima.
-if [ -n "${HOST_DIR:-}" ]; then
-    GAMEPAD_SRC="$POST_BUILD_DIR/giochi-gamepad/giochi-gamepad.c"
-    GAMEPAD_DB="$POST_BUILD_DIR/giochi-gamepad/gamecontrollerdb.txt"
-    if [ -f "$GAMEPAD_SRC" ]; then
-        GCC_BIN_G="$(echo "$HOST_DIR"/bin/*-buildroot-linux-gnu-gcc 2>/dev/null | awk '{print $1}')"
-        if [ ! -x "$GCC_BIN_G" ]; then
-            echo "post-build: toolchain ausente ($GCC_BIN_G) — giochi-gamepad não compilado" >&2
-            echo "post-build: cada aparelho vai responder no seu formato de botão" >&2
+# `HOST_DIR` é derivada no topo do script, fora de condicional — de propósito,
+# porque depender do bloco de outro item foi o defeito que este arquivo já teve.
+GAMEPAD_SRC="$POST_BUILD_DIR/giochi-gamepad/giochi-gamepad.c"
+GAMEPAD_DB="$POST_BUILD_DIR/giochi-gamepad/gamecontrollerdb.txt"
+if [ -f "$GAMEPAD_SRC" ]; then
+    GCC_BIN_G="$(echo "$HOST_DIR"/bin/*-buildroot-linux-gnu-gcc 2>/dev/null | awk '{print $1}')"
+    if [ ! -x "$GCC_BIN_G" ]; then
+        echo "post-build: toolchain ausente ($GCC_BIN_G) — giochi-gamepad não compilado" >&2
+        echo "post-build: cada aparelho vai responder no seu formato de botão" >&2
+    else
+        mkdir -p "$TARGET_DIR/usr/bin" "$TARGET_DIR/etc/giochi"
+        if "$GCC_BIN_G" -O2 -Wall -Wextra \
+                -o "$TARGET_DIR/usr/bin/giochi-gamepad" "$GAMEPAD_SRC" \
+                2>"$TARGET_DIR/.gamepad.log"; then
+            chmod 0755 "$TARGET_DIR/usr/bin/giochi-gamepad"
+            echo "post-build: giochi-gamepad compilado"
         else
-            mkdir -p "$TARGET_DIR/usr/bin" "$TARGET_DIR/etc/giochi"
-            if "$GCC_BIN_G" -O2 -Wall -Wextra \
-                    -o "$TARGET_DIR/usr/bin/giochi-gamepad" "$GAMEPAD_SRC" \
-                    2>"$TARGET_DIR/.gamepad.log"; then
-                chmod 0755 "$TARGET_DIR/usr/bin/giochi-gamepad"
-                echo "post-build: giochi-gamepad compilado"
-            else
-                echo "post-build: FALHOU compilar o giochi-gamepad:" >&2
-                sed 's/^/  /' "$TARGET_DIR/.gamepad.log" >&2
-                rm -f "$TARGET_DIR/usr/bin/giochi-gamepad" "$TARGET_DIR/.gamepad.log"
-                exit 1
-            fi
-            rm -f "$TARGET_DIR/.gamepad.log"
-            # O mapeamento do SDL viaja junto: sem ele o `Button::A` do SDL é o
-            # botão de BAIXO, e o `buttons.map` diz que `a` é o da DIREITA. As
-            # duas vias discordariam — que é o defeito de origem.
-            if [ -f "$GAMEPAD_DB" ]; then
-                cp -f "$GAMEPAD_DB" "$TARGET_DIR/etc/giochi/gamecontrollerdb.txt"
-                echo "post-build: gamecontrollerdb.txt instalado"
-            else
-                echo "post-build: AVISO — $GAMEPAD_DB ausente; o SDL usará o" >&2
-                echo "            mapeamento automático e A/B ficarão trocados" >&2
-            fi
+            echo "post-build: FALHOU compilar o giochi-gamepad:" >&2
+            sed 's/^/  /' "$TARGET_DIR/.gamepad.log" >&2
+            rm -f "$TARGET_DIR/usr/bin/giochi-gamepad" "$TARGET_DIR/.gamepad.log"
+            exit 1
+        fi
+        rm -f "$TARGET_DIR/.gamepad.log"
+        # O mapeamento do SDL viaja junto: sem ele o `Button::A` do SDL é o
+        # botão de BAIXO, e o `buttons.map` diz que `a` é o da DIREITA. As
+        # duas vias discordariam — que é o defeito de origem.
+        if [ -f "$GAMEPAD_DB" ]; then
+            cp -f "$GAMEPAD_DB" "$TARGET_DIR/etc/giochi/gamecontrollerdb.txt"
+            echo "post-build: gamecontrollerdb.txt instalado"
+        else
+            echo "post-build: AVISO — $GAMEPAD_DB ausente; o SDL usará o" >&2
+            echo "            mapeamento automático e A/B ficarão trocados" >&2
         fi
     fi
 fi
