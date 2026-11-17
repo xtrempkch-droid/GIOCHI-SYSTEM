@@ -150,7 +150,7 @@ o que foi medido, e deixar a decisão com quem responde pelo código.
 
 | Verificação | Resultado |
 | --- | --- |
-| `node tests/run-all.mjs` | **582/582 + 1 skip** (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, devices 13, assert-config 12, fdt 11, gpu-bench 16, …) |
+| `node tests/run-all.mjs` | **607/607 + 1 skip**, 66 arquivos (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, panel-diag 17, gamepad-virtual 12, selftest-contract 21, issues-vizinhos 5, …) |
 | `node scripts/validate-devices.mjs` | OK — 7 devices, 1 habilitado |
 | `node scripts/list-devices.mjs --github-matrix` | matriz com `qemu-aarch64` |
 | matriz com `--device powkiddy-x55 --allow-draft` | devolve **só** o X55 |
@@ -514,7 +514,7 @@ si (§12.4), mas provavelmente **não** era a causa dos 3 s.
 
 ```bash
 node scripts/validate-devices.mjs
-node tests/run-all.mjs                          # 547 testes
+node tests/run-all.mjs                          # 608 testes
 node scripts/list-devices.mjs
 node scripts/list-devices.mjs --github-matrix
 node scripts/list-devices.mjs --github-matrix --device powkiddy-x55 --allow-draft
@@ -565,7 +565,7 @@ absoluto** do host — §12.40).
 
 ## 10. Testes
 
-`node tests/run-all.mjs` → **582/582 + 1 skip**, em **64 arquivos**. A tabela abaixo é uma
+`node tests/run-all.mjs` → **607/607 + 1 skip**, em **66 arquivos**. A tabela abaixo é uma
 seleção dos que prendem contratos de projeto; a lista completa é `ls tests/` e
 `tests/runner-coverage.test.mjs` **falha** se algum arquivo existir sem estar
 importado no `run-all.mjs` — foi assim que dois testes desta revisão quase
@@ -596,6 +596,9 @@ ficaram fora da contagem.
 | `tests/help-sentinels.test.mjs` | 4 | nenhum script fatia `--help` por número de linha (a classe que quebrou em 2 de 13) |
 | `tests/bootlog-dmesg-spam.test.mjs` | 4 | o `awk` REAL do `giochi-bootlog` sobre 300 repetições do charger: agrupa, conta, e **preserva** as duas linhas de `fbcon` que estavam no meio |
 | `tests/hardware-x55.test.mjs` | 5 | o que o X55 desmentiu: `model`×`compatible` normalizados, `present=0` ≠ 0%, fbcon ausente ≠ `CONFIG_ROTATION` desligado, sem `dropbear` no status, `giochi-usb` sem role-switch |
+| `tests/panel-diag.test.mjs` | 17 | a tela que não acende: driver de painel reconhecido nos três nomes (hx8394/st7703/generic-dsi), veredito pela **consequência** (`fb0` + conector) e não pelo nome, o caminho por SSH analisando, `--iface` chegando ao `ssh` como **um** argumento, e o formato real do `giochi-boot.log` |
+| `tests/issues-vizinhos.test.mjs` | 5 | o material que só pode ser colado à mão: corpo inteiro, sem HTML, sem H1, e cada arquivo falando do que **aquela** equipe tem de fazer (trocar dois de lugar reprova) |
+| `tests/gamepad-virtual.test.mjs` | 12 | o contrato de entrada: GUID recalculado por `crc16` do nome (não literal copiado), `a:b1`, sem `EVIOCGRAB`, e a guarda do `HOST_DIR` no post-build |
 | `tests/sdl-input-probe.test.mjs` | 6 | o probe pergunta `SDL_IsGameController` e imprime o mapeamento (não só conta joysticks), não abre vídeo sem `--video` (não rouba o DRM master), cruza `bN`→código evdev, e prende a convenção `a = BTN_EAST` dos mapas contra a do SDL2 com o mapa **medido** no R35S (§12.74) |
 | `tests/gamepad-virtual.test.mjs` | 9 | o controle VIRTUAL: layout canônico igual nos três aparelhos, mapa que troca A/B é traduzido, faixa de eixo normalizada com inversão, `CONFIG_INPUT_UINPUT` no fragmento **e** no gate, GUID do DB casa com o `id` do daemon, `a:b1` e não o automático `b0`, e sem `EVIOCGRAB` (§29) |
 
@@ -6450,10 +6453,10 @@ O R35S respondeu em `10.55.0.2` a sessão inteira (SSH por senha, sem chave na
 imagem). O launcher está no ar (pid 505) e **nada foi interrompido**: o probe roda
 sem tocar no DRM. Nenhum arquivo foi gravado no aparelho, só `/tmp`.
 
-Suíte: **582/582 + 1 skip**, em 64 arquivos.
+Suíte: **607/607 + 1 skip**, em 66 arquivos.
 
 ```bash
-node tests/run-all.mjs                          # 582/582 + 1 skip
+node tests/run-all.mjs                          # 607/607 + 1 skip
 bash scripts/sdl-input-probe.sh r35s --run      # a medição do §12.74
 ```
 
