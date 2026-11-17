@@ -23,3 +23,36 @@ thumbl  = BTN_THUMBL       # GPIO BTN_THUMBL
 thumbr  = BTN_THUMBR       # GPIO BTN_THUMBR
 volup   = KEY_VOLUMEUP     # VOLUMEUP
 voldown = KEY_VOLUMEDOWN   # VOLUMEDOWN
+
+# ── analógico ────────────────────────────────────────────────
+#
+# **Medido no aparelho em 17/11/2026**, não deduzido do DTS:
+#
+#   $ bash scripts/sdl-input-probe.sh r35s --run 10.55.0.2
+#     ABS_X   min=-1800 max=1800 flat=32 fuzz=32 valor=0
+#     ABS_Y   min=-1800 max=1800 flat=32 fuzz=32 valor=-15
+#     ABS_RX  min=-1800 max=1800 flat=32 fuzz=32 valor=0
+#     ABS_RY  min=-1800 max=1800 flat=32 fuzz=32 valor=-15
+#
+# O driver `rocknix-singleadc-joypad` **normaliza** o ADC: entrega a faixa
+# simétrica, centrada em 0, e não 0..1023 como o `adc-joystick` mainline da X55.
+# Consequência para quem normaliza: aqui é `valor / 1800`, e não
+# `(valor - 519) / 504`. Usar a fórmula da X55 neste aparelho dá curso de 2% no
+# meio da faixa — o carro não vira.
+#
+# Nenhum eixo é invertido (min < max nos quatro). Isso **difere** da X55, cujo
+# `adc-joystick` declara o Y e o RY como 1023..15.
+#
+# O centro do Y e do RY mede -15, e não 0. É folga mecânica do potenciômetro,
+# dentro do `flat=32` que o kernel declara: quem ignorar valores abaixo de
+# `flat` em torno do centro não sente. Quem comparar com zero exato sente o
+# carro puxando de leve para um lado — e o sintoma parece defeito de física.
+axis_x_min = -1800
+axis_x_max = 1800
+axis_y_min = -1800
+axis_y_max = 1800
+axis_rx_min = -1800
+axis_rx_max = 1800
+axis_ry_min = -1800
+axis_ry_max = 1800
+axis_y_deadzone = 32

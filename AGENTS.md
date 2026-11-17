@@ -150,7 +150,7 @@ o que foi medido, e deixar a decisão com quem responde pelo código.
 
 | Verificação | Resultado |
 | --- | --- |
-| `node tests/run-all.mjs` | **569/569 + 1 skip** (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, devices 13, assert-config 12, fdt 11, gpu-bench 16, …) |
+| `node tests/run-all.mjs` | **581/581 + 1 skip** (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, devices 13, assert-config 12, fdt 11, gpu-bench 16, …) |
 | `node scripts/validate-devices.mjs` | OK — 7 devices, 1 habilitado |
 | `node scripts/list-devices.mjs --github-matrix` | matriz com `qemu-aarch64` |
 | matriz com `--device powkiddy-x55 --allow-draft` | devolve **só** o X55 |
@@ -534,6 +534,7 @@ bash scripts/gpu-bench.sh powkiddy-x55          # só compila o benchmark
 bash scripts/audio-alerta.sh --alar             # tom pela via SDL2 -> ALSA
 bash scripts/audio-validar.sh                   # áudio medido: card, mux, volume, PCM RUNNING (§23)
 bash scripts/sdl-input-probe.sh r35s --run      # o que o SDL vê como controle, e com qual mapa (§12.74)
+bash scripts/../device/common/rootfs-overlay/etc/init.d/S52gamepad status   # o controle virtual subiu? (§29)
 bash scripts/input-diag.sh                      # o que o KERNEL classificou: joystick/teclado/ponteiro (§12.73)
 bash scripts/engine-build.sh r35s --instalar    # compila a GIOCHI-ENGINE
 python3 scripts/gles-probe.py                    # idem sem compilar (usa o python3 da imagem)
@@ -560,7 +561,7 @@ absoluto** do host — §12.40).
 
 ## 10. Testes
 
-`node tests/run-all.mjs` → **569/569 + 1 skip**, em **63 arquivos**. A tabela abaixo é uma
+`node tests/run-all.mjs` → **581/581 + 1 skip**, em **64 arquivos**. A tabela abaixo é uma
 seleção dos que prendem contratos de projeto; a lista completa é `ls tests/` e
 `tests/runner-coverage.test.mjs` **falha** se algum arquivo existir sem estar
 importado no `run-all.mjs` — foi assim que dois testes desta revisão quase
@@ -592,6 +593,7 @@ ficaram fora da contagem.
 | `tests/bootlog-dmesg-spam.test.mjs` | 4 | o `awk` REAL do `giochi-bootlog` sobre 300 repetições do charger: agrupa, conta, e **preserva** as duas linhas de `fbcon` que estavam no meio |
 | `tests/hardware-x55.test.mjs` | 5 | o que o X55 desmentiu: `model`×`compatible` normalizados, `present=0` ≠ 0%, fbcon ausente ≠ `CONFIG_ROTATION` desligado, sem `dropbear` no status, `giochi-usb` sem role-switch |
 | `tests/sdl-input-probe.test.mjs` | 6 | o probe pergunta `SDL_IsGameController` e imprime o mapeamento (não só conta joysticks), não abre vídeo sem `--video` (não rouba o DRM master), cruza `bN`→código evdev, e prende a convenção `a = BTN_EAST` dos mapas contra a do SDL2 com o mapa **medido** no R35S (§12.74) |
+| `tests/gamepad-virtual.test.mjs` | 9 | o controle VIRTUAL: layout canônico igual nos três aparelhos, mapa que troca A/B é traduzido, faixa de eixo normalizada com inversão, `CONFIG_INPUT_UINPUT` no fragmento **e** no gate, GUID do DB casa com o `id` do daemon, `a:b1` e não o automático `b0`, e sem `EVIOCGRAB` (§29) |
 
 ## 10-A. O sistema base — acesso antes de interface
 
@@ -6444,10 +6446,10 @@ O R35S respondeu em `10.55.0.2` a sessão inteira (SSH por senha, sem chave na
 imagem). O launcher está no ar (pid 505) e **nada foi interrompido**: o probe roda
 sem tocar no DRM. Nenhum arquivo foi gravado no aparelho, só `/tmp`.
 
-Suíte: **569/569 + 1 skip**, em 63 arquivos.
+Suíte: **581/581 + 1 skip**, em 64 arquivos.
 
 ```bash
-node tests/run-all.mjs                          # 569/569 + 1 skip
+node tests/run-all.mjs                          # 581/581 + 1 skip
 bash scripts/sdl-input-probe.sh r35s --run      # a medição do §12.74
 ```
 
@@ -6507,10 +6509,109 @@ tentasse o DB perderia a tarde num aparelho onde o device nem é joystick.
 
 ```text
 main        5ffb592
-suíte       569/569 + 1 skip, 63 arquivos
+suíte       581/581 + 1 skip, 63 arquivos
 CI          5ffb592: Validate OK, builds em andamento
 issue       GIOCHI-GAMES#1 aberta
 ```
 
 Nada foi gravado no aparelho (só `/tmp`, já limpo), o launcher nunca foi parado, e
 o R35S segue respondendo em `10.55.0.2`.
+
+## 29. O controle virtual: a garantia de "mesma resposta em todo console" (17/11/2026)
+
+Pergunta que veio depois da issue do §28: *"outros dispositivos no futuro vão
+usar esse sistema, então tem que ser de forma que qualquer jogo tenha a mesma
+resposta dos botões de consoles diferentes."*
+
+**Estava certo, e o sistema não dava essa garantia.** O §12.74 mostrou que o
+SDL2 reconhece gamecontroller no R35S e **não** na X55 — e a "solução" que
+sobrava era cada jogo ter um `if` por aparelho. Isso não escala para o próximo
+console, muito menos para dez.
+
+### O que foi feito, e é a resposta
+
+`giochi-gamepad` publica **um** device (`Giochi Gamepad`) com layout fixo e
+traduz o hardware de cada placa para ele:
+
+| Garantia | Detalhe |
+| --- | --- |
+| **um nó** com botões e eixos | é o que o `SDL_GameController` exige |
+| **17 códigos fixos** | mesmo `bN` = mesma coisa em todo console, inclusive quando o aparelho não tem o botão (X35H não tem `home`) |
+| **4 eixos em -32767..32767** | uma fórmula de normalização serve para todos |
+| **Y/RY desinvertidos** quando o hardware inverte (X55: `1023..15`) | senão o eixo vira ao contrário, sem erro |
+| **`flat=32`** nos quatro | a zona morta é do sistema, não de cada jogo |
+| **GUID estável** + `gamecontrollerdb.txt` | `Button::A` do SDL = o `a` do `buttons.map` |
+
+**Aparelho novo não muda nada nos jogos**: entra editando `buttons.map`.
+
+### Peças
+
+| Arquivo | Papel |
+| --- | --- |
+| `device/common/giochi-gamepad/giochi-gamepad.c` | o daemon: lê `buttons.map`, acha os códigos físicos em todos os `event*`, cria o virtual e traduz |
+| `device/common/giochi-gamepad/gamecontrollerdb.txt` | o mapeamento do SDL para o GUID `06005931091200000100000001000000` |
+| `device/common/rootfs-overlay/etc/init.d/S52gamepad` | sobe com supervisão (daemon morto devolve o aparelho ao layout dele em silêncio) |
+| `device/common/rootfs-overlay/usr/bin/giochi-init` | exporta `SDL_GAMECONTROLLERCONFIG` lendo o arquivo |
+| `CONFIG_INPUT_UINPUT=y` nos três fragmentos **e** nos três `kernel-required.txt` | sem ele não há device virtual, e o build tem de falhar, não seguir |
+| `scripts/post-build.sh` | compila o daemon e instala o `.txt` |
+| `tests/gamepad-virtual.test.mjs` | 9 casos; executa o binário de verdade contra os três mapas |
+
+### Medições que fecharam o desenho
+
+**1. O layout da X55 deixa o controle pela metade, e isso é pior que não ter.**
+Medido no host com um layout sintético idêntico ao da X55 (botões num nó, eixos
+noutro):
+
+```text
+SEM o daemon:  botões -> SDL_IsGameController = SIM
+               eixos  -> SDL_IsGameController = NAO
+COM o daemon:  "Giochi Gamepad" botões=17 eixos=4, gamecontroller SIM
+```
+
+Um jogo que abre o gamecontroller recebe os botões e **nenhum analógico**, sem
+erro. Registrar o GUID no DB não conserta: o `adc-joystick` responderia "sim" com
+zero botões. Um gamepad SDL não se monta colando dois nós.
+
+**2. `SDL_GAMECONTROLLERCONFIG_FILE` não funciona; a variável de conteúdo sim.**
+Medido duas vezes no host: com a variável de caminho, o SDL manteve `a:b0` (o
+mapeamento automático); com a de conteúdo, `a:b1`. Por isso o `giochi-init` **lê
+o arquivo e exporta o texto**. O teste proíbe a variável de caminho voltar.
+
+**3. O host não reproduz o aparelho, por causa do libudev.** No host o nó
+só-de-botões é aceito como gamecontroller (`libudev` o classifica como joystick);
+no aparelho, sem libudev (`HAVE_LIBUDEV_H` indefinido, medido), ele é **rejeitado**
+por `GuessIsJoystick`. Qualquer conclusão sobre o comportamento no aparelho tem
+de vir do código de `IsJoystick` com `enumeration_method != ENUMERATION_LIBUDEV`,
+não do desktop. É a razão de o device virtual precisar dos **dois** — botão e
+eixo — no mesmo nó: aí ele passa nos dois caminhos.
+
+**4. O X35H tem 16 botões, e o virtual tem de declarar 17.** Descoberto pelo
+teste: o virtual declarava só o que existia no hardware, então um jogo veria 17
+botões num console e 16 em outro — a divergência que o serviço existe para
+eliminar. Botão que nunca dispara é inofensivo; layout diferente não é.
+
+### Decisão: sem `EVIOCGRAB`
+
+O daemon **não** toma os devices físicos. Assim `evtest`, `giochi-buttons`,
+`input-diag` e o `giochi-selftest` continuam funcionando com o serviço no ar —
+ferramenta de diagnóstico que exige o produto desligado é a armadilha do §12.45.
+
+Não há conflito: as duas fontes emitem a **mesma** transição, então aplicar as
+duas em máscara de bits dá o mesmo estado. O que não se pode fazer é somar fontes
+com **mapeamentos diferentes** — e é exatamente isso que o virtual elimina.
+
+`tests/gamepad-virtual.test.mjs` falha se `EVIOCGRAB` aparecer no código.
+
+### Estado e pendências
+
+```text
+suíte   581/581 + 1 skip
+imagem  NENHUMA gravada contém o daemon ainda — precisa de rebuild
+```
+
+| Pendência | Por quê |
+| --- | --- |
+| rebuild dos três aparelhos | o daemon e o `UINPUT` não estão em imagem nenhuma |
+| `js0` idem | `CONFIG_INPUT_JOYDEV` de `4018875` também não |
+| multi-controle | o daemon funde todos os devices que casem o mapa num único gamepad; jogador 2 com controle USB entra como jogador 1. Resolver exige um virtual por device físico |
+| a faixa do X35H | herdada da X55; não medida no aparelho |

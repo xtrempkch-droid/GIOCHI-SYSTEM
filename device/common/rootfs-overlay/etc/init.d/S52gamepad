@@ -1,0 +1,134 @@
+#!/bin/sh
+#
+# Sobe o `giochi-gamepad`: o controle VIRTUAL que faz todo aparelho responder
+# igual.
+#
+# ## O defeito que isto fecha
+#
+# Medido em 17/11/2026 (AGENTS §12.74): o mesmo jogo, mesma versão, respondia
+# com os botões trocados no R35S e certo na X55. A causa não estava em nenhum
+# dos dois jogos — estava no **formato do hardware**:
+#
+#   R35S   um nó com 17 botões + 4 eixos   -> o SDL2 reconhece gamecontroller
+#   X55    um nó com botões, outro com eixos -> o SDL2 NÃO reconhece
+#
+# O SDL2 exige `BTN_SOUTH` e `ABS_X`/`ABS_Y` no MESMO nó de input
+# (`SDL_EVDEV_GuessDeviceClass` + `LINUX_JoystickGetGamepadMapping`). O DTS da
+# X55 separa os dois, e registrar o GUID no DB não resolve: o controle sairia
+# com eixos e nenhum botão.
+#
+# Sem correção no sistema, cada jogo precisaria de um `if` por aparelho — e o
+# próximo console exigiria mais um. Este serviço resolve uma vez, para todos.
+#
+# ## O que ele garante, em todo aparelho
+#
+#   - um device só, chamado `Giochi Gamepad`
+#   - os 17 botões do contrato, nos mesmos códigos
+#   - os 4 eixos na MESMA faixa (-32767..32767), com o Y e o RY já
+#     desinvertidos quando o hardware os inverte
+#
+# O `SDL_GAMECONTROLLERCONFIG` (lido de /etc/giochi/gamecontrollerdb.txt pelo
+# `giochi-init`) completa o serviço: faz o `Button::A` do SDL ser o `a` do
+# `buttons.map`, e não o botão de baixo.
+#
+# ## Por que o daemon NÃO toma os devices físicos (`EVIOCGRAB`)
+#
+# Ele lê os nós físicos em paralelo. Consequência: `evtest`, `giochi-buttons`,
+# `input-diag` e o `giochi-selftest` continuam funcionando com o serviço no ar.
+# Tomar os devices os deixaria cegos, e ferramenta de diagnóstico que só
+# funciona com o produto desligado é a armadilha do §12.45.
+#
+# Não há conflito por isso: os dois emitem a MESMA transição, então um app que
+# leia os dois em máscara de bits chega ao mesmo estado. O que não se pode fazer
+# é somar fontes com **mapeamentos diferentes** — e é justamente isso que o
+# device virtual elimina.
+
+DAEMON=/usr/bin/giochi-gamepad
+MAPA=/etc/giochi/buttons.map
+PIDFILE=/run/giochi/gamepad.pid
+LOG=/run/giochi/gamepad.log
+
+case "$1" in
+  start)
+    [ -x "$DAEMON" ] || {
+      echo "gamepad: $DAEMON não existe — o controle terá o layout do aparelho"
+      exit 0
+    }
+    [ -e /dev/uinput ] || {
+      # Não falha o boot: sem o virtual, o controle continua funcionando pelo
+      # evdev, só que com o formato daquele aparelho. O selftest reporta.
+      echo "gamepad: /dev/uinput ausente (CONFIG_INPUT_UINPUT) — sem controle virtual" >&2
+      exit 0
+    }
+    [ -f "$MAPA" ] || {
+      echo "gamepad: $MAPA não existe — sem mapa não há o que traduzir" >&2
+      exit 0
+    }
+
+    mkdir -p /run/giochi
+    # O daemon pode morrer (mapa trocado, device removido). Sem supervisão, o
+    # controle volta ao layout do aparelho em silêncio — e o jogador só nota
+    # quando um botão faz a coisa errada. O laço reinicia com folga para não
+    # inundar o log se a falha for permanente.
+    (
+      while :; do
+        "$DAEMON" --mapa "$MAPA" >>"$LOG" 2>&1
+        echo "gamepad: daemon saiu (código $?), reiniciando em 3s" >>"$LOG"
+        sleep 3
+      done
+    ) &
+    echo $! >"$PIDFILE"
+    echo "gamepad: controle virtual 'Giochi Gamepad' iniciado"
+    ;;
+
+  stop)
+    if [ -f "$PIDFILE" ]; then
+      # O PID é do subshell que supervisiona; matar o filho também é preciso.
+      SUPERVISOR=$(cat "$PIDFILE" 2>/dev/null)
+      [ -n "$SUPERVISOR" ] && kill "$SUPERVISOR" 2>/dev/null
+      # `pidof` casa pelo nome do binário — o daemon é ELF com nome próprio,
+      # então funciona (§12.62-D: `pidof` não serve para script `sh`).
+      for p in $(pidof giochi-gamepad 2>/dev/null); do
+        kill "$p" 2>/dev/null
+      done
+      rm -f "$PIDFILE"
+      echo "gamepad: encerrado"
+    else
+      echo "gamepad: não estava rodando"
+    fi
+    ;;
+
+  restart)
+    "$0" stop
+    sleep 1
+    "$0" start
+    ;;
+
+  status)
+    # Lê `/proc`, não `ps`: o `ps` desta imagem mostra só a própria TTY
+    # (§12.46), então `ps | grep gamepad` daria "não está rodando" com ele vivo.
+    vivos=0
+    for d in /proc/[0-9]*; do
+      [ "$(cat "$d/comm" 2>/dev/null)" = "giochi-gamepad" ] && vivos=$((vivos + 1))
+    done
+    echo "giochi-gamepad: $vivos processo(s)"
+    if [ -e /dev/input/event0 ]; then
+      for e in /sys/class/input/event*/device/name; do
+        [ -f "$e" ] || continue
+        if [ "$(cat "$e" 2>/dev/null)" = "Giochi Gamepad" ]; then
+          echo "device virtual: presente ($(dirname "$e"))"
+          exit 0
+        fi
+      done
+    fi
+    echo "device virtual: AUSENTE"
+    exit 1
+    ;;
+
+  *)
+    echo "Uso: $0 {start|stop|restart|status}"
+    exit 1
+    ;;
+esac
+
+exit 0

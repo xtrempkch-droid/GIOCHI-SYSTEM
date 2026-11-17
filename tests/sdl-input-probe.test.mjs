@@ -170,3 +170,67 @@ test("o probe traduz bN para código evdev, em vez de só imprimir o mapa", () =
     assert.match(PROBE, /SDL_JoystickPath\s*\(/,
         "o caminho do /dev/input/event* vem do SDL, não de adivinhar o número");
 });
+
+// --- o contrato de entrada: o mapa precisa estar COMPLETO em todo aparelho ---
+
+test("aparelho com analógico declara a faixa do eixo no mapa", () => {
+    // Sem `axis_*`, um app que calibre pelo mapa fica sem calibração — e o
+    // sintoma (curso de 2% no meio da faixa, carro que puxa para um lado)
+    // parece física, não configuração. O R35S ficou assim até 17/11/2026.
+    const dirDevice = join(RAIZ, "device");
+    const comEixo = [];
+    const semEixo = [];
+    for (const pasta of readdirSync(dirDevice)) {
+        const mapa = join(dirDevice, pasta, "buttons.map");
+        if (!existsSync(mapa)) continue;
+        const texto = readFileSync(mapa, "utf8");
+        if (/^axis_x_min\s*=/m.test(texto)) {
+            comEixo.push(pasta);
+        } else {
+            semEixo.push(pasta);
+        }
+    }
+    // X55, X35H e R35S têm analógico e mapa medido. X35S tem a faixa em
+    // comentário (não conferida no aparelho) — declarado, não inventado.
+    assert.ok(comEixo.length >= 3,
+        `esperava os três com analógico medido; declarei em ${comEixo.join(", ")}`);
+
+    for (const pasta of semEixo) {
+        const texto = readFileSync(join(dirDevice, pasta, "buttons.map"), "utf8");
+        assert.match(texto, /axis_x_min|faixa desconhecid|não conferid/i,
+            `${pasta}: não declara axis_* e não diz por quê. Mapa sem calibração ` +
+            `é calibração implícita errada.`);
+    }
+});
+
+test("a faixa do R35S é a medida, não a da X55", () => {
+    // -1800..1800 medido em 17/11/2026 com EVIOCGABS no `rocknix-singleadc-joypad`.
+    // A X55 é 15..1023 com Y invertido; copiar uma na outra dá curso de 2%.
+    const r35s = readFileSync(join(RAIZ, "device/r35s/buttons.map"), "utf8");
+    const x55 = readFileSync(join(RAIZ, "device/powkiddy x55/buttons.map"), "utf8");
+
+    assert.match(r35s, /^axis_x_min = -1800$/m, "R35S: faixa simétrica medida");
+    assert.match(r35s, /^axis_x_max = 1800$/m);
+    assert.doesNotMatch(r35s, /^axis_y_min = 1023$/m,
+        "R35S não herda a inversão do adc-joystick da X55 — mediu-se min < max");
+
+    assert.match(x55, /^axis_x_min = 15$/m, "X55: faixa do adc-joystick mainline");
+    assert.match(x55, /^axis_y_min = 1023$/m, "X55: Y invertido, declarado");
+    assert.notEqual(
+        r35s.match(/^axis_x_min = (\S+)$/m)[1],
+        x55.match(/^axis_x_min = (\S+)$/m)[1],
+        "as duas faixas são diferentes de propósito; igualá-las é o defeito");
+});
+
+test("o contrato de entrada documenta o que varia e o que não varia", () => {
+    const doc = readFileSync(join(RAIZ, "docs/contrato-de-entrada.md"), "utf8");
+    // A conclusão que o usuário precisa: evdev = universal, SDL_GameController = não.
+    assert.match(doc, /buttons\.map/, "o doc tem de nomear o contrato");
+    assert.match(doc, /SDL_GameController/, "e nomear a via que não é universal");
+    assert.match(doc, /n[aã]o\s+.*resolve|n[aã]o\s+resolveria/i,
+        "o doc tem de dizer que registrar no DB não resolve a X55");
+    assert.match(doc, /-1800/, "a faixa medida do R35S fica no doc");
+    // A regra que impede a recaída do §12.74.
+    assert.match(doc, /[Nn]unca\s+`?bits_evdev|nunca somar|Não some duas fontes/i,
+        "o doc tem de proibir somar as duas fontes — foi o que criou o defeito");
+});

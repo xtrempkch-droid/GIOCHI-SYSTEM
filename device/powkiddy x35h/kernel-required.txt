@@ -63,6 +63,9 @@ CONFIG_INPUT_EVDEV=y
 # /proc/bus/input/devices — medido no R35S em 17/11/2026. É complementar ao
 # EVDEV, não substituto: EVDEV entrega os eventos, JOYDEV dá a identidade.
 CONFIG_INPUT_JOYDEV=y
+# controle virtual `Giochi Gamepad` (S52gamepad): sem isto cada aparelho
+# entrega os botoes no seu formato e todo jogo precisa de excecao (§12.74)
+CONFIG_INPUT_UINPUT=y
 CONFIG_INPUT_JOYSTICK=y
 CONFIG_JOYSTICK_ADC=y
 CONFIG_ROCKCHIP_SARADC=y

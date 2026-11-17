@@ -110,6 +110,53 @@ if [ -f "$VERIFICADOR_SRC" ]; then
     fi
 fi
 
+# ── controle virtual: o mesmo formato de botão em todo aparelho ──
+#
+# `giochi-gamepad` cria o device "Giochi Gamepad" com os 17 botões do contrato e
+# os 4 eixos numa faixa única, traduzindo o hardware de cada placa. É o que faz
+# um jogo responder igual no R35S (um nó com botões + eixos) e na X55 (dois nós,
+# um de cada) — sem `if` por console dentro de cada jogo (§12.74).
+#
+# Compilado aqui, e não versionado como binário, pela mesma razão do
+# verificador: assim ele linka contra a libc DESTA imagem.
+#
+# Depende de `HOST_DIR`, que o bloco do verificador já derivou acima.
+if [ -n "${HOST_DIR:-}" ]; then
+    GAMEPAD_SRC="$POST_BUILD_DIR/giochi-gamepad/giochi-gamepad.c"
+    GAMEPAD_DB="$POST_BUILD_DIR/giochi-gamepad/gamecontrollerdb.txt"
+    if [ -f "$GAMEPAD_SRC" ]; then
+        GCC_BIN_G="$(echo "$HOST_DIR"/bin/*-buildroot-linux-gnu-gcc 2>/dev/null | awk '{print $1}')"
+        if [ ! -x "$GCC_BIN_G" ]; then
+            echo "post-build: toolchain ausente ($GCC_BIN_G) — giochi-gamepad não compilado" >&2
+            echo "post-build: cada aparelho vai responder no seu formato de botão" >&2
+        else
+            mkdir -p "$TARGET_DIR/usr/bin" "$TARGET_DIR/etc/giochi"
+            if "$GCC_BIN_G" -O2 -Wall -Wextra \
+                    -o "$TARGET_DIR/usr/bin/giochi-gamepad" "$GAMEPAD_SRC" \
+                    2>"$TARGET_DIR/.gamepad.log"; then
+                chmod 0755 "$TARGET_DIR/usr/bin/giochi-gamepad"
+                echo "post-build: giochi-gamepad compilado"
+            else
+                echo "post-build: FALHOU compilar o giochi-gamepad:" >&2
+                sed 's/^/  /' "$TARGET_DIR/.gamepad.log" >&2
+                rm -f "$TARGET_DIR/usr/bin/giochi-gamepad" "$TARGET_DIR/.gamepad.log"
+                exit 1
+            fi
+            rm -f "$TARGET_DIR/.gamepad.log"
+            # O mapeamento do SDL viaja junto: sem ele o `Button::A` do SDL é o
+            # botão de BAIXO, e o `buttons.map` diz que `a` é o da DIREITA. As
+            # duas vias discordariam — que é o defeito de origem.
+            if [ -f "$GAMEPAD_DB" ]; then
+                cp -f "$GAMEPAD_DB" "$TARGET_DIR/etc/giochi/gamecontrollerdb.txt"
+                echo "post-build: gamecontrollerdb.txt instalado"
+            else
+                echo "post-build: AVISO — $GAMEPAD_DB ausente; o SDL usará o" >&2
+                echo "            mapeamento automático e A/B ficarão trocados" >&2
+            fi
+        fi
+    fi
+fi
+
 # ── gate: a biblioteca presente PROVA que alguém a usa? ─────
 #
 # DEFEITO REAL, medido no R35S em 06/11/2026: `BR2_PACKAGE_HARFBUZZ=y` estava no

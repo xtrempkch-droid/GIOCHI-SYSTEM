@@ -87,6 +87,26 @@ fi
 SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-$VIDEO_PADRAO}"
 export SDL_VIDEODRIVER
 
+# ── o mapeamento canônico do controle ────────────────────────
+#
+# Sem isto, o `Button::A` do SDL2 é o botão de **baixo** do plástico (o SDL liga
+# `a` ao menor código, `BTN_SOUTH`), enquanto o `buttons.map` diz que `a` é o da
+# **direita** (`BTN_EAST`). Um jogo por SDL e outro por evdev discordariam sobre
+# o que é "A" — foi o defeito medido no `neon-drift` (§12.74).
+#
+# A variável de **conteúdo** funciona; a `SDL_GAMECONTROLLERCONFIG_FILE`
+# (caminho) foi medida em 17/11/2026 e o SDL a ignorou — o mapeamento continuou
+# o automático. Por isso o arquivo é lido aqui e exportado como string.
+#
+# `:-` preserva quem definiu a sua: um app pode querer o layout do Xbox, e nesse
+# caso exporta antes. E se o arquivo não existir, nada é exportado — o SDL cai
+# no automático, que é o comportamento de antes, sem erro.
+GAMEPAD_DB=/etc/giochi/gamecontrollerdb.txt
+if [ -z "${SDL_GAMECONTROLLERCONFIG:-}" ] && [ -f "$GAMEPAD_DB" ]; then
+  SDL_GAMECONTROLLERCONFIG="$(grep -v '^[[:space:]]*#' "$GAMEPAD_DB" | grep -v '^[[:space:]]*$')"
+  [ -n "$SDL_GAMECONTROLLERCONFIG" ] && export SDL_GAMECONTROLLERCONFIG
+fi
+
 CONFIG_DIR="${GIOCHI_CONFIG_DIR:-/user/.config/giochi}"
 SETUP_FLAG="$CONFIG_DIR/controller-setup"
 BRIGHTNESS_FILE="$CONFIG_DIR/brightness"

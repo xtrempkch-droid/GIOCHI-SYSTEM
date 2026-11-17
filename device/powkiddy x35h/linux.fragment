@@ -103,6 +103,21 @@ CONFIG_INPUT_EVDEV=y
 # identidade — `/dev/input/js0` existir é a afirmação do kernel de que aquele
 # dispositivo é um joystick.
 CONFIG_INPUT_JOYDEV=y
+
+# ── controle virtual: o formato igual em todo aparelho ───────
+#
+# `UINPUT` é o que permite ao `giochi-gamepad` criar o device "Giochi Gamepad".
+# Sem ele, cada aparelho entrega os botões no formato do seu DTS e todo jogo
+# precisa de exceção por console — o defeito do §12.74.
+#
+# `=y` e não `=m`: o controle é hardware ONBOARD, existe em todo boot, e o
+# rootfs do Buildroot não tem autoload de módulo (a armadilha do §12.51). Módulo
+# que depende de alguém carregar vira "sem controle virtual" sem erro nenhum.
+#
+# Medido no host em 17/11/2026: com `/dev/uinput` e o daemon, o SDL2 passa a
+# reconhecer gamecontroller num aparelho cujo layout separa botões e eixos (o
+# caso da X55) — que é exatamente o que hoje ele não faz.
+CONFIG_INPUT_UINPUT=y
 CONFIG_INPUT_JOYSTICK=y
 # AUSENTE no kernel 6.12 de propósito: `rocknix-joypad` é driver FORA da árvore.
 # E NÃO É NECESSÁRIO neste aparelho — os botões vêm do `gpio-keys` do DTS

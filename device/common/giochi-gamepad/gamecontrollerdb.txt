@@ -1,0 +1,38 @@
+# Mapeamento canônico do controle do Giochi System
+#
+# Uma linha por GUID de device. Este arquivo é lido pelo `giochi-init`, que o
+# exporta como `SDL_GAMECONTROLLERCONFIG` antes de subir o launcher — assim todo
+# app SDL herda o mesmo mapeamento, sem precisar de código.
+#
+# ## Por que existe
+#
+# O device virtual `Giochi Gamepad` (criado pelo `giochi-gamepad`) entrega os 17
+# botões do contrato em códigos fixos. O SDL2, sozinho, numera os botões na
+# ordem CRESCENTE do código e liga `a` ao menor deles — `BTN_SOUTH` (304), que
+# o `buttons.map` do projeto chama de `b`.
+#
+# Sem esta linha, o `Button::A` do SDL seria o botão **de baixo** do plástico,
+# enquanto o `buttons.map` diz que `a` é o da **direita**. Um jogo que usa SDL e
+# outro que usa evdev discordariam sobre o que é "A" — foi exatamente o defeito
+# do `neon-drift` (AGENTS §12.74).
+#
+# Com `a:b1`, `Button::A` passa a ser `BTN_EAST` = o `a` do mapa, e as duas vias
+# concordam. Em todo aparelho, porque o virtual é sempre o mesmo.
+#
+# ## O GUID é estável
+#
+# `06005931091200000100000001000000` vem de `bustype=BUS_VIRTUAL`,
+# `vendor=0x1209`, `product=0x0001`, `version=1`, fixados no `giochi-gamepad.c`.
+# Mudar qualquer um deles invalida esta linha EM SILÊNCIO: o SDL volta ao
+# mapeamento automático e `a` e `b` trocam de lado. Quem mudar o `id` do device
+# tem de mudar o GUID aqui, e `tests/gamepad-virtual.test.mjs` falha se a linha
+# não existir.
+#
+# ## Por que não `SDL_GAMECONTROLLERCONFIG_FILE`
+#
+# Medido em 17/11/2026: o SDL 2.32.10 do host ignora essa variável — o
+# mapeamento continua o automático (`a:b0`). A variável de **conteúdo**
+# (`SDL_GAMECONTROLLERCONFIG`) funciona. Por isso o `giochi-init` lê este
+# arquivo e exporta o conteúdo, em vez de apontar para o caminho.
+
+06005931091200000100000001000000,Giochi Gamepad,a:b1,b:b0,x:b2,y:b3,back:b8,guide:b10,start:b9,leftstick:b11,rightstick:b12,leftshoulder:b4,rightshoulder:b5,dpup:b13,dpdown:b14,dpleft:b15,dpright:b16,leftx:a0,lefty:a1,rightx:a2,righty:a3,lefttrigger:b6,righttrigger:b7,

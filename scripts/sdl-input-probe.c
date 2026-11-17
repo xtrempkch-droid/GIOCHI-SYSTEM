@@ -122,6 +122,71 @@ static int codigos_do_device(const char *caminho, unsigned *saida, int maximo)
     return n;
 }
 
+/*
+ * A faixa que o device entrega em cada eixo, e o que está ligado nele.
+ *
+ * É a metade que faltava para um jogo normalizar sem adivinhar: dois aparelhos
+ * do mesmo catálogo entregam o analógico em escalas diferentes — a X55 mainline
+ * (`adc-joystick`) declara 15..1023 com o Y invertido, enquanto o R35S
+ * (`rocknix-singleadc-joypad`) normaliza no driver. Sem medir, o jogo "puxa"
+ * para um lado num aparelho e fica reto no outro, e o sintoma parece física.
+ *
+ * `flat` e `fuzz` também são dado, não enfeite: é o que o kernel pede para ser
+ * ignorado como ruído de repouso, e usar o valor errado deixa o carro tremendo
+ * parado ou morto nos primeiros milímetros.
+ */
+static void eixos_do_device(const char *caminho)
+{
+    int fd = open(caminho, O_RDONLY | O_NONBLOCK);
+    if (fd < 0) {
+        return;
+    }
+    unsigned char absbits[ABS_CNT / 8];
+    memset(absbits, 0, sizeof(absbits));
+    if (ioctl(fd, EVIOCGBIT(EV_ABS, sizeof(absbits)), absbits) < 0) {
+        close(fd);
+        return;
+    }
+
+    static const struct { unsigned codigo; const char *nome; } NOMES[] = {
+        {ABS_X, "ABS_X"}, {ABS_Y, "ABS_Y"}, {ABS_Z, "ABS_Z"},
+        {ABS_RX, "ABS_RX"}, {ABS_RY, "ABS_RY"}, {ABS_RZ, "ABS_RZ"},
+        {ABS_HAT0X, "ABS_HAT0X"}, {ABS_HAT0Y, "ABS_HAT0Y"},
+    };
+
+    printf("      eixos (faixa que o kernel entrega):\n");
+    int achou = 0;
+    for (unsigned a = 0; a < ABS_CNT; a++) {
+        if (!(absbits[a / 8] & (1u << (a % 8)))) {
+            continue;
+        }
+        struct input_absinfo info;
+        if (ioctl(fd, EVIOCGABS((int)a), &info) < 0) {
+            continue;
+        }
+        const char *nome = NULL;
+        for (unsigned k = 0; k < sizeof(NOMES) / sizeof(NOMES[0]); k++) {
+            if (NOMES[k].codigo == a) {
+                nome = NOMES[k].nome;
+                break;
+            }
+        }
+        char buf[16];
+        if (!nome) {
+            snprintf(buf, sizeof(buf), "ABS_%u", a);
+            nome = buf;
+        }
+        printf("        %-10s min=%-6d max=%-6d flat=%-5d fuzz=%-5d valor=%d%s\n",
+               nome, info.minimum, info.maximum, info.flat, info.fuzz, info.value,
+               info.minimum > info.maximum ? "  (INVERTIDO)" : "");
+        achou++;
+    }
+    if (!achou) {
+        printf("        (nenhum — este device não tem analógico)\n");
+    }
+    close(fd);
+}
+
 static const char *tipo(SDL_JoystickType t)
 {
     switch (t) {
@@ -179,12 +244,31 @@ int main(int argc, char **argv)
         printf("      guid=%s  tipo=%s\n", texto, tipo(SDL_JoystickGetDeviceType(i)));
 
         SDL_Joystick *js = SDL_JoystickOpen(i);
+        /* `SDL_JoystickPath` devolve ponteiro do próprio joystick, que morre no
+           Close — e o `bN`->código é lido DEPOIS dele. Copiar antes de fechar;
+           sem isso o segundo uso imprime lixo (medido: "event" virou "??4㪪"). */
+        static char caminho_buf[256];
+        caminho_buf[0] = '\0';
         if (js) {
             printf("      botoes=%d  eixos=%d  hats=%d\n",
                    SDL_JoystickNumButtons(js), SDL_JoystickNumAxes(js),
                    SDL_JoystickNumHats(js));
+            const char *p = SDL_JoystickPath(js);
+            if (p) {
+                snprintf(caminho_buf, sizeof(caminho_buf), "%s", p);
+            }
+            /* Os eixos são medidos aqui, e não lá embaixo: um device pode ser
+               joystick SEM ser gamecontroller — é o `adc-joystick` da X55, que
+               tem os 4 eixos e zero botões. Se a leitura ficasse depois do
+               `continue` do is_game_controller, o eixo do aparelho onde ele mais
+               importa nunca apareceria. */
+            if (caminho_buf[0]) {
+                printf("      device=%s\n", caminho_buf);
+                eixos_do_device(caminho_buf);
+            }
             SDL_JoystickClose(js);
         }
+        const char *caminho = caminho_buf[0] ? caminho_buf : NULL;
 
         if (!SDL_IsGameController(i)) {
             printf("      SDL_IsGameController = NAO\n");
@@ -213,11 +297,10 @@ int main(int argc, char **argv)
          * botão do PLÁSTICO cada `Button` do SDL aciona — e é onde um mapa
          * automático divergente do `buttons.map` aparece.
          */
-        const char *caminho = SDL_JoystickPath(SDL_GameControllerGetJoystick(gc));
         unsigned codigos[64];
         int n_codigos = caminho ? codigos_do_device(caminho, codigos, 64) : -1;
         if (n_codigos > 0) {
-            printf("      device=%s  (%d codigos EV_KEY em ordem)\n", caminho, n_codigos);
+            printf("      %d codigos EV_KEY em ordem\n", n_codigos);
             printf("      Button do SDL  -> bN -> codigo evdev\n");
             for (int b = 0; b <= SDL_CONTROLLER_BUTTON_DPAD_RIGHT; b++) {
                 SDL_GameControllerButtonBind lig = SDL_GameControllerGetBindForButton(gc, (SDL_GameControllerButton)b);

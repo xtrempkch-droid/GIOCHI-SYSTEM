@@ -68,3 +68,4 @@ import "./fontes-idiomas.test.mjs";
 import "./input-diag.test.mjs";
 import "./input-joystick.test.mjs";
 import "./sdl-input-probe.test.mjs";
+import "./gamepad-virtual.test.mjs";
