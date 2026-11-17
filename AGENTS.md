@@ -6976,6 +6976,21 @@ de um boot que falhou. Quando o aparelho estiver disponível:
         <(bash scripts/panel-diag.sh --log bom.log)
    ```
 
+**O pipeline já foi exercitado de ponta a ponta no R35S** (17/11/2026, o único
+aparelho ligado):
+
+```text
+S96bootlog  -> /tmp/giochi-boot.log          482 linhas, 26 KB
+               ## dmesg                      (17 linhas de drm/dsi/panel)
+               ## DRM: conectores, ...       card0-DSI-1/status: connected
+panel-diag.sh --log  -> "O painel inicializou NESTE boot", com as duas provas
+```
+
+O log do `S96bootlog` **já traz as duas metades** que o veredito precisa (dmesg +
+estado do conector), então o `--log` funciona sem adaptação. Isso é o que torna o
+diagnóstico do X35H possível sem ninguém com SSH no aparelho — que é justamente a
+situação quando a tela está apagada.
+
 O que cada resultado significa para a correção:
 
 | Veredito | Correção provável | Onde |

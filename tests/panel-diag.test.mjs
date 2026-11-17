@@ -408,3 +408,38 @@ test("o log de boot RUIM do X35H diz onde parou, e não 'detecção falhou'", ()
     assert.doesNotMatch(saida, /O painel inicializou NESTE boot/,
         "com erro de init não pode dar PASS");
 });
+
+test("funciona sobre o giochi-boot.log real do S96bootlog", () => {
+    // O caminho de uso no X35H: o `S96bootlog` grava o log na FAT do cartão, o
+    // log é copiado para o PC, e `panel-diag.sh --log` analisa. Verificado no
+    // R35S em 17/11/2026 — o formato abaixo é um recorte do arquivo real
+    // (482 linhas), não um fixture inventado.
+    //
+    // O log já traz as DUAS metades que o veredito precisa: o dmesg (`## dmesg`)
+    // e o estado do conector (`## DRM: conectores, status e modos`). Por isso
+    // `--log` funciona sem nenhuma adaptação — e é o que faz o diagnóstico do
+    // X35H ser possível sem ninguém com SSH no aparelho.
+    const log = `=== giochi-boot.log — fase early — 2026-11-17T18:59:07Z (UTC) ===
+
+## cmdline
+console=ttyS2,1500000n8
+
+## dmesg
+[    1.139177] panel-generic-dsi ff450000.dsi.0: lanes 4, format 0, mode e03
+[    1.149824] rockchip-drm display-subsystem: [drm] fb0: rockchipdrmfb frame buffer device
+[    2.524617] Console: switching to colour frame buffer device 80x30
+
+## DRM: conectores, status e modos
+/sys/class/drm/card0-DSI-1/status: connected
+/sys/class/drm/card0-DSI-1/modes: 640x480
+
+## selftest
+  [PASS] conector card0-DSI-1: connected 640x480
+=== fim — 2026-11-17T18:59:21Z (UTC) ===
+`;
+    const saida = analisar("bootlog.log", log);
+    assert.match(saida, /O painel inicializou NESTE boot/);
+    assert.match(saida, /o conector DSI está 'connected'/,
+        "a seção '## DRM' do S96bootlog é o que responde a consequência; se o " +
+        "formato mudar, o veredito perde a metade que prova");
+});
