@@ -150,7 +150,7 @@ o que foi medido, e deixar a decisão com quem responde pelo código.
 
 | Verificação | Resultado |
 | --- | --- |
-| `node tests/run-all.mjs` | **581/581 + 1 skip** (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, devices 13, assert-config 12, fdt 11, gpu-bench 16, …) |
+| `node tests/run-all.mjs` | **582/582 + 1 skip** (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, devices 13, assert-config 12, fdt 11, gpu-bench 16, …) |
 | `node scripts/validate-devices.mjs` | OK — 7 devices, 1 habilitado |
 | `node scripts/list-devices.mjs --github-matrix` | matriz com `qemu-aarch64` |
 | matriz com `--device powkiddy-x55 --allow-draft` | devolve **só** o X55 |
@@ -561,7 +561,7 @@ absoluto** do host — §12.40).
 
 ## 10. Testes
 
-`node tests/run-all.mjs` → **581/581 + 1 skip**, em **64 arquivos**. A tabela abaixo é uma
+`node tests/run-all.mjs` → **582/582 + 1 skip**, em **64 arquivos**. A tabela abaixo é uma
 seleção dos que prendem contratos de projeto; a lista completa é `ls tests/` e
 `tests/runner-coverage.test.mjs` **falha** se algum arquivo existir sem estar
 importado no `run-all.mjs` — foi assim que dois testes desta revisão quase
@@ -6446,10 +6446,10 @@ O R35S respondeu em `10.55.0.2` a sessão inteira (SSH por senha, sem chave na
 imagem). O launcher está no ar (pid 505) e **nada foi interrompido**: o probe roda
 sem tocar no DRM. Nenhum arquivo foi gravado no aparelho, só `/tmp`.
 
-Suíte: **581/581 + 1 skip**, em 64 arquivos.
+Suíte: **582/582 + 1 skip**, em 64 arquivos.
 
 ```bash
-node tests/run-all.mjs                          # 581/581 + 1 skip
+node tests/run-all.mjs                          # 582/582 + 1 skip
 bash scripts/sdl-input-probe.sh r35s --run      # a medição do §12.74
 ```
 
@@ -6509,7 +6509,7 @@ tentasse o DB perderia a tarde num aparelho onde o device nem é joystick.
 
 ```text
 main        5ffb592
-suíte       581/581 + 1 skip, 63 arquivos
+suíte       582/582 + 1 skip, 64 arquivos
 CI          5ffb592: Validate OK, builds em andamento
 issue       GIOCHI-GAMES#1 aberta
 ```
@@ -6605,7 +6605,7 @@ com **mapeamentos diferentes** — e é exatamente isso que o virtual elimina.
 ### Estado e pendências
 
 ```text
-suíte   581/581 + 1 skip
+suíte   582/582 + 1 skip
 imagem  NENHUMA gravada contém o daemon ainda — precisa de rebuild
 ```
 
@@ -6615,3 +6615,66 @@ imagem  NENHUMA gravada contém o daemon ainda — precisa de rebuild
 | `js0` idem | `CONFIG_INPUT_JOYDEV` de `4018875` também não |
 | multi-controle | o daemon funde todos os devices que casem o mapa num único gamepad; jogador 2 com controle USB entra como jogador 1. Resolver exige um virtual por device físico |
 | a faixa do X35H | herdada da X55; não medida no aparelho |
+
+## 30. As issues do contrato de entrada, e o que deu errado ao abrir (17/11/2026)
+
+O contrato de entrada (§29) precisa chegar às três equipes: **jogos**, **app** e
+**OS**. O conteúdo foi escrito e está pronto; a **abertura** não saiu como
+planejado, e o registro fica aqui porque a próxima sessão vai querer saber o que
+existe e o que falta.
+
+### O estado real, medido na API às 20:36 UTC
+
+| Repo | Issue | Estado |
+| --- | --- | --- |
+| `GIOCHI-GAMES` | **#1** — `neon-drift: gamepad.rs diverge do buttons.map` | **aberta, única, correta** |
+| `GIOCHI-GAMES` | #2 — `Contrato de entrada: mirar o Giochi Gamepad` | **aberta, correta** — é a que fica |
+| `GIOCHI-GAMES` | #3, #4, #5 | **cópias exatas da #2** (body 3609 B, md5 `14c04d459798`, os quatro) |
+| `GIOCHI-APP` | — | **não criada** |
+| `GIOCHI-OS` | — | **não criada** |
+
+### O que deu errado
+
+O formulário interativo do MCP não se renova entre chamadas: quatro submissões
+minhas resultaram em **quatro cópias do mesmo texto no mesmo repo**, em vez de
+uma em cada repo. As três cópias estão marcadas para fechar como duplicata da
+`#2`; o pedido de fechamento foi submetido e depende de confirmação na interface.
+
+**A lição não é sobre o MCP — é sobre o meu hábito.** Eu chamei a ferramenta três
+vezes seguidas sem **medir o resultado da primeira**. Se tivesse lido a API entre
+uma e outra, teria visto que a segunda já era duplicata. É a mesma regra que este
+documento repete desde o §12.1: *medir antes de afirmar* — e ela vale para as
+minhas próprias ações, não só para o comportamento do Buildroot.
+
+### Os corpos estão versionados fora do Git
+
+Como a ferramenta falhou de forma não determinística, os textos completos ficaram
+em arquivo nesta sessão, prontos para colar em
+`https://github.com/xtrempkch-droid/<repo>/issues/new`:
+
+```text
+~/.copilot/session-state/3812db2f-.../files/issues-prontas/
+├── APP-contrato-de-entrada.md    GIOCHI-APP — enumeração e analógico no launcher
+└── OS-contrato-de-entrada.md     GIOCHI-OS — documentar na junção e garantir na imagem
+```
+
+Não estão no repositório de propósito: são artefato de sessão, e o
+`docs/contrato-de-entrada.md` já é a fonte da verdade do **conteúdo**. O que os
+arquivos carregam a mais é a **forma** — o recorte por equipe.
+
+### O que cada equipe precisa fazer
+
+| Equipe | Issue | O pedido, em uma linha |
+| --- | --- | --- |
+| **jogos** | #1 e #2 | não somar fontes de input; mirar `Giochi Gamepad` |
+| **app** | a criar | preferir o virtual na enumeração; o analógico agora tem faixa única |
+| **OS** | a criar | documentar o contrato na junção **e** verificar que a imagem o carrega |
+
+O pedido do OS é o que mais importa a longo prazo: se a imagem sair sem
+`S52gamepad` ou sem `CONFIG_INPUT_UINPUT`, o contrato **não existe** e nada
+avisa. É o "verde e errado" clássico deste repositório, agora no repo vizinho.
+
+### Pendência registrada
+
+- Confirmar o fechamento de `GAMES#3`, `#4`, `#5` como duplicata de `#2`.
+- Abrir as duas issues restantes (APP e OS) a partir dos arquivos acima.
