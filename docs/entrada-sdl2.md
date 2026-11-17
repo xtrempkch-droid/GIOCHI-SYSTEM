@@ -36,20 +36,49 @@ O segundo é o problema deste projeto e está registrado em
 próprio, e o SDL só reconhece um controle se houver entrada no
 `SDL_GameControllerDB` — que não existe para aparelho custom.
 
+> **Correção medida em 17/11/2026 (AGENTS §12.74).** A frase acima está errada no
+> mecanismo, e o erro muda a correção. O SDL2 **não** depende só do DB: sem
+> libudev ele gera o mapeamento **sozinho**, em
+> `LINUX_JoystickGetGamepadMapping`, desde que o device declare `BTN_GAMEPAD`
+> (`BTN_SOUTH`, 0x130). Medido no R35S: `SDL_IsGameController = SIM` e um
+> mapeamento `a:b0,b:b1,…` que **não veio de DB nenhum**.
+>
+> No X55 o `SDL_IsGameController` devolve **NAO**, mas o motivo não é "falta DB
+> entry" — é que o DTS mainline **separa** botões e eixos em dois nós, e nenhum
+> dos dois serve:
+>
+> | Nó | O que tem | Por que não vira gamecontroller |
+> | --- | --- | --- |
+> | `gpio-keys-control` | 17 `BTN_*`, **zero eixos** | `SDL_EVDEV_GuessDeviceClass` devolve **classe 0** — nem entra na lista de joysticks |
+> | `adc-joystick` | 4 eixos, **zero botões** | é joystick, mas `LINUX_JoystickGetGamepadMapping` exige `BTN_SOUTH` e recusa |
+>
+> Consequência prática, e é por isso que a distinção importa: no X55/X35H
+> **`SDL_GameControllerAddMapping` não resolve**. Registrar um GUID no DB faria
+> `SDL_IsGameController` responder `SIM` para o `adc-joystick` — e o controle
+> sairia com **eixos e nenhum botão**, porque os botões moram em outro device que
+> não é joystick. Um gamepad SDL não se monta colando dois nós.
+>
+> Quem quiser conferir no aparelho, sem pacote novo:
+> `bash scripts/sdl-input-probe.sh <device> --run 10.55.0.2` imprime os três
+> portões e a tradução `Button do SDL -> bN -> código evdev`.
+
 **Consequência para a GIOCHI-ENGINE-3D:** ela usa `SDL_GameController`
 ([citação do relatório](../Relatório%20consultor%20externo.md)). No X55 isso
-**não vai funcionar por padrão**, porque o controle não está no DB. O
-`giochi_gamepad_connected()` vai devolver 0 e os jogos da engine ficarão sem
-controle — sem erro, só sem resposta.
+**não vai funcionar por padrão** — a conclusão desta seção sempre esteve certa;
+o motivo é o nó partido, não o DB ausente. O `giochi_gamepad_connected()` vai
+devolver 0 e os jogos da engine ficarão sem controle — sem erro, só sem resposta.
 
-Duas saídas, e a escolha é da equipe da engine:
+Duas saídas, e a escolha é da equipe da engine — mas só a segunda vale nos três
+aparelhos (ver a correção acima):
 
-1. **Registrar o mapeamento em runtime** com
-   `SDL_GameControllerAddMapping()` antes da primeira consulta, lendo o
-   `/etc/giochi/buttons.map` que este repositório instala. É o caminho que usa o
-   que já existe no aparelho.
-2. **Usar `SDL_Joystick` cru e traduzir pelo `buttons.map`**, como o launcher faz
-   por evdev. É o que garante funcionar em qualquer aparelho, sem DB.
+1. ~~**Registrar o mapeamento em runtime** com `SDL_GameControllerAddMapping()`~~
+   — **não resolve o X55 nem o X35H**: o DB só é consultado depois de o device
+   ser joystick, e os botões de lá estão num nó que não é. Resolveria o R35S, que
+   já funciona sem ele.
+2. **Usar `SDL_Joystick` cru, ou `evdev` direto, e traduzir pelo `buttons.map`**,
+   como o launcher faz. É o único caminho que funciona nos três, e é o que o
+   `neon-drift` já faz por evdev — o defeito dele é ter **também** o caminho SDL,
+   com um segundo mapa que diverge (AGENTS §12.74).
 
 **O gate que ficou no repositório:** `device/<aparelho>/kernel-required.txt`
 declara `CONFIG_INPUT_EVDEV` e `CONFIG_INPUT_JOYSTICK`, então um build que perca
