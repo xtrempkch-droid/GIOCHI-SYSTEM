@@ -6911,3 +6911,49 @@ reiniciar ele acende". Isso **descarta** qualquer causa que sobreviva ao reset �
 o que aponta para estado físico (carga do trilho, estado do painel) e não para
 configuração. Configuração errada dá o mesmo resultado em todo boot; o que muda
 entre boot frio e reset é o **estado analógico da placa**.
+
+### 31.7 "Então não dá para suportar telas diferentes?" — dá, e é assim que se faz
+
+A conclusão "não há detecção" não significa "um painel por imagem". Significa que
+o painel é **declarado**, não descoberto — e declarar é uma linha a mais por
+painel. O mecanismo, lido no kernel 6.12:
+
+```c
+/* drivers/gpu/drm/panel/panel-sitronix-st7703.c — patch 0002 do X35H */
+
+static const struct st7703_panel_desc powkiddy_x35h_panel_desc = { ... };
+
+static const struct of_device_id st7703_of_match[] = {
+	{ .compatible = "anbernic,rg353v-panel-v2",  .data = &rg353v2_desc },
+	{ .compatible = "powkiddy,rgb10max3-panel",  .data = &rgb10max3_panel_desc },
+	{ .compatible = "powkiddy,x35h-panel",       .data = &powkiddy_x35h_panel_desc }, /* nosso */
+	…
+};
+```
+
+Cada linha é "este nome no DTS ⇒ esta `struct` em C". Nada é negociado, nada é
+lido do painel. A receita para um painel novo, na ordem em que dói menos:
+
+| Passo | O que muda | Onde |
+| --- | --- | --- |
+| 1 | `st7703_panel_desc` nova: modo (clock/htotal/vtotal), `lanes`, `format`, `init_sequence` | patch do aparelho |
+| 2 | uma linha nova em `st7703_of_match[]` com o `compatible` inventado | idem |
+| 3 | `&panel { compatible = "fabricante,modelo-panel"; }` no DTS | patch do aparelho |
+| 4 | `device.json` → `panel` refletindo o modo, para o `giochi-selftest` conferir | repo |
+
+O caro não é o driver — é a **`init_sequence`** (155 a 188 comandos DCS no R35S,
+~100 no X35H), e ela só se obtém do vendor ou de outro projeto que já a tenha.
+O `scripts/panel-inspect.mjs` + `device/r35s/panels/` existem para isso: guardam
+as sequências em **texto**, versionadas, porque binário no Git não mostra o que
+mudou (§13-A).
+
+Duas consequências de planejamento, e a segunda é a que muda decisão:
+
+- **um DTS por painel**: duas unidades do mesmo modelo com painéis diferentes
+  exigem dois `compatible` e uma escolha — que hoje não existe no runtime. Se
+  isso for cenário real, a solução é um parâmetro de boot (`giochi.panel=`) lido
+  por um `__setup()` que reescreve o `of_node`, e **isso não está implementado**;
+- **não dá para "tentar um, senão o outro"**: tentar inicializar o painel errado
+  com a sequência errada costuma deixar a tela apagada *e* o link DSI travado,
+  então a segunda tentativa não aconteceria no mesmo boot. É por isso que a
+  escolha tem de ser declarada, não tentada.
