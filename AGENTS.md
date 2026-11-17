@@ -115,8 +115,9 @@ o que foi medido, e deixar a decisão com quem responde pelo código.
 - Estrutura de repositório, `.gitignore`, `.gitattributes`, licença MIT.
 - `device/devices.json` como fonte da verdade da lista **e** da matriz de CI.
 - `device.json` por aparelho, validado por schema em `scripts/lib/devices.mjs`.
-- 7 aparelhos registrados: `qemu-aarch64` e **`powkiddy-x55`** habilitados
-  (o X55 foi liberado em 14/11/2026 para a build de release) + 5 drafts.
+- 7 aparelhos registrados, **4 habilitados**: `qemu-aarch64`, **`powkiddy-x55`**
+  (release, 14/11/2026), **`r35s`** (15/11/2026) e **`powkiddy-x35h`**
+  (17/11/2026, para a equipe do OS). Os outros 3 são drafts sem defconfig.
 - Buildroot fixado em **2025.02** (`buildroot.version`, LTS). Subiu de 2024.02 em
   13/11/2026 para ter glibc 2.41 — ver §12.66, que também registra as duas
   armadilhas silenciosas que o upgrade trouxe.
@@ -5263,7 +5264,7 @@ equipe lê.
 | `qemu-aarch64` | `qemu-aarch64/` | virtual | arm64 | **ready** | nada — é o smoke test do pipeline |
 | `powkiddy-x55` | `powkiddy x55/` | RK3566 | arm64 | **ready (habilitado)** | **boota com tela, áudio, Wi-Fi, BT e 16 botões + 4 eixos**; alvo da build de release desde 14/11/2026 — a interface de jogos é do `Giochi app` e entra por overlay |
 | `powkiddy-x35s` | `powkiddy x35s/` | **RK3566** | arm64 | draft | DTS (compartilha com o X35H) e build |
-| `powkiddy-x35h` | `powkiddy x35h/` | **RK3566** | arm64 | draft | **boota com tela 640x480, `usb0` e SSH**; imagem de 04/11 já tem o `respawn`. Falta o launcher, o teste A/B de cartão e os eixos analógicos |
+| `powkiddy-x35h` | `powkiddy x35h/` | **RK3566** | arm64 | **ready (habilitado)** | **boota com tela 640x480, `usb0` e SSH**. Liberado em 17/11/2026 para a equipe do OS. Defeito conhecido e não resolvido: a tela não acende em alguns boots frios (§31) — diagnóstico por `scripts/panel-diag.sh --log`. Falta o launcher, o teste A/B de cartão e a faixa dos eixos |
 | `r35s` | `r35s/` | RK3326 | arm64 | **ready (habilitado)** | **BOOTOU em 06/11/2026 e testado por SSH**: tela 640x480, `r36s_Gamepad` com 16 botões + 4 eixos, áudio (`rk817_int`, `Playback Mux = HP` — §12.68), bateria, térmica e GPU (§12.51). Habilitado em 15/11/2026 para a rodada de validação do som |
 | `steamdeck` | `steamdeck/` | x86_64 | x86_64 | draft | kernel, firmware, áudio, Wi-Fi, controle |
 | `generic-x64` | `generic-x64/` | x86_64 | x86_64 | draft | **nunca compilado**; `pc_x86_64_efi_defconfig` declarado para permitir dispatch com `allow_draft` |
@@ -5753,11 +5754,12 @@ sem medir o build completo.
 | --- | --- | --- |
 | `r35s` | **em uso por outra equipe** (15/11/2026, a partir das 19h) | **indisponível** — nem SSH, nem reboot, nem troca de cartão |
 | `powkiddy-x55` | **em uso pelo time do `Giochi app`** (launcher) | não usar para teste; **avisar com antecedência** se precisar |
-| `powkiddy-x35h` | **conectado, mas em uso** (04/11) | **indisponível momentaneamente** — nem SSH, nem serial, nem reboot |
+| `powkiddy-x35h` | liberado para a equipe do **OS** em 17/11/2026 | é deles agora: **combinar antes** de qualquer teste, reboot ou gravação |
 
-**Nenhum aparelho está livre.** O R35S entrou na lista em 15/11/2026: estava na
-bancada com a imagem `a012b5a` e passou para outra equipe. A X55 continua
-conectada (USB e TTL) mas está **ocupada**.
+**Nenhum aparelho está livre.** O R35S entrou na lista em 15/11/2026 e saiu em
+17/11 (ficou disponível para medição e validou o `panel-diag.sh`). A X55 continua
+conectada (USB e TTL) mas está **ocupada** pelo time do app. O X35H foi liberado
+em 17/11/2026 — é o quarto aparelho na matriz do CI, e o alvo da equipe do OS.
 
 Não rode nada neles sem combinar antes: um reboot ou uma gravação de cartão
 interrompe o trabalho de quem está usando. O mesmo vale para `adb`/SSH/serial —

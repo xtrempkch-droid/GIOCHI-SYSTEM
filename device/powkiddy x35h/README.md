@@ -14,7 +14,42 @@ tela e o mesmo DTS.
 | Rádio | **nenhum** — sem Wi-Fi, sem Bluetooth |
 | Console | `ttyS2` @ 1500000 (pads; **não há TTL exposto**) |
 | U-Boot | mainline 2024.10, `anbernic-rgxx3-rk3566` |
-| Status | `draft` — **não testado em hardware** |
+| Status | **`ready`** — bootou em hardware (tela, `usb0`, SSH) e entra na matriz do CI |
+
+## Defeito conhecido: a tela não acende em alguns boots frios
+
+**Sintoma.** Em alguns boots a tela fica apagada; apertar o botão de reset faz a
+tela funcionar. Não é sempre, e o mesmo cartão acende no reset.
+
+**O que NÃO é.** Não é detecção de painel. Painel MIPI-DSI não se anuncia: não há
+EDID nem DDC, e o modo vem de uma `drm_display_mode` escrita em C, casada por
+`compatible`. Se o `compatible` estivesse errado, a tela **nunca** acenderia.
+
+**Como diagnosticar, sem precisar de SSH** (a tela apagada é justamente quando
+não há SSH):
+
+```bash
+# o S96bootlog grava /tmp/giochi-boot.log na FAT do cartão a cada boot
+bash scripts/panel-diag.sh --log giochi-boot.log
+```
+
+O veredito diz em qual das quatro etapas o boot parou — controlador DSI, painel,
+backlight ou trilho `vcc_lcd` — e compara com um boot bom:
+
+```bash
+diff <(bash scripts/panel-diag.sh --log ruim.log) \
+     <(bash scripts/panel-diag.sh --log bom.log)
+```
+
+**Hipótese em aberto, NÃO aplicada.** O `vcc_lcd` deste aparelho (herdado da X55)
+é `regulator-fixed` chaveado por GPIO **sem** `startup-delay-us`, e o
+`st7703_prepare()` dá 10–20 ms entre ligar o trilho e soltar o reset. No R35S o
+mesmo trilho é LDO de PMIC com rampa declarada. A hipótese concorrente é um
+comando DCS que expira no boot frio (`accum_err` = `-110`). **As duas produzem o
+mesmo sintoma**, e só o log separa — por isso não há correção aplicada: um atraso
+que ninguém mediu troca "intermitente" por "raro", que é pior de achar.
+
+Registro completo em `AGENTS.md` §31.
 
 ## Por que ele é derivado da X55
 

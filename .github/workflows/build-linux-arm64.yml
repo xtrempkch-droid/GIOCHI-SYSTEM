@@ -314,21 +314,68 @@ jobs:
       # 2 GiB ou mais. Comprimir não é economia: sem isto o arquivo que o usuário
       # precisa — o que se grava no cartão — ficaria de fora. O `flash-sd.sh` e
       # o `flash-dd.sh` aceitam `.gz` justamente por causa disto.
-      - name: Comprimir as imagens de cartão
+      # NOME DE ASSET É ÚNICO numa release, e o `--clobber` não avisa: ele
+      # SOBRESCREVE. Com três aparelhos, `build-info.txt`, `SHA256SUMS`, `Image`,
+      # `device.json` e `rootfs.ext4` existem nos três — o último upload vence e
+      # a release passa a mostrar o build-info de UM aparelho como se fosse de
+      # todos. Ninguém descobre isso por log: o upload sai com sucesso.
+      #
+      # Por isso tudo vai para uma pasta plana com o aparelho no nome. A imagem
+      # de cartão é a exceção porque já nasce única.
+      - name: Comprimir e renomear para não colidir entre aparelhos
         run: |
           set -euo pipefail
           shopt -s nullglob
+          rm -rf publicar && mkdir -p publicar
+
+          # `cp -f` SOBRESCREVE sem avisar, e uma pasta plana nunca teria dois
+          # arquivos com o mesmo nome — então uma checagem de duplicata feita
+          # DEPOIS do laço é decorativa: ela não pode disparar. A colisão
+          # acontece no `cp`, e é ali que tem de ser recusada. (A primeira
+          # versão deste passo fazia `uniq -d` no fim; verificado que o guarda
+          # nunca dispara, e o arquivo era silenciosamente substituído.)
+          # A função só CHECA, e não devolve o caminho: chamada em `$(...)` ela
+          # rodaria num subshell, e `exit 1` ali dentro mata o subshell — não o
+          # script. Medido: a checagem disparava, o `cp` seguia com destino vazio
+          # e o operador via "cp: cannot create regular file ''", que não diz
+          # nada sobre o problema real.
+          checa() {
+            if [ -e "publicar/$1" ]; then
+              echo "ERRO: dois aparelhos produziriam o asset '$1'." >&2
+              echo "       A release mostraria o arquivo de um como se fosse de" >&2
+              echo "       todos, e o upload sairia com sucesso." >&2
+              exit 1
+            fi
+          }
+
           for dir in baixado/*/; do
-            for img in "$dir"*.img; do
-              echo "comprimindo $img ($(stat -c %s "$img") bytes)"
-              gzip -9 -k "$img"
-              rm -f "$img"
+            aparelho="$(basename "$dir")"
+            aparelho="${aparelho#giochi-system-}"
+            for f in "$dir"*; do
+              [ -f "$f" ] || continue
+              base="$(basename "$f")"
+              case "$base" in
+                *.img)
+                  echo "comprimindo $base ($(stat -c %s "$f") bytes)" >&2
+                  checa "${base}.gz"
+                  gzip -9 -c "$f" >"publicar/${base}.gz"
+                  ;;
+                *-sd.img.gz)
+                  # Já veio comprimida e já tem o aparelho no nome.
+                  checa "$base"
+                  cp -f "$f" "publicar/$base"
+                  ;;
+                *)
+                  checa "giochi-system-${aparelho}-${base}"
+                  cp -f "$f" "publicar/giochi-system-${aparelho}-${base}"
+                  ;;
+              esac
             done
           done
           echo "--- conteúdo a publicar:"
-          find baixado -type f | sort | sed 's/^/  /'
-          echo "--- tamanhos:"
-          du -sh baixado/* | sed 's/^/  /'
+          find publicar -type f -printf '%12s  %f\n' | sort -k2 | sed 's/^/  /'
+          echo "--- total:"
+          du -sh publicar | sed 's/^/  /'
 
       - name: Publicar na release
         env:
@@ -378,8 +425,8 @@ jobs:
 
           # `SHA256SUMS` primeiro e o resto depois: se o upload parar no meio, o
           # que falta é a imagem, não o hash dela.
-          find baixado -name SHA256SUMS -print0 | xargs -0 -r -n1 gh release upload "$TAG" --clobber
-          find baixado -type f ! -name SHA256SUMS -print0 | xargs -0 -r -n1 gh release upload "$TAG" --clobber
+          find publicar -name '*SHA256SUMS' -print0 | xargs -0 -r -n1 gh release upload "$TAG" --clobber
+          find publicar -type f ! -name '*SHA256SUMS' -print0 | xargs -0 -r -n1 gh release upload "$TAG" --clobber
 
           echo "### Release publicada" >> "$GITHUB_STEP_SUMMARY"
           echo "${{ github.server_url }}/${{ github.repository }}/releases/tag/$TAG" >> "$GITHUB_STEP_SUMMARY"

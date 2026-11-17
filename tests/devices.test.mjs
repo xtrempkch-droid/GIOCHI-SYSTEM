@@ -100,9 +100,20 @@ test("arquitetura sem device habilitado retorna erro claro", async () => {
   );
 });
 
-test("allow-draft inclui rascunho com defconfig quando pedido pelo id", async () => {
+test("allow-draft inclui rascunho com defconfig quando pedido pelo id", async (t) => {
   const rascunho = await primeiroDesabilitado({ comDefconfig: true });
-  assert.ok(rascunho, "o índice precisa manter ao menos um rascunho com defconfig");
+  // Em 17/11/2026 o X35H foi habilitado e o índice ficou SEM nenhum rascunho com
+  // defconfig. Este teste cravava que existisse um, então passou a falhar sem
+  // que a regra tivesse mudado — o mesmo que aconteceu quando o X55 foi
+  // liberado. A pergunta é sobre a CLASSE, e ela é respondida pelo teste
+  // seguinte (rascunho SEM defconfig é recusado) qualquer que seja o índice.
+  if (!rascunho) {
+    t.diagnostic(
+      "nenhum rascunho com defconfig no índice hoje — o lado positivo da regra " +
+      "fica sem cobaia; o negativo está coberto abaixo",
+    );
+    return;
+  }
   const matrix = await buildGithubMatrix({
     arch: rascunho.arch,
     deviceId: rascunho.id,
@@ -111,6 +122,29 @@ test("allow-draft inclui rascunho com defconfig quando pedido pelo id", async ()
   assert.deepEqual(
     matrix.include.map((item) => item.device),
     [rascunho.id],
+  );
+});
+
+test("allow-draft NÃO inclui rascunho sem defconfig, nem pedido pelo id", async () => {
+  // O outro lado da mesma regra, e este tem cobaia sempre: um rascunho sem
+  // `buildrootDefconfig` não entra nem com `allowDraft` e o id na mão. Sem isso
+  // o CI agendaria um job que morre antes de compilar, e vermelho por rascunho
+  // treina todo mundo a ignorar o vermelho.
+  const semDefconfig = await primeiroDesabilitado({ comDefconfig: false });
+  if (!semDefconfig) {
+    return; // todos os rascunhos declaram defconfig: não há o que exercitar
+  }
+  // `primeiroDesabilitado` devolve o device, não a entrada do índice — o id vem
+  // dele, e o que interessa é que a recusa aconteça.
+  await assert.rejects(
+    () =>
+      buildGithubMatrix({
+        arch: semDefconfig.arch,
+        deviceId: semDefconfig.id,
+        allowDraft: true,
+      }),
+    /Nenhum dispositivo construível|declara buildrootDefconfig/,
+    "rascunho sem defconfig tem de ser recusado mesmo com allow-draft",
   );
 });
 

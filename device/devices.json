@@ -24,7 +24,7 @@
       "id": "powkiddy-x35h",
       "folder": "powkiddy x35h",
       "arch": "arm64",
-      "enabled": false
+      "enabled": true
     },
     {
       "id": "r35s",

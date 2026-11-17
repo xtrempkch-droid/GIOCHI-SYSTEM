@@ -17,6 +17,16 @@ import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
+// Só as linhas de código: o YAML e os scripts EXPLICAM por que não fazem certas
+// coisas ("não use `uniq -d`", "não use `gzip -l`"), e uma asserção negativa
+// sobre o texto cru acusaria a própria explicação. Já aconteceu três vezes neste
+// arquivo — é o mesmo erro do teste que procurou o nome do driver em vez da
+// consequência (§12.30).
+const soCodigo = (fonte) => fonte
+    .split("\n")
+    .filter((l) => !/^\s*#/.test(l))
+    .join("\n");
+
 const RAIZ = new URL("..", import.meta.url).pathname;
 const WORKFLOW = readFileSync(join(RAIZ, ".github/workflows/build-linux-arm64.yml"), "utf8");
 const FLASH_SD = readFileSync(join(RAIZ, "scripts/flash-sd.sh"), "utf8");
@@ -44,7 +54,7 @@ test("o input `publicar_release` é choice, não boolean", () => {
 });
 
 test("o job de release só roda em dispatch, com a caixa marcada", () => {
-    const bloco = WORKFLOW.slice(WORKFLOW.indexOf("\n  release:"));
+    const bloco = soCodigo(WORKFLOW.slice(WORKFLOW.indexOf("\n  release:")));
     assert.ok(bloco.length > 100, "o job `release` sumiu do workflow");
 
     assert.match(bloco, /needs: \[build\]/,
@@ -60,7 +70,7 @@ test("a permissão de escrita fica no job, não no topo", () => {
     const topo = WORKFLOW.slice(0, WORKFLOW.indexOf("jobs:"));
     assert.match(topo, /permissions:\s*\n\s*contents: read/,
         "o workflow inteiro deve continuar com contents: read");
-    const bloco = WORKFLOW.slice(WORKFLOW.indexOf("\n  release:"));
+    const bloco = soCodigo(WORKFLOW.slice(WORKFLOW.indexOf("\n  release:")));
     assert.match(bloco, /permissions:\s*\n\s*contents: write/,
         "o job de release precisa de contents: write para criar/editar a release");
 });
@@ -73,13 +83,13 @@ test("as imagens são comprimidas — a .img tem 2 GiB e o GitHub recusa", () =>
         "se o tamanho da imagem mudar, a decisão de comprimir precisa ser " +
         "reavaliada contra o limite de 2 GiB por asset do GitHub");
 
-    const bloco = WORKFLOW.slice(WORKFLOW.indexOf("\n  release:"));
+    const bloco = soCodigo(WORKFLOW.slice(WORKFLOW.indexOf("\n  release:")));
     assert.match(bloco, /gzip/,
         "sem gzip a imagem de 2 GiB não sobe: o GitHub recusa asset de 2 GiB ou mais");
 });
 
 test("a tag é móvel: uma página só, sempre a mais recente", () => {
-    const bloco = WORKFLOW.slice(WORKFLOW.indexOf("\n  release:"));
+    const bloco = soCodigo(WORKFLOW.slice(WORKFLOW.indexOf("\n  release:")));
     // `--clobber` é o que sobrescreve a imagem anterior em vez de acumular uma
     // por build. Sem ele, `gh release upload` falha com "asset already exists".
     assert.match(bloco, /--clobber/,
@@ -90,12 +100,62 @@ test("a tag é móvel: uma página só, sempre a mais recente", () => {
         "e as seguintes também");
 });
 
+test("nome de asset é único: o `--clobber` sobrescreve sem avisar", () => {
+    // O defeito que quase foi publicado: `build-info.txt`, `SHA256SUMS`, `Image`,
+    // `device.json` e `rootfs.ext4` existem nos TRÊS aparelhos. Numa release o
+    // nome do asset é único, e `--clobber` não falha — ele SOBRESCREVE. O
+    // resultado seria a release mostrando o build-info de um aparelho como se
+    // fosse de todos, com upload saindo com sucesso e nenhum aviso.
+    //
+    // A defesa tem duas partes, e as duas precisam existir: renomear com o
+    // aparelho no nome, e RECUSAR quando ainda assim houver duplicata (o
+    // `uniq -d`), porque renomear depende de o laço ter coberto todos os
+    // arquivos.
+    const bloco = soCodigo(WORKFLOW.slice(WORKFLOW.indexOf("\n  release:")));
+
+    assert.match(bloco, /giochi-system-\$\{aparelho\}-\$\{base\}/,
+        "os arquivos comuns aos aparelhos precisam levar o aparelho no nome");
+
+    // A checagem tem de acontecer ANTES do `cp`/`gzip`, no próprio nome de
+    // destino — e não com `uniq -d` no fim do laço. Uma pasta plana não pode
+    // conter dois arquivos com o mesmo nome: a colisão acontece no `cp -f`, que
+    // sobrescreve calado. `uniq -d` no fim é sempre vazio, ou seja, decorativo.
+    // (Primeira versão deste passo fazia exatamente isso.)
+    assert.match(bloco, /checa\(\)/, "falta a função que recusa a colisão");
+    assert.match(bloco, /\[ -e "publicar\/\$1" \]/,
+        "a checagem tem de ser sobre o destino JÁ existente, antes de escrever");
+    assert.doesNotMatch(bloco, /uniq -d/,
+        "`uniq -d` numa pasta plana nunca dispara — a colisão é no cp, não depois");
+
+    // E o `exit 1` não pode estar dentro de `$(...)`: ali ele mata só o
+    // subshell, o script segue com destino vazio e o operador vê um erro de
+    // `cp` que não diz nada. Medido.
+    assert.doesNotMatch(bloco, /\$\(por /,
+        "chamar a checagem em `$(...)` faria o `exit 1` morrer no subshell");
+    assert.match(bloco, /checa "giochi-system-\$\{aparelho\}-\$\{base\}"/,
+        "a checagem tem de ser chamada no shell principal, com o nome já montado");
+
+    // E o upload sai da pasta normalizada, não de `baixado/` — senão o
+    // renomeamento não teria efeito nenhum.
+    assert.match(bloco, /find publicar/,
+        "o upload tem de publicar a pasta com os nomes normalizados");
+});
+
+test("a imagem de cartão mantém o nome único que já nasce com ela", () => {
+    // `giochi-system-<aparelho>-sd.img.gz` já é única, e é o arquivo que o
+    // usuário procura. Renomear de novo daria `giochi-system-r35s-giochi-
+    // system-r35s-sd.img.gz` — feio e confuso na página de download.
+    const bloco = soCodigo(WORKFLOW.slice(WORKFLOW.indexOf("\n  release:")));
+    assert.match(bloco, /\*-sd\.img\.gz\)/,
+        "o caso da imagem comprimida precisa de ramo próprio");
+});
+
 test("o SHA256SUMS sobe antes da imagem", () => {
     // Se o upload parar no meio, o que falta tem de ser a imagem, não o hash
     // dela. Ordem invertida deixaria um .img.gz sem conferência publicada.
-    const bloco = WORKFLOW.slice(WORKFLOW.indexOf("\n  release:"));
-    const hash = bloco.indexOf("SHA256SUMS -print0");
-    const resto = bloco.indexOf("! -name SHA256SUMS");
+    const bloco = soCodigo(WORKFLOW.slice(WORKFLOW.indexOf("\n  release:")));
+    const hash = bloco.search(/\*\*SHA256SUMS' -print0|\*SHA256SUMS' -print0/);
+    const resto = bloco.search(/! -name '\*SHA256SUMS'/);
     assert.ok(hash > 0 && resto > 0, "não achei os dois uploads");
     assert.ok(hash < resto, "o SHA256SUMS tem de subir primeiro");
 });
