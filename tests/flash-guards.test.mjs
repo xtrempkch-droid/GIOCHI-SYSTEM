@@ -46,7 +46,11 @@ test("a guarda do disco de sistema está ANTES do dd, nos dois scripts", async (
   for (const nome of DESTRUTIVOS) {
     const corpo = codigo(await readFile(path.join(ROOT, "scripts", nome), "utf8"));
     const guarda = corpo.indexOf("findmnt -no SOURCE /");
-    const dd = corpo.indexOf("dd if=");
+    // O `dd` deixou de ser `dd if=...` quando os scripts passaram a aceitar
+    // `.img.gz` (17/11/2026): agora é `ler_imagem | dd of=...`. Procurar a forma
+    // antiga daria `-1`, e `-1 > guarda` é falso — o teste passaria a reprovar
+    // um script correto, que é o defeito espelhado do §12.34.
+    const dd = corpo.search(/\| *dd of=|dd if=/);
     assert.ok(guarda > 0, `${nome}: a guarda sumiu`);
     assert.ok(dd > guarda, `${nome}: a guarda passou para depois da gravação`);
   }

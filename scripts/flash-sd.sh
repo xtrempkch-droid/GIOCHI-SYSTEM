@@ -105,6 +105,23 @@ if [[ ! -f "$IMAGE" ]]; then
   exit 2
 fi
 
+# A imagem do release vem COMPRIMIDA (`.img.gz`), e o motivo não é economia: a
+# `.img` tem exatamente 2 GiB e o GitHub recusa asset de 2 GiB ou mais — o
+# arquivo ficaria de fora do release sem que ninguém percebesse, porque o
+# upload de um asset entre vários falha em silêncio no log.
+#
+# Aceitar `.gz` aqui também é o que torna o download do release utilizável: são
+# ~200 MB em vez de 2 GB, e a gravação sai igual.
+#
+# `gunzip -c` em vez de descomprimir para um arquivo temporário: 2 GiB de
+# temporário é justamente o que não cabe em disco neste projeto (§12.3).
+ler_imagem() {
+  case "$IMAGE" in
+    *.gz) gzip -dc "$IMAGE" ;;
+    *)    cat "$IMAGE" ;;
+  esac
+}
+
 if [[ ! -b "$TARGET" ]]; then
   echo "ERRO: $TARGET não é um dispositivo de bloco." >&2
   echo "Candidatos:" >&2
@@ -184,7 +201,11 @@ if [[ -n "$EXPECT_GIB" ]]; then
   fi
   echo "  tamanho: ${TARGET_GIB} GiB (confere com --expect-gib ${EXPECT_GIB})"
 fi
-IMAGE_BYTES="$(stat -c %s "$IMAGE")"
+# `wc -c` sobre a leitura descomprimida, e não `gzip -l`: o ISIZE do gzip é o
+# tamanho módulo 2^32, então um arquivo maior que 4 GiB reportaria um valor
+# MENOR que o real — e a checagem "o cartão é grande o bastante" passaria com um
+# cartão pequeno. Custa uma passada; a alternativa custa uma gravação errada.
+IMAGE_BYTES="$(ler_imagem | wc -c)"
 if (( TARGET_BYTES < IMAGE_BYTES )); then
   echo "ERRO: o cartão ($((TARGET_BYTES / 1024 / 1024)) MiB) é menor que a imagem ($((IMAGE_BYTES / 1024 / 1024)) MiB)." >&2
   exit 2
@@ -207,10 +228,12 @@ if ((!ASSUME_YES)); then
 fi
 
 echo "Gravando..."
-dd if="$IMAGE" of="$TARGET" bs=4M conv=fsync status=progress
+ler_imagem | dd of="$TARGET" bs=4M conv=fsync status=progress
 sync
 
-EXPECTED_SHA="$(sha256sum "$IMAGE" | awk '{print $1}')"
+# O hash é do conteúdo DESCOMPRIMIDO: é o que está no cartão, e é o que o
+# `SHA256SUMS` do release publica. Hash do `.gz` compararia outra coisa.
+EXPECTED_SHA="$(ler_imagem | sha256sum | awk '{print $1}')"
 
 # Confere lendo o cartão. Duas passadas, porque a primeira pode falhar por um
 # motivo que NÃO é cartão defeituoso.
@@ -231,7 +254,7 @@ verify_card() {
 ACTUAL_SHA="$(verify_card)"
 if [[ "$ACTUAL_SHA" != "$EXPECTED_SHA" ]]; then
   echo "  divergiu na primeira passada; regravando antes de acusar o cartão..."
-  dd if="$IMAGE" of="$TARGET" bs=4M conv=fsync status=none
+  ler_imagem | dd of="$TARGET" bs=4M conv=fsync status=none
   sync
   ACTUAL_SHA="$(verify_card)"
 fi

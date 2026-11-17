@@ -117,7 +117,20 @@ if [[ -n "$MONTADO" ]]; then
   exit 2
 fi
 
-IMAGEM_BYTES="$(stat -c %s "$IMAGEM")"
+# `.img.gz` é o formato do release (§ no AGENTS: a `.img` tem 2 GiB exatos e o
+# GitHub recusa asset desse tamanho). Mesmo tratamento do `flash-sd.sh`, para os
+# dois scripts aceitarem o MESMO arquivo baixado — senão o caminho de reserva
+# deixa de ser reserva no dia em que for preciso.
+#
+# `wc -c` sobre a leitura descomprimida, e não `gzip -l`: o ISIZE é módulo 2^32
+# e mentiria para MENOS num arquivo > 4 GiB, deixando passar um cartão pequeno.
+ler_imagem() {
+  case "$IMAGEM" in
+    *.gz) gzip -dc "$IMAGEM" ;;
+    *)    cat "$IMAGEM" ;;
+  esac
+}
+IMAGEM_BYTES="$(ler_imagem | wc -c)"
 DESTINO_BYTES="$(blockdev --getsize64 "$DESTINO")"
 if (( DESTINO_BYTES < IMAGEM_BYTES )); then
   echo "ERRO: cartão ($((DESTINO_BYTES/1024/1024)) MiB) menor que a imagem ($((IMAGEM_BYTES/1024/1024)) MiB)." >&2
@@ -140,7 +153,7 @@ fi
 echo "Gravando..."
 # `conv=fsync` faz o dd sincronizar no fim. O `sync` depois é redundante e
 # barato — e num cartão SD é onde o buffer do controlador termina de escoar.
-dd if="$IMAGEM" of="$DESTINO" bs=4M conv=fsync status=progress
+ler_imagem | dd of="$DESTINO" bs=4M conv=fsync status=progress
 sync
 
 # O kernel precisa reler a tabela de partições; sem isto o cartão aparece sem

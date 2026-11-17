@@ -71,3 +71,4 @@ import "./sdl-input-probe.test.mjs";
 import "./gamepad-virtual.test.mjs";
 import "./panel-diag.test.mjs";
 import "./issues-vizinhos.test.mjs";
+import "./release-e-gz.test.mjs";

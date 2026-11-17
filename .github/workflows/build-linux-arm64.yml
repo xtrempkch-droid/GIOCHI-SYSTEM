@@ -30,6 +30,17 @@ on:
         required: false
         default: ""
         type: string
+      publicar_release:
+        description: "Publicar as imagens numa Release (link permanente, sem login, não expira em 14 dias)."
+        required: false
+        default: "false"
+        # `choice` pelo mesmo motivo do `allow_draft`: `github.event.inputs.*`
+        # chega como STRING, e comparar string com booleano em expressão do
+        # Actions faz coerção numérica — "true" == true dá falso (§12.5).
+        type: choice
+        options:
+          - "false"
+          - "true"
       allow_draft:
         description: "Construir rascunho (ex.: powkiddy-x55). Só vale com device=<id>, nunca com all."
         required: false
@@ -266,3 +277,109 @@ jobs:
           path: out/${{ matrix.device }}
           if-no-files-found: error
           retention-days: 14
+
+  # ── Release: o "site" onde a imagem se baixa sem mim ──────────────────────
+  #
+  # O artefato de Actions resolve o build, não o download: ele **exige login**
+  # (`GET /actions/artifacts/<id>/zip` → 401 sem token, medido) e **expira em 14
+  # dias**. Para quem quer a imagem no cartão, isso significa abrir o GitHub,
+  # achar a execução certa, baixar um zip e ainda lidar com a expiração.
+  #
+  # Uma Release resolve as três coisas de uma vez: é uma página com o arquivo, o
+  # download é anônimo em repositório público, e o link não expira. A tag é
+  # **móvel** (`imagens`) para existir sempre uma só página "a mais recente" —
+  # sem ela, cada build viraria uma release e a de ontem ficaria ao lado.
+  release:
+    name: Publicar release de imagens
+    needs: [build]
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.publicar_release == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    # `contents: write` só aqui, e não no topo: o resto do workflow não precisa
+    # de escrita, e permissão mínima é o que limita o estrago de um passo
+    # comprometido.
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Baixar os artefatos deste build
+        uses: actions/download-artifact@v4
+        with:
+          path: baixado
+
+      # A `.img` tem 2 GiB EXATOS (SIZE_MIB=2048), e o GitHub recusa asset de
+      # 2 GiB ou mais. Comprimir não é economia: sem isto o arquivo que o usuário
+      # precisa — o que se grava no cartão — ficaria de fora. O `flash-sd.sh` e
+      # o `flash-dd.sh` aceitam `.gz` justamente por causa disto.
+      - name: Comprimir as imagens de cartão
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          for dir in baixado/*/; do
+            for img in "$dir"*.img; do
+              echo "comprimindo $img ($(stat -c %s "$img") bytes)"
+              gzip -9 -k "$img"
+              rm -f "$img"
+            done
+          done
+          echo "--- conteúdo a publicar:"
+          find baixado -type f | sort | sed 's/^/  /'
+          echo "--- tamanhos:"
+          du -sh baixado/* | sed 's/^/  /'
+
+      - name: Publicar na release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG=imagens
+          commit="${{ github.sha }}"
+          {
+            echo "Imagens do Giochi System, geradas pelo CI a partir do commit \`${commit:0:12}\`."
+            echo
+            echo "**Não expiram** e o download **não exige login** (repositório público)."
+            echo "A tag é móvel: a cada publicação o conteúdo desta página é substituído."
+            echo
+            echo "## Como gravar"
+            echo
+            echo '```bash'
+            echo '# 1. baixe o .img.gz do seu aparelho e confira o SHA256'
+            echo 'sha256sum giochi-system-<aparelho>-sd.img.gz'
+            echo
+            echo '# 2. grave (o script aceita .gz direto, sem descomprimir)'
+            echo 'sudo bash scripts/flash-sd.sh <arquivo>.img.gz /dev/sdX --expect-gib <N>'
+            echo '```'
+            echo
+            echo "O \`--expect-gib\` evita gravar no cartão errado quando há dois no PC"
+            echo "(§12.8 do AGENTS). O tamanho que vale é o que o aparelho reporta em \`mmc info\`."
+            echo
+            echo "## Conteúdo"
+            echo
+            echo "| Arquivo | O que é |"
+            echo "| --- | --- |"
+            echo "| \`*-sd.img.gz\` | **a imagem para gravar no cartão** |"
+            echo "| \`SHA256SUMS\` | hashes de tudo, para conferir o download |"
+            echo "| \`Image\`, \`*.dtb\`, \`u-boot-rockchip.bin\` | as peças soltas, para diagnóstico |"
+            echo "| \`build-info.txt\` | commit e instante do build |"
+            echo
+            echo "Build [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})."
+          } > notas.md
+
+          # `--clobber` sobrescreve asset de mesmo nome; é o que faz a tag móvel
+          # funcionar em vez de acumular arquivos de builds antigos.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --notes-file notas.md --title "Imagens mais recentes"
+          else
+            gh release create "$TAG" --title "Imagens mais recentes" --notes-file notas.md
+          fi
+
+          # `SHA256SUMS` primeiro e o resto depois: se o upload parar no meio, o
+          # que falta é a imagem, não o hash dela.
+          find baixado -name SHA256SUMS -print0 | xargs -0 -r -n1 gh release upload "$TAG" --clobber
+          find baixado -type f ! -name SHA256SUMS -print0 | xargs -0 -r -n1 gh release upload "$TAG" --clobber
+
+          echo "### Release publicada" >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ github.server_url }}/${{ github.repository }}/releases/tag/$TAG" >> "$GITHUB_STEP_SUMMARY"

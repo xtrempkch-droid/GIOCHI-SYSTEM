@@ -42,7 +42,13 @@ test("é dd puro: sem sha256, sem resize, sem expect-gib", async () => {
   assert.ok(!/sha256sum/.test(executavel), "não pode verificar SHA256");
   assert.ok(!/resize2fs/.test(executavel), "não pode crescer partição");
   assert.ok(!/expect-gib/.test(executavel), "não pode recusar por tamanho");
-  assert.match(executavel, /dd if="\$IMAGEM" of="\$DESTINO" bs=4M conv=fsync/);
+  // A forma mudou em 17/11/2026 para aceitar `.img.gz` (a `.img` tem 2 GiB e o
+  // GitHub recusa asset desse tamanho, então o release publica comprimido).
+  // O que este teste protege continua igual: é `dd` cru, sem verificação de
+  // hash, sem resize e sem recusa por tamanho — e o `ler_imagem` só decide entre
+  // `cat` e `gunzip -c`, não acrescenta nenhuma dessas três coisas.
+  assert.match(executavel, /ler_imagem \| dd of="\$DESTINO" bs=4M conv=fsync/,
+      "a gravação tem de continuar sendo dd direto no destino");
 });
 
 test("as três guardas de destino continuam, e são do código executável", async () => {
