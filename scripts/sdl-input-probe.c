@@ -28,9 +28,99 @@
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
+#include <linux/input.h>
 
 #include <SDL2/SDL.h>
+
+/* Nome do código evdev, para o relatório não sair em número. Só a faixa que
+   um gamepad usa; o resto sai em hexadecimal. */
+static const char *nome_codigo(unsigned c)
+{
+    switch (c) {
+    case BTN_SOUTH: return "BTN_SOUTH";
+    case BTN_EAST: return "BTN_EAST";
+    case BTN_NORTH: return "BTN_NORTH";
+    case BTN_WEST: return "BTN_WEST";
+    case BTN_TL: return "BTN_TL";
+    case BTN_TR: return "BTN_TR";
+    case BTN_TL2: return "BTN_TL2";
+    case BTN_TR2: return "BTN_TR2";
+    case BTN_SELECT: return "BTN_SELECT";
+    case BTN_START: return "BTN_START";
+    case BTN_MODE: return "BTN_MODE";
+    case BTN_THUMBL: return "BTN_THUMBL";
+    case BTN_THUMBR: return "BTN_THUMBR";
+    case BTN_DPAD_UP: return "BTN_DPAD_UP";
+    case BTN_DPAD_DOWN: return "BTN_DPAD_DOWN";
+    case BTN_DPAD_LEFT: return "BTN_DPAD_LEFT";
+    case BTN_DPAD_RIGHT: return "BTN_DPAD_RIGHT";
+    case BTN_TRIGGER_HAPPY1: return "BTN_TRIGGER_HAPPY1";
+    case BTN_TRIGGER_HAPPY2: return "BTN_TRIGGER_HAPPY2";
+    case KEY_VOLUMEUP: return "KEY_VOLUMEUP";
+    case KEY_VOLUMEDOWN: return "KEY_VOLUMEDOWN";
+    default: return NULL;
+    }
+}
+
+static const char *nome_botao_sdl(int b)
+{
+    switch (b) {
+    case SDL_CONTROLLER_BUTTON_A: return "A";
+    case SDL_CONTROLLER_BUTTON_B: return "B";
+    case SDL_CONTROLLER_BUTTON_X: return "X";
+    case SDL_CONTROLLER_BUTTON_Y: return "Y";
+    case SDL_CONTROLLER_BUTTON_BACK: return "BACK";
+    case SDL_CONTROLLER_BUTTON_GUIDE: return "GUIDE";
+    case SDL_CONTROLLER_BUTTON_START: return "START";
+    case SDL_CONTROLLER_BUTTON_LEFTSTICK: return "LEFTSTICK";
+    case SDL_CONTROLLER_BUTTON_RIGHTSTICK: return "RIGHTSTICK";
+    case SDL_CONTROLLER_BUTTON_LEFTSHOULDER: return "LEFTSHOULDER";
+    case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER: return "RIGHTSHOULDER";
+    case SDL_CONTROLLER_BUTTON_DPAD_UP: return "DPAD_UP";
+    case SDL_CONTROLLER_BUTTON_DPAD_DOWN: return "DPAD_DOWN";
+    case SDL_CONTROLLER_BUTTON_DPAD_LEFT: return "DPAD_LEFT";
+    case SDL_CONTROLLER_BUTTON_DPAD_RIGHT: return "DPAD_RIGHT";
+    default: return NULL;
+    }
+}
+
+/*
+ * Os códigos evdev que o device declara em `EV_KEY`, em ordem **crescente**.
+ *
+ * É essa ordem que o driver linux do SDL2 usa para numerar `b0`, `b1`, … ao
+ * montar o mapeamento automático (`key_map[]` em `SDL_sysjoystick.c`). Sem esta
+ * lista, `a:b0` não diz qual botão do plástico é — e é justamente essa tradução
+ * que faltava para o defeito do §12.74 aparecer.
+ *
+ * Devolve a quantidade, ou -1.
+ */
+static int codigos_do_device(const char *caminho, unsigned *saida, int maximo)
+{
+    int fd = open(caminho, O_RDONLY | O_NONBLOCK);
+    if (fd < 0) {
+        return -1;
+    }
+    unsigned char bits[KEY_CNT / 8];
+    memset(bits, 0, sizeof(bits));
+    if (ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(bits)), bits) < 0) {
+        close(fd);
+        return -1;
+    }
+    close(fd);
+
+    int n = 0;
+    for (unsigned c = 0; c < KEY_CNT && n < maximo; c++) {
+        if (bits[c / 8] & (1u << (c % 8))) {
+            saida[n++] = c;
+        }
+    }
+    return n;
+}
 
 static const char *tipo(SDL_JoystickType t)
 {
@@ -115,6 +205,53 @@ int main(int argc, char **argv)
             continue;
         }
         printf("      aberto: \"%s\"\n", SDL_GameControllerName(gc));
+
+        /* ---- o elo que faltava: `bN` -> código evdev ----
+         *
+         * O SDL numera `b0`, `b1`, … na ordem crescente dos códigos que o
+         * device declara em `EV_KEY`. Cruzar as duas pontas é o que diz qual
+         * botão do PLÁSTICO cada `Button` do SDL aciona — e é onde um mapa
+         * automático divergente do `buttons.map` aparece.
+         */
+        const char *caminho = SDL_JoystickPath(SDL_GameControllerGetJoystick(gc));
+        unsigned codigos[64];
+        int n_codigos = caminho ? codigos_do_device(caminho, codigos, 64) : -1;
+        if (n_codigos > 0) {
+            printf("      device=%s  (%d codigos EV_KEY em ordem)\n", caminho, n_codigos);
+            printf("      Button do SDL  -> bN -> codigo evdev\n");
+            for (int b = 0; b <= SDL_CONTROLLER_BUTTON_DPAD_RIGHT; b++) {
+                SDL_GameControllerButtonBind lig = SDL_GameControllerGetBindForButton(gc, (SDL_GameControllerButton)b);
+                if (lig.bindType == SDL_CONTROLLER_BINDTYPE_NONE) {
+                    continue;
+                }
+                const char *nomeb = nome_botao_sdl(b);
+                if (lig.bindType != SDL_CONTROLLER_BINDTYPE_BUTTON) {
+                    printf("        %-13s -> eixo/hat\n", nomeb ? nomeb : "?");
+                    continue;
+                }
+                int alvo = lig.value.button;
+                const char *cod = "fora da lista";
+                if (alvo >= 0 && alvo < n_codigos) {
+                    const char *nomecod = nome_codigo(codigos[alvo]);
+                    static char buf[32];
+                    if (nomecod) {
+                        cod = nomecod;
+                    } else {
+                        snprintf(buf, sizeof(buf), "0x%x", codigos[alvo]);
+                        cod = buf;
+                    }
+                }
+                printf("        %-13s -> b%-2d -> %-20s (%u)\n",
+                       nomeb ? nomeb : "?",
+                       alvo,
+                       cod,
+                       (alvo >= 0 && alvo < n_codigos) ? codigos[alvo] : 0u);
+            }
+        } else {
+            printf("      nao consegui ler os codigos evdev de %s\n",
+                   caminho ? caminho : "(sem caminho)");
+        }
+
         SDL_GameControllerClose(gc);
     }
 

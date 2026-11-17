@@ -150,7 +150,7 @@ o que foi medido, e deixar a decisão com quem responde pelo código.
 
 | Verificação | Resultado |
 | --- | --- |
-| `node tests/run-all.mjs` | **567/567 + 1 skip** (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, devices 13, assert-config 12, fdt 11, gpu-bench 16, …) |
+| `node tests/run-all.mjs` | **569/569 + 1 skip** (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, devices 13, assert-config 12, fdt 11, gpu-bench 16, …) |
 | `node scripts/validate-devices.mjs` | OK — 7 devices, 1 habilitado |
 | `node scripts/list-devices.mjs --github-matrix` | matriz com `qemu-aarch64` |
 | matriz com `--device powkiddy-x55 --allow-draft` | devolve **só** o X55 |
@@ -560,7 +560,7 @@ absoluto** do host — §12.40).
 
 ## 10. Testes
 
-`node tests/run-all.mjs` → **567/567 + 1 skip**, em **63 arquivos**. A tabela abaixo é uma
+`node tests/run-all.mjs` → **569/569 + 1 skip**, em **63 arquivos**. A tabela abaixo é uma
 seleção dos que prendem contratos de projeto; a lista completa é `ls tests/` e
 `tests/runner-coverage.test.mjs` **falha** se algum arquivo existir sem estar
 importado no `run-all.mjs` — foi assim que dois testes desta revisão quase
@@ -591,7 +591,7 @@ ficaram fora da contagem.
 | `tests/help-sentinels.test.mjs` | 4 | nenhum script fatia `--help` por número de linha (a classe que quebrou em 2 de 13) |
 | `tests/bootlog-dmesg-spam.test.mjs` | 4 | o `awk` REAL do `giochi-bootlog` sobre 300 repetições do charger: agrupa, conta, e **preserva** as duas linhas de `fbcon` que estavam no meio |
 | `tests/hardware-x55.test.mjs` | 5 | o que o X55 desmentiu: `model`×`compatible` normalizados, `present=0` ≠ 0%, fbcon ausente ≠ `CONFIG_ROTATION` desligado, sem `dropbear` no status, `giochi-usb` sem role-switch |
-| `tests/sdl-input-probe.test.mjs` | 4 | o probe pergunta `SDL_IsGameController` e imprime o mapeamento (não só conta joysticks), não abre vídeo sem `--video` (não rouba o DRM master), e a convenção `a = BTN_EAST` dos mapas contra a do SDL2 (§12.74) |
+| `tests/sdl-input-probe.test.mjs` | 6 | o probe pergunta `SDL_IsGameController` e imprime o mapeamento (não só conta joysticks), não abre vídeo sem `--video` (não rouba o DRM master), cruza `bN`→código evdev, e prende a convenção `a = BTN_EAST` dos mapas contra a do SDL2 com o mapa **medido** no R35S (§12.74) |
 
 ## 10-A. O sistema base — acesso antes de interface
 
@@ -5129,16 +5129,34 @@ joysticks vistos pelo SDL: 1
         leftshoulder:b4,rightshoulder:b5,dpup:b13,dpdown:b14,dpleft:b15,
         dpright:b16,leftx:a0,lefty:a1,rightx:a2,righty:a3,
         lefttrigger:b6,righttrigger:b7,crc:8239,
+      device=/dev/input/event2  (17 codigos EV_KEY em ordem)
+      Button do SDL  -> bN -> codigo evdev
+        A             -> b0  -> BTN_SOUTH            (304)
+        B             -> b1  -> BTN_EAST             (305)
+        X             -> b2  -> BTN_NORTH            (307)
+        Y             -> b3  -> BTN_WEST             (308)
+        BACK          -> b8  -> BTN_SELECT           (314)
+        GUIDE         -> b10 -> BTN_MODE             (316)
+        START         -> b9  -> BTN_START            (315)
+        LEFTSTICK     -> b11 -> BTN_THUMBL           (317)
+        RIGHTSTICK    -> b12 -> BTN_THUMBR           (318)
+        LEFTSHOULDER  -> b4  -> BTN_TL               (310)
+        RIGHTSHOULDER -> b5  -> BTN_TR               (311)
+        DPAD_UP       -> b13 -> BTN_DPAD_UP          (544)
+        DPAD_DOWN     -> b14 -> BTN_DPAD_DOWN        (545)
+        DPAD_LEFT     -> b15 -> BTN_DPAD_LEFT        (546)
+        DPAD_RIGHT    -> b16 -> BTN_DPAD_RIGHT       (547)
 ```
+
+A tradução `bN` → código evdev é a peça que faltava: o SDL numera `b0`, `b1`, …
+na **ordem crescente** dos códigos que o device declara em `EV_KEY`, e o probe
+lê essa lista com `EVIOCGBIT`. Sem ela, `a:b0` é só um índice — e foi por isso
+que o defeito passou por três sessões sem aparecer.
 
 Ou seja: no R35S o caminho SDL do jogo **funciona** — e é justamente aí que ele
 divergiu.
 
-#### A divergência, botão por botão
-
-O índice `bN` é atribuído pelo SDL em ordem crescente de código; cruzando com o
-`capabilities/key` do aparelho (`f00000000 0 0 0 7fdb000000000000 0 0 0 0`) e
-com o `device/r35s/buttons.map`, dá:
+#### A divergência, botão por botão — **medida**, não deduzida
 
 | Físico | código evdev | mapa do projeto | SDL chama de | jogo faz no caminho SDL | bate? |
 | --- | --- | --- | --- | --- | --- |
@@ -5153,6 +5171,7 @@ com o `device/r35s/buttons.map`, dá:
 | SELECT | 314 | `voltar` | `b8` = `Back` | voltar | sim |
 | START | 315 | `iniciar` | `b9` = `Start` | iniciar | sim |
 | D-pad | 544-547 | direções | `b13`-`b16` | direções | sim |
+| HOME | 316 | `home` | `b10` = `Guide` | não é lido | — |
 
 O jogo faz `botoes.bits() | gamepad.bits()`: as duas máscaras são **somadas**.
 Com o A apertado, o evdev acende `acelerar` e o SDL acende `frear` — o carro
@@ -6249,15 +6268,32 @@ O único `WARN` é `/opt/giochi/apps/index.json` ausente — arquivo do
 
 ### Pendências, em ordem de risco
 
-1. **CI vermelho do `0bd9383` no r35s, sem diagnóstico.** O job morreu em
-   *Build image* aos 753 s (o mesmo passo leva ~34 min quando passa). `x55` e
-   `qemu-aarch64` ficaram verdes no **mesmo commit**, e o **build local do r35s
-   em `0bd9383` passou** (`out/r35s/build-info.txt`, `built_at 21:48:23Z`). O
-   delta entre o `ad35151` (verde) e o `0bd9383` é **só** o
-   `giochi-selftest` — nenhuma linha de `device/r35s/` mudou. O log exige token
-   (`GET /actions/jobs/<id>/logs` → 403) e esta máquina não tem. **Sem o log,
-   não afirmo causa** — os candidatos são concorrência de cache e um limite do
-   runner, não o código.
+1. ~~**CI vermelho do `0bd9383` no r35s, sem diagnóstico.**~~ **Era transitório, e
+   agora está provado.** O job morreu em *Build image* aos 753 s (o mesmo passo
+   leva ~34 min quando passa), com `x55` e `qemu-aarch64` verdes no **mesmo
+   commit** e o **build local do r35s em `0bd9383` também verde**
+   (`out/r35s/build-info.txt`, `built_at 21:48:23Z`). O delta entre o `ad35151`
+   (verde) e o `0bd9383` era **só** o `giochi-selftest` — nenhuma linha de
+   `device/r35s/` mudou.
+
+   O dado que faltava veio do run seguinte, e não de log nenhum:
+
+   ```text
+   43765691615  0bd9383  Build r35s  failure   21:50 -> 23:05   (75 min)
+   43775825355  58510df  Build r35s  success   23:39 -> 00:15   (36 min)
+   ```
+
+   O `58510df` **contém** o `0bd9383` mais as fontes do `e3b72b8`, e o r35s
+   compilou **verde em 36 min** — inclusive o `giochi-selftest` que o
+   `0bd9383` trocou. Um defeito de código não desaparece com um commit que só
+   acrescenta pacote de fonte; um runner lento/travado desaparece com um runner
+   novo. Os passos do job morto confirmam a forma: parou em *Build image* e
+   todos os seguintes ficaram `None`, que é o desenho de um timeout, não de um
+   erro de compilação.
+
+   Fica como fato registrado: **vermelho num runner não é diagnóstico de
+   código** quando o mesmo commit compila localmente e o commit seguinte — que o
+   contém — passa no CI. A regra que já valia (§12.59) ganha a outra metade.
 
 2. ~~**As fontes novas não foram vistas na tela.**~~ **Verificadas na imagem,
    glifo por glifo.** Não há tela nem launcher nesta máquina, mas a pergunta
@@ -6341,6 +6377,11 @@ plástico. O `neon-drift` soma a máscara do SDL à do `evdev`, e o mesmo botão
 acende acelerar e frear. Na X55 o SDL2 não consegue gamecontroller nenhum
 (`adc-joystick` tem eixos e **zero botões**), então o jogo obedece só ao `evdev`.
 
+A prova não é leitura de código: o probe roda no aparelho e imprime a tradução
+`Button do SDL -> bN -> código evdev`. Ele diz `A -> b0 -> BTN_SOUTH (304)`, e o
+`device/r35s/buttons.map` diz `b = BTN_SOUTH`. As duas metades, medidas na mesma
+máquina.
+
 ### O que ficou no repositório
 
 | Arquivo | Para quê |
@@ -6368,10 +6409,12 @@ botão**, reprovado no segundo portão.
    `files/issue-giochi-games-gamepad-sdl-diverge.md` (desta sessão). Esta máquina
    não tem token: `POST /issues` → 401 (§2-A). Enquanto ela não for postada, o
    defeito continua no jogo, com a tabela completa no §12.74.
-2. **Nada disso foi provado no jogo rodando.** A conclusão sai do mapeamento que
-   o SDL imprime × o mapa do jogo; o passo que falta é abrir o `neon-drift` no
-   R35S e apertar A/B com o log de inicialização à vista (`neon-drift: gamepad
-   aberto: r36s_Gamepad`).
+2. **O jogo rodando, com A/B apertados, ainda não foi observado.** A conclusão
+   sai do mapeamento que o SDL imprime no aparelho × o mapa do jogo, e essa
+   cadeia está fechada dos dois lados (`Button do SDL -> bN -> código evdev`
+   medido, mais o `Button::A` do `gamepad.rs`). O passo que falta exige parar o
+   launcher (KMSDRM é exclusivo) e não foi feito porque ele estava com a
+   interface no ar. É confirmação, não descoberta.
 3. **`SDL_GAMECONTROLLERCONFIG` não foi adotado.** Seria a forma de o *sistema*
    fazer todo app SDL concordar com o plástico, mas ele consertaria só A/B (o R1
    e o R2 continuariam divergentes) — meia correção que esconde a outra metade.
@@ -6380,8 +6423,9 @@ botão**, reprovado no segundo portão.
 4. **X55 e X35H não têm gamecontroller para o SDL** (botões e eixos em nós
    separados). Latente: hoje todo mundo lê `evdev`. Registrado no §12.74 e no
    `docs/button-maps.md`.
-5. **CI do `0bd9383` no r35s continua sem diagnóstico** (§26) — o log exige
-   token.
+5. ~~**CI do `0bd9383` no r35s continua sem diagnóstico**~~ — **era transitório.**
+   O `58510df`, que contém o `0bd9383`, compilou o r35s **verde em 36 min**. Ver
+   o §26, item 1, com os dois runs lado a lado.
 
 ### Estado do ambiente no fim desta sessão
 
@@ -6389,9 +6433,9 @@ O R35S respondeu em `10.55.0.2` a sessão inteira (SSH por senha, sem chave na
 imagem). O launcher está no ar (pid 505) e **nada foi interrompido**: o probe roda
 sem tocar no DRM. Nenhum arquivo foi gravado no aparelho, só `/tmp`.
 
-Suíte: **567/567 + 1 skip**, em 63 arquivos.
+Suíte: **569/569 + 1 skip**, em 63 arquivos.
 
 ```bash
-node tests/run-all.mjs                          # 567/567 + 1 skip
+node tests/run-all.mjs                          # 569/569 + 1 skip
 bash scripts/sdl-input-probe.sh r35s --run      # a medição do §12.74
 ```

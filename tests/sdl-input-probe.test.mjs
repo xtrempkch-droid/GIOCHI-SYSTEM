@@ -97,3 +97,76 @@ test("buttons.map declara a convenção que o SDL2 automapeia ao contrário", ()
     assert.ok(naConvencao >= 3,
         `esperava os três aparelhos medidos na convenção do plástico; achei ${naConvencao}`);
 });
+
+// --- a tradução `bN` -> código evdev, com os números MEDIDOS no R35S ---
+
+// Saída de `sdl-input-probe` no R35S em 17/11/2026, com o launcher no ar.
+// Fixture de propósito: é o dado do aparelho, não uma dedução do código do SDL.
+const MAPA_MEDIDO = {
+    device: "/dev/input/event2",
+    // ordem crescente dos códigos EV_KEY que o device declara
+    codigos: [304, 305, 307, 308, 310, 311, 312, 313, 314, 315, 316, 317, 318,
+        544, 545, 546, 547],
+    // `bN` que o SDL atribuiu a cada Button
+    botoes: {
+        A: 0, B: 1, X: 2, Y: 3,
+        BACK: 8, GUIDE: 10, START: 9,
+        LEFTSTICK: 11, RIGHTSTICK: 12,
+        LEFTSHOULDER: 4, RIGHTSHOULDER: 5,
+        DPAD_UP: 13, DPAD_DOWN: 14, DPAD_LEFT: 15, DPAD_RIGHT: 16,
+    },
+};
+
+function lerMapa(pasta) {
+    const texto = readFileSync(join(RAIZ, "device", pasta, "buttons.map"), "utf8");
+    const mapa = {};
+    for (const linha of texto.split("\n")) {
+        const m = linha.match(/^(\w+)\s*=\s*(\S+)/);
+        if (m) mapa[m[1]] = m[2];
+    }
+    return mapa;
+}
+
+const CODIGO_DE = {
+    BTN_SOUTH: 304, BTN_EAST: 305, BTN_NORTH: 307, BTN_WEST: 308,
+    BTN_TL: 310, BTN_TR: 311, BTN_TL2: 312, BTN_TR2: 313,
+    BTN_SELECT: 314, BTN_START: 315, BTN_MODE: 316,
+    BTN_THUMBL: 317, BTN_THUMBR: 318,
+    BTN_DPAD_UP: 544, BTN_DPAD_DOWN: 545, BTN_DPAD_LEFT: 546, BTN_DPAD_RIGHT: 547,
+};
+
+test("o SDL2 chama de A o mesmo código que o mapa chama de b (R35S, medido)", () => {
+    // Esta é a asserção que prende o §12.74: se alguém "consertar" o probe para
+    // que o SDL concorde com o plástico, isto falha e obriga a reler a seção.
+    // O automático do SDL2 nunca vai concordar — a correção tem de ser no app.
+    const mapa = lerMapa("r35s");
+    const codigoDoBotao = (nome) =>
+        MAPA_MEDIDO.codigos[MAPA_MEDIDO.botoes[nome]];
+
+    assert.equal(codigoDoBotao("A"), 304, "Button::A do SDL = b0 = 304");
+    assert.equal(codigoDoBotao("B"), 305, "Button::B do SDL = b1 = 305");
+
+    // e o que o mapa do projeto diz desses dois códigos
+    assert.equal(CODIGO_DE[mapa.b], 304,
+        "o 304 é o `b` do mapa — e é o que o SDL entrega como Button::A");
+    assert.equal(CODIGO_DE[mapa.a], 305,
+        "o 305 é o `a` do mapa — e é o que o SDL entrega como Button::B");
+
+    // a conclusão, escrita de forma executável: um app que use Button::A está
+    // lendo o `b` do plástico, não o `a`.
+    assert.notEqual(mapa.a, "BTN_SOUTH",
+        "se o mapa passasse a chamar o 304 de `a`, o SDL concordaria por " +
+        "acidente e o §12.74 viraria história sem sentido");
+});
+
+test("o probe traduz bN para código evdev, em vez de só imprimir o mapa", () => {
+    // O mapeamento cru (`a:b0`) não diz qual botão do plástico é: sem a lista
+    // de códigos EV_KEY, `b0` é só um índice. Foi essa tradução que faltava
+    // para o defeito aparecer sem abrir o código do SDL.
+    assert.match(PROBE, /EVIOCGBIT\s*\(/,
+        "sem EVIOCGBIT o probe não tem a ordem dos códigos");
+    assert.match(PROBE, /SDL_GameControllerGetBindForButton\s*\(/,
+        "é essa chamada que devolve o `bN` de cada Button");
+    assert.match(PROBE, /SDL_JoystickPath\s*\(/,
+        "o caminho do /dev/input/event* vem do SDL, não de adivinhar o número");
+});
