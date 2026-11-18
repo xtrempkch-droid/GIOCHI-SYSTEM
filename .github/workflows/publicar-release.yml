@@ -1,0 +1,156 @@
+name: Publicar imagens na release
+
+# Publica os artefatos de um build que JÁ EXISTE, sem recompilar.
+#
+# ## Por que existe
+#
+# O `build-linux-arm64.yml` leva de 1 a 2 horas e só publica release quando é
+# disparado por `workflow_dispatch` com `publicar_release: true`. Isso deixava um
+# buraco: um build disparado por push — ou um build anterior que ninguém pensou
+# em publicar — produzia artefatos que **expiram em 14 dias** e **exigem login**
+# para baixar. Publicá-los exigia reconstruir tudo.
+#
+# Com este workflow, publicar é 2 minutos: baixa o artefato do run escolhido e
+# sobe na release.
+#
+# ## Como usar
+#
+# Actions → **Publicar imagens na release** → Run workflow.
+#   - `run_id` vazio: pega o build mais recente que terminou com sucesso.
+#   - `run_id` preenchido: aquele run específico (número da URL de Actions).
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "ID do run de Build (vazio = o mais recente com sucesso)"
+        required: false
+        default: ""
+        type: string
+      tag:
+        description: "Tag da release (padrão: imagens)"
+        required: false
+        default: "imagens"
+        type: string
+
+permissions:
+  contents: write   # criar/editar a release e subir assets
+  actions: read     # baixar artefatos de outro run
+
+jobs:
+  publicar:
+    name: Publicar release de imagens
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Descobrir o run de origem
+        id: origem
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ github.event.inputs.run_id }}
+        run: |
+          set -euo pipefail
+          if [ -n "${RUN_ID:-}" ]; then
+            run_id="$RUN_ID"
+          else
+            # O mais recente que COMPLETOU com SUCESSO. `--status success`
+            # filtra no servidor; sem ele viria o mais recente em andamento e o
+            # download falharia por não ter artefato ainda.
+            run_id="$(gh run list \
+              --repo "$GITHUB_REPOSITORY" \
+              --workflow build-linux-arm64.yml \
+              --status success \
+              --limit 1 \
+              --json databaseId \
+              --jq '.[0].databaseId')"
+          fi
+          if [ -z "$run_id" ] || [ "$run_id" = "null" ]; then
+            echo "ERRO: não achei nenhum run de build com sucesso." >&2
+            echo "Rode o workflow de build primeiro, ou informe o run_id." >&2
+            exit 1
+          fi
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+          echo "origem: run $run_id"
+          gh run view "$run_id" --repo "$GITHUB_REPOSITORY" \
+            --json headSha,conclusion,createdAt \
+            --jq '"  commit \(.headSha[0:12])  \(.conclusion)  \(.createdAt)"'
+
+      - name: Baixar os artefatos do run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # `gh run download` extrai uma pasta por artefato, que é exatamente o
+          # formato que o `preparar-assets-release.sh` espera.
+          gh run download "${{ steps.origem.outputs.run_id }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --dir baixado
+          echo "--- baixado:"
+          find baixado -maxdepth 1 -mindepth 1 -type d -printf '  %f\n' | sort
+          echo "--- total: $(du -sh baixado | cut -f1)"
+
+      - name: Preparar os assets
+        run: bash scripts/preparar-assets-release.sh baixado publicar
+
+      - name: Publicar na release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.inputs.tag }}"
+          TAG="${TAG:-imagens}"
+          run_id="${{ steps.origem.outputs.run_id }}"
+          commit="$(gh run view "$run_id" --repo "$GITHUB_REPOSITORY" --json headSha --jq '.headSha')"
+
+          {
+            echo "Imagens do Giochi System, geradas pelo CI a partir do commit \`${commit:0:12}\`."
+            echo
+            echo "**Não expiram** e o download **não exige login** (repositório público)."
+            echo "A tag é móvel: a cada publicação o conteúdo desta página é substituído."
+            echo
+            echo "## Como gravar"
+            echo
+            echo '```bash'
+            echo '# 1. baixe o .img.gz do seu aparelho e confira o SHA256'
+            echo 'sha256sum giochi-system-<aparelho>-sd.img.gz'
+            echo
+            echo '# 2. grave (o script aceita .gz direto, sem descomprimir)'
+            echo 'sudo bash scripts/flash-sd.sh <arquivo>.img.gz /dev/sdX --expect-gib <N>'
+            echo '```'
+            echo
+            echo "O \`--expect-gib\` evita gravar no cartão errado quando há dois no PC"
+            echo "(§12.8 do AGENTS). O tamanho que vale é o que o aparelho reporta em \`mmc info\`."
+            echo
+            echo "## Conteúdo"
+            echo
+            echo "| Arquivo | O que é |"
+            echo "| --- | --- |"
+            echo "| \`*-sd.img.gz\` | **a imagem para gravar no cartão** |"
+            echo "| \`*SHA256SUMS\` | hashes, para conferir o download |"
+            echo "| \`*Image\`, \`*.dtb\`, \`*u-boot*\` | as peças soltas, para diagnóstico |"
+            echo "| \`*build-info.txt\` | commit e instante do build de cada aparelho |"
+            echo
+            echo "Build [#${run_id}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${run_id})."
+          } > notas.md
+
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" \
+              --notes-file notas.md --title "Imagens mais recentes"
+          else
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
+              --title "Imagens mais recentes" --notes-file notas.md
+          fi
+
+          # SHA256SUMS primeiro: se o upload parar no meio, o que falta é a
+          # imagem, não o hash dela.
+          find publicar -name '*SHA256SUMS' -print0 \
+            | xargs -0 -r -n1 gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber
+          find publicar -type f ! -name '*SHA256SUMS' -print0 \
+            | xargs -0 -r -n1 gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber
+
+          echo "### Release publicada" >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ github.server_url }}/${{ github.repository }}/releases/tag/$TAG" >> "$GITHUB_STEP_SUMMARY"

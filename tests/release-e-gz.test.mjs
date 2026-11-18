@@ -12,7 +12,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdtempSync, rmSync, readdirSync, mkdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -32,6 +32,8 @@ const WORKFLOW = readFileSync(join(RAIZ, ".github/workflows/build-linux-arm64.ym
 const FLASH_SD = readFileSync(join(RAIZ, "scripts/flash-sd.sh"), "utf8");
 const FLASH_DD = readFileSync(join(RAIZ, "scripts/flash-dd.sh"), "utf8");
 const MAKE_SD = readFileSync(join(RAIZ, "scripts/make-sd-image.sh"), "utf8");
+const WORKFLOW_PUBLICAR = readFileSync(join(RAIZ, ".github/workflows/publicar-release.yml"), "utf8");
+const ASSETS = readFileSync(join(RAIZ, "scripts/preparar-assets-release.sh"), "utf8");
 
 test("o input `publicar_release` é choice, não boolean", () => {
     // §12.5: `workflow_dispatch` com `type: boolean` entrega
@@ -83,8 +85,7 @@ test("as imagens são comprimidas — a .img tem 2 GiB e o GitHub recusa", () =>
         "se o tamanho da imagem mudar, a decisão de comprimir precisa ser " +
         "reavaliada contra o limite de 2 GiB por asset do GitHub");
 
-    const bloco = soCodigo(WORKFLOW.slice(WORKFLOW.indexOf("\n  release:")));
-    assert.match(bloco, /gzip/,
+    assert.match(soCodigo(ASSETS), /gzip -9/,
         "sem gzip a imagem de 2 GiB não sobe: o GitHub recusa asset de 2 GiB ou mais");
 });
 
@@ -100,6 +101,24 @@ test("a tag é móvel: uma página só, sempre a mais recente", () => {
         "e as seguintes também");
 });
 
+test("os dois workflows usam o MESMO preparador de assets", () => {
+    // Duas cópias de trinta linhas de shell em dois workflows divergem na
+    // primeira correção: alguém conserta a compressão num e o outro continua
+    // publicando arquivo com nome que colide. É o §12.49 — trabalho repetido em
+    // N pontos, e um deles esquece um passo.
+    for (const [nome, texto] of [
+        ["build-linux-arm64.yml", WORKFLOW],
+        ["publicar-release.yml", WORKFLOW_PUBLICAR],
+    ]) {
+        assert.match(texto, /preparar-assets-release\.sh/,
+            `${nome} não chama o preparador compartilhado`);
+        // E não pode ter a lógica duplicada ao lado da chamada.
+        assert.doesNotMatch(soCodigo(texto), /gzip -9/,
+            `${nome} tem a compressão inline ALÉM de chamar o script — as duas ` +
+            `cópias vão divergir`);
+    }
+});
+
 test("nome de asset é único: o `--clobber` sobrescreve sem avisar", () => {
     // O defeito que quase foi publicado: `build-info.txt`, `SHA256SUMS`, `Image`,
     // `device.json` e `rootfs.ext4` existem nos TRÊS aparelhos. Numa release o
@@ -111,7 +130,7 @@ test("nome de asset é único: o `--clobber` sobrescreve sem avisar", () => {
     // aparelho no nome, e RECUSAR quando ainda assim houver duplicata (o
     // `uniq -d`), porque renomear depende de o laço ter coberto todos os
     // arquivos.
-    const bloco = soCodigo(WORKFLOW.slice(WORKFLOW.indexOf("\n  release:")));
+    const bloco = soCodigo(ASSETS);
 
     assert.match(bloco, /giochi-system-\$\{aparelho\}-\$\{base\}/,
         "os arquivos comuns aos aparelhos precisam levar o aparelho no nome");
@@ -122,7 +141,9 @@ test("nome de asset é único: o `--clobber` sobrescreve sem avisar", () => {
     // sobrescreve calado. `uniq -d` no fim é sempre vazio, ou seja, decorativo.
     // (Primeira versão deste passo fazia exatamente isso.)
     assert.match(bloco, /checa\(\)/, "falta a função que recusa a colisão");
-    assert.match(bloco, /\[ -e "publicar\/\$1" \]/,
+    // O destino é parametrizado (`$DESTINO`), então a asserção é sobre a forma
+    // e não sobre o literal "publicar".
+    assert.match(bloco, /\[ -e "\$DESTINO\/\$1" \]/,
         "a checagem tem de ser sobre o destino JÁ existente, antes de escrever");
     assert.doesNotMatch(bloco, /uniq -d/,
         "`uniq -d` numa pasta plana nunca dispara — a colisão é no cp, não depois");
@@ -136,17 +157,22 @@ test("nome de asset é único: o `--clobber` sobrescreve sem avisar", () => {
         "a checagem tem de ser chamada no shell principal, com o nome já montado");
 
     // E o upload sai da pasta normalizada, não de `baixado/` — senão o
-    // renomeamento não teria efeito nenhum.
-    assert.match(bloco, /find publicar/,
-        "o upload tem de publicar a pasta com os nomes normalizados");
+    // renomeamento não teria efeito nenhum. Esta asserção é sobre o WORKFLOW,
+    // não sobre o script: quem publica é o `gh release upload`.
+    for (const [nome, texto] of [
+        ["build-linux-arm64.yml", WORKFLOW],
+        ["publicar-release.yml", WORKFLOW_PUBLICAR],
+    ]) {
+        assert.match(soCodigo(texto), /find publicar/,
+            `${nome}: o upload tem de publicar a pasta com os nomes normalizados`);
+    }
 });
 
 test("a imagem de cartão mantém o nome único que já nasce com ela", () => {
     // `giochi-system-<aparelho>-sd.img.gz` já é única, e é o arquivo que o
     // usuário procura. Renomear de novo daria `giochi-system-r35s-giochi-
     // system-r35s-sd.img.gz` — feio e confuso na página de download.
-    const bloco = soCodigo(WORKFLOW.slice(WORKFLOW.indexOf("\n  release:")));
-    assert.match(bloco, /\*-sd\.img\.gz\)/,
+    assert.match(soCodigo(ASSETS), /\*-sd\.img\.gz\)/,
         "o caso da imagem comprimida precisa de ramo próprio");
 });
 
@@ -288,4 +314,72 @@ test("o README não descreve mais o workflow terminando no artefato", () => {
     assert.match(raiz, /expira em 14 dias/,
         "e a limitação do artefato, para a escolha entre os dois caminhos ser " +
         "informada");
+});
+
+test("o preparador recusa colisão com exit 1, não com erro de cp", () => {
+    // Executável, porque o defeito real foi de semântica de shell: a primeira
+    // versão chamava a checagem em `$(...)`, o `exit 1` morria no subshell, o
+    // `cp` seguia com destino vazio e o operador via
+    // "cp: cannot create regular file ''" — que não diz nada sobre o problema.
+    const tmp = mkdtempSync(join(tmpdir(), "assets-col-"));
+    try {
+        // Dois "aparelhos" que resolvem para o MESMO nome depois do prefixo.
+        for (const d of ["a", "b"]) {
+            const dir = join(tmp, "baixado", `giochi-system-${d}`);
+            mkdirSync(dir, { recursive: true });
+            writeFileSync(join(dir, "Image"), d);
+        }
+        // Sem colisão: nomes distintos, tem de passar.
+        execFileSync("bash", [join(RAIZ, "scripts/preparar-assets-release.sh"),
+            join(tmp, "baixado"), join(tmp, "ok")], { stdio: "pipe" });
+
+        // Com colisão forçada (aparelho fixo), tem de falhar ALTO.
+        // Reescreve o script com o nome do aparelho fixo — é a única forma de
+        // produzir a colisão, já que o nome real difere por pasta.
+        const copia = join(tmp, "colide.sh");
+        writeFileSync(copia, ASSETS.replace(
+            'aparelho="${aparelho#giochi-system-}"', 'aparelho="MESMO"'));
+        let saida = "";
+        let codigo = 0;
+        try {
+            execFileSync("bash", [copia, join(tmp, "baixado"), join(tmp, "col")], { stdio: "pipe" });
+        } catch (e) {
+            codigo = e.status;
+            saida = `${e.stderr ?? ""}`;
+        }
+        assert.equal(codigo, 1,
+            "a colisão tem de sair com exit 1 do script principal — em `$(...)` " +
+            "o exit morreria no subshell e o cp seguiria com destino vazio");
+        assert.match(saida, /dois aparelhos produziriam o asset/,
+            `a mensagem tem de nomear a causa; veio: ${saida.slice(0, 200)}`);
+        assert.doesNotMatch(saida, /cannot create regular file/,
+            "erro de cp no lugar da causa é o defeito que existia antes");
+    } finally {
+        rmSync(tmp, { recursive: true, force: true });
+    }
+});
+
+test("o preparador comprime a .img e mantém a .img.gz que já veio pronta", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "assets-gz-"));
+    try {
+        const dir = join(tmp, "baixado", "giochi-system-r35s");
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, "giochi-system-r35s-sd.img"), Buffer.alloc(64 * 1024, 7));
+        // Outro aparelho já traz a .img.gz (o download-artifact pode preservar).
+        const dir2 = join(tmp, "baixado", "giochi-system-x55");
+        mkdirSync(dir2, { recursive: true });
+        execFileSync("gzip", ["-c", join(dir, "giochi-system-r35s-sd.img")],
+            { stdio: ["ignore", "pipe", "ignore"] })
+            .pipe?.(process.stdout);
+
+        execFileSync("bash", [join(RAIZ, "scripts/preparar-assets-release.sh"),
+            join(tmp, "baixado"), join(tmp, "out")], { stdio: "pipe" });
+        const saida = readdirSync(join(tmp, "out"));
+        assert.ok(saida.includes("giochi-system-r35s-sd.img.gz"),
+            `a .img tem de sair comprimida; saiu: ${saida.join(", ")}`);
+        assert.ok(!saida.some((f) => f.endsWith(".img") ),
+            "a .img crua NÃO pode subir: ela tem 2 GiB e o GitHub recusa");
+    } finally {
+        rmSync(tmp, { recursive: true, force: true });
+    }
 });
