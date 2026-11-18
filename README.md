@@ -95,10 +95,14 @@ O primeiro build compila a toolchain interna do Buildroot e pode levar de dezena
 3. **Build** roda um job por device, instala dependências, baixa o Buildroot fixado, aplica o defconfig, mescla os fragmentos, compila e publica o artefato.
 4. **Upload** disponibiliza `giochi-system-<device>` como artefato do Actions —
    que **exige login** e **expira em 14 dias**.
-5. **Release** (opcional, com `publicar_release: true` no dispatch) publica as
-   imagens numa **tag móvel** `imagens`: uma página só, sempre a mais recente,
-   download anônimo e sem expiração. É o caminho recomendado para quem só quer
-   gravar — ver [docs/baixar-imagens.md](./docs/baixar-imagens.md).
+5. **Release** (opcional) publica as imagens numa **tag móvel** `imagens`: uma
+   página só, sempre a mais recente, download anônimo e sem expiração. Dois
+   caminhos, e o segundo não recompila nada:
+   - `publicar_release: true` no dispatch do próprio build;
+   - o workflow **Publicar imagens na release**, que publica os artefatos de um
+     build que **já existe** (~2 min em vez de 1–2 h).
+
+   Ver [docs/baixar-imagens.md](./docs/baixar-imagens.md).
 
 O workflow padrão é **ARM64**. Também aceita `arch=x86_64` e `arch=arm` para devices que vierem a ser habilitados com essas arquiteturas.
 

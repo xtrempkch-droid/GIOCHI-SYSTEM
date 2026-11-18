@@ -376,7 +376,7 @@ Giochi system/
 │   (serial-push.py envia arquivo ao aparelho por base64 em blocos)
 ├── tests/{devices,assert-config,assert-kernel-config,fdt,prepare-config,buildroot-hash}.test.mjs + run-all.mjs
 ├── .github/
-│   ├── workflows/{build-linux-arm64,validate}.yml
+│   ├── workflows/{build-linux-arm64,publicar-release,validate}.yml
 │   └── ISSUE_TEMPLATE/novo-aparelho.yml
 ├── package.json, Makefile, README.md, AGENTS.md, CONTRIBUTING.md,
 │   SECURITY.md, LICENSE, .gitignore, .gitattributes, .editorconfig
@@ -7053,6 +7053,61 @@ reiniciar ele acende". Isso **descarta** qualquer causa que sobreviva ao reset �
 o que aponta para estado físico (carga do trilho, estado do painel) e não para
 configuração. Configuração errada dá o mesmo resultado em todo boot; o que muda
 entre boot frio e reset é o **estado analógico da placa**.
+
+### 31.4-A O build e a publicação são dois passos — e o segundo não pode exigir recompilar
+
+O run `44200418609` terminou com os **quatro** aparelhos verdes (qemu, x55,
+x35h, r35s) e o job `release` saiu `skipped`. Não era bug: ele só roda em
+`workflow_dispatch` com `publicar_release=true`. O efeito prático, porém, era
+ruim — para ter a imagem numa página de download seria preciso **recompilar 2 h**,
+e os artefatos que acabaram de sair expiram em 14 dias (01–02/12).
+
+A pergunta que originou isto ("consigo baixar sem te pedir para compilar?")
+apontava para o lugar certo, e a resposta completa tem duas partes:
+
+| Parte | Como |
+| --- | --- |
+| **o build** | GitHub Actions (a nuvem compila) |
+| **a entrega** | Release com tag móvel — página, download anônimo, sem prazo |
+
+O que faltava era a segunda parte ser independente da primeira. Agora
+`publicar-release.yml` baixa os artefatos de um run que já existe (o mais
+recente com sucesso, ou o `run_id` informado), prepara e publica: **2 minutos**.
+
+E a preparação saiu do YAML para `scripts/preparar-assets-release.sh`, porque
+agora **dois** workflows precisam dela. Duas cópias de trinta linhas de shell
+divergem na primeira correção — §12.49.
+
+#### O que o caminho já provou, e o que só o clique prova
+
+| Verificação | Como foi medida |
+| --- | --- |
+| os 4 aparelhos compilam (incl. X35H recém-habilitado) | run `44200418609`, 4× `success` |
+| os artefatos existem e têm tamanho plausível | API: r35s 154,3 · x55 171,6 · x35h 163,0 · qemu 54,4 MB |
+| o preparador comprime e renomeia sem colidir | executado com os nomes REAIS dos 4 aparelhos: 40 arquivos, 4 `.img.gz`, zero colisão |
+| a colisão sai com `exit 1` e nomeia a causa | executado com o nome do aparelho forçado igual |
+| o workflow está registrado e ativo | API: `Publicar imagens na release` → `active` |
+
+**O que não se pode provar daqui:** o `workflow_dispatch` em si. Disparar
+workflow exige token, e esta máquina não tem (§2-A: `POST` → 401, sem `gh`, sem
+`GH_TOKEN`). Então o primeiro clique é seu — e é o único passo do caminho que
+depende de uma pessoa.
+
+#### Por que 2 GiB é o número que decide tudo isto
+
+`SIZE_MIB=2048` no `make-sd-image.sh` = **2 GiB exatos**, e o GitHub recusa asset
+de 2 GiB ou mais. A `.img` não cabe — por um byte. Por isso o release publica
+`.img.gz`, e por isso os **dois** scripts de gravação passaram a ler `.gz`
+(`ler_imagem()`): se só o `flash-sd.sh` aceitasse, o `flash-dd.sh` deixaria de ser
+caminho de reserva no dia em que fosse preciso.
+
+Três detalhes que os testes prendem, todos medidos:
+
+- tamanho por `ler_imagem | wc -c`, nunca `gzip -l` — o ISIZE do gzip é módulo
+  2^32 e mentiria para MENOS num arquivo > 4 GiB, deixando passar cartão pequeno;
+- hash do conteúdo **descomprimido**, que é o do cartão e o do `SHA256SUMS`;
+- `SHA256SUMS` sobe **antes** da imagem: se o upload parar no meio, o que falta é
+  a imagem, não o hash dela.
 
 ### 31.5-A Dongle: o Wi-Fi entrou, o Bluetooth não — e a frase que eu escrevi mentia
 

@@ -5,6 +5,7 @@ Duas perguntas, duas respostas curtas:
 | Você quer… | Vá para |
 | --- | --- |
 | **a imagem pronta**, para gravar no cartão | [§1 — Release](#1-a-imagem-pronta-release) |
+| **publicar um build que já existe** (2 min, sem recompilar) | [§1-A](#1-a-publicar-um-build-que-já-existe) |
 | **compilar você mesmo**, do código | [§2 — build na nuvem](#2-compilar-na-nuvem-sem-instalar-nada) ou [§3 — build no seu PC](#3-compilar-no-seu-pc) |
 
 Nenhuma das três exige pedir para o agente compilar. O build é o mesmo: o
@@ -65,6 +66,37 @@ A `.img` tem **2 GiB exatos**, e o GitHub recusa asset de 2 GiB ou mais. Sem
 comprimir, o arquivo que interessa ficaria de fora da release — e o upload de um
 asset entre vários falha sem estardalhaço. Comprimido fica em ~200 MB, e a
 gravação sai igual.
+
+---
+
+## 1-A. Publicar um build que já existe
+
+O build do CI é separado de **publicar o resultado**. Um build disparado por push
+— ou um que ninguém pensou em publicar na hora — deixa os artefatos no Actions por
+14 dias, e eles **exigem login** para baixar. Para transformá-los em página de
+download não é preciso recompilar:
+
+1. Abra **Actions** → **Publicar imagens na release** → **Run workflow**.
+2. `run_id`: deixe **vazio** para pegar o build mais recente que terminou com
+   sucesso, ou informe o número do run específico (está na URL de Actions).
+3. `tag`: deixe `imagens`.
+4. **Run workflow**. Leva ~2 minutos: baixa o artefato, comprime a `.img`,
+   normaliza os nomes e sobe na release.
+
+É o mesmo resultado do `publicar_release: true` no build — a diferença é que
+aquele exige recompilar tudo (1–2 h).
+
+### Se o build e a publicação puderem esperar
+
+Se você já sabe que vai querer a imagem publicada, é mais direto pedir no próprio
+build: **Actions** → **Build Giochi System ARM64** → Run workflow →
+`publicar_release: true`. Aí a publicação acontece assim que os quatro aparelhos
+compilarem, sem um segundo passo.
+
+> **Cuidado com o `cancel-in-progress`.** Um push em `device/`, `config/` ou
+> `scripts/` **mata** o build em andamento. Se disparar um build, não empurre
+> commit nessas pastas até ele terminar. Docs e testes (`docs/**`, `tests/**`)
+> não disparam build.
 
 ---
 
@@ -131,6 +163,7 @@ Duas coisas que economizam horas:
 | --- | --- |
 | quero só gravar e jogar | **Release** (§1) |
 | quero a imagem de um commit específico, sem mexer no PC | **Actions com `publicar_release`** (§2) |
+| o build já rodou e eu só quero o download | **Publicar imagens na release** (§1-A) — 2 min |
 | estou mudando código e quero iterar rápido | **build local** (§3) |
 
 O que **não** é caminho: pedir para o agente compilar na máquina dele. O build

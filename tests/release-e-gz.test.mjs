@@ -383,3 +383,40 @@ test("o preparador comprime a .img e mantém a .img.gz que já veio pronta", () 
         rmSync(tmp, { recursive: true, force: true });
     }
 });
+
+test("publicar não exige recompilar: existe workflow próprio para isso", () => {
+    // O buraco que apareceu no run 44200418609: os quatro aparelhos verdes e o
+    // job de release `skipped`, porque ele só roda em workflow_dispatch com
+    // publicar_release=true. Publicar exigiria recompilar 1-2 h, e os
+    // artefatos expiram em 14 dias — então "publicar" e "compilar" eram a mesma
+    // coisa na prática, que é exatamente o que torna a entrega dependente de
+    // alguém com tempo.
+    assert.match(WORKFLOW_PUBLICAR, /workflow_dispatch/,
+        "publicar tem de ser disparável sozinho");
+    assert.match(WORKFLOW_PUBLICAR, /gh run download/,
+        "e tem de baixar artefato de um run EXISTENTE, não recompilar");
+    assert.match(WORKFLOW_PUBLICAR, /--status success/,
+        "sem filtrar por sucesso ele pegaria o run mais recente em andamento e o " +
+        "download falharia por não haver artefato ainda");
+    assert.match(WORKFLOW_PUBLICAR, /actions: read/,
+        "baixar artefato de outro run exige permissão de leitura em actions");
+    assert.match(WORKFLOW_PUBLICAR, /contents: write/,
+        "e publicar a release exige escrita em contents");
+});
+
+test("publicar-release.yml não compila nada", () => {
+    // Se este workflow algum dia chamar o build, ele deixa de resolver o
+    // problema: o ponto é justamente não gastar 2 h para publicar.
+    assert.doesNotMatch(soCodigo(WORKFLOW_PUBLICAR), /build-device\.sh|build-in-container/,
+        "o publicador não pode compilar: o objetivo é publicar em minutos");
+});
+
+test("o guia documenta os dois caminhos de publicação", () => {
+    const guia = readFileSync(join(RAIZ, "docs/baixar-imagens.md"), "utf8");
+    assert.match(guia, /Publicar imagens na release/,
+        "o guia tem de dizer que existe o caminho de 2 minutos");
+    assert.match(guia, /sem recompilar|já existe/,
+        "e deixar claro que ele NÃO recompila — é a diferença que importa");
+    assert.match(guia, /cancel-in-progress/,
+        "e avisar do cancelamento: quem publica costuma estar no meio de pushes");
+});
