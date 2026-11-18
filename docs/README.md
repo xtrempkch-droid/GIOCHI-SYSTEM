@@ -43,6 +43,9 @@
   (arcade sem patch); launcher e Godot Compatibility passam. As três saídas e
   a regra de licença do `libmali`: **fora** da imagem base.
 - [Mapas de botões](button-maps.md) — de onde vêm os códigos evdev de cada aparelho.
+- [Entrada para as equipes](entrada-para-equipes.md) — **como implementar** a
+  leitura de botões: o controle virtual `Giochi Gamepad`, as regras (abrir pelo
+  nome, nunca por índice; uma fonte só) e o que cada stack deve fazer.
 - [Catálogo RK3326](rk3326-catalog.md) — 15 aparelhos extraídos de device tree.
 - [Painéis do R35S/R36S](../device/r35s/panels/README.md) — os **cinco** painéis
   que saem de fábrica, em texto comparável: formato `panel_description`, a conta

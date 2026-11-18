@@ -551,6 +551,29 @@ int main(int argc, char **argv)
             }
             int qtd = (int)(lido / (ssize_t)sizeof(struct input_event));
             for (int k = 0; k < qtd; k++) {
+                /* O evdev so publica um pacote quando chega EV_SYN/SYN_REPORT:
+                 * `client->packet_head` e atualizado ali, e o `read()` do app
+                 * espera por ele. Sem este write, o device virtual parece vivo
+                 * (o daemon loga a traducao) e NENHUM app recebe evento -
+                 * medido em 18/11/2026 com um fisico sintetico via uinput.
+                 *
+                 * O report e repassado mesmo quando nada foi traduzido: o
+                 * pacote do fisico pode conter so codigo que este aparelho nao
+                 * tem (volume, power), e o cliente do virtual ainda precisa do
+                 * fim de pacote para nao ficar esperando. */
+                if (ev[k].type == EV_SYN) {
+                    if (ev[k].code == SYN_REPORT) {
+                        struct input_event out;
+                        memset(&out, 0, sizeof(out));
+                        out.type = EV_SYN;
+                        out.code = SYN_REPORT;
+                        out.value = 0;
+                        if (write(ufd, &out, sizeof(out)) < 0 && verboso) {
+                            perror("giochi-gamepad: write EV_SYN");
+                        }
+                    }
+                    continue;
+                }
                 if (ev[k].type == EV_KEY) {
                     if (ev[k].value == 2) {
                         continue; /* repeticao nao muda estado */

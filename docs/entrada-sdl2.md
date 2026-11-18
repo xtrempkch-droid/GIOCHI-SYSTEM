@@ -68,17 +68,28 @@ próprio, e o SDL só reconhece um controle se houver entrada no
 o motivo é o nó partido, não o DB ausente. O `giochi_gamepad_connected()` vai
 devolver 0 e os jogos da engine ficarão sem controle — sem erro, só sem resposta.
 
+> **Atualização de 18/11/2026:** o problema do nó partido foi resolvido **no
+> sistema**, não na engine. O `giochi-gamepad` publica um nó único
+> (`Giochi Gamepad`) com botões e eixos, e o `SDL_GameController` passa a
+> existir nos três aparelhos. A engine **não precisa** trocar de API; precisa
+> (a) abrir o controle **pelo nome**, nunca por índice, porque no R35S o nó
+> físico também é um gamecontroller, e (b) rodar numa imagem posterior a
+> 18/11/2026 — as anteriores têm o nó e não entregam evento (§12.75). Guia por
+> stack: [`entrada-para-equipes.md`](entrada-para-equipes.md).
+
 Duas saídas, e a escolha é da equipe da engine — mas só a segunda vale nos três
-aparelhos (ver a correção acima):
+aparelhos de uma imagem **sem** o virtual (ver a correção acima):
 
 1. ~~**Registrar o mapeamento em runtime** com `SDL_GameControllerAddMapping()`~~
    — **não resolve o X55 nem o X35H**: o DB só é consultado depois de o device
    ser joystick, e os botões de lá estão num nó que não é. Resolveria o R35S, que
    já funciona sem ele.
 2. **Usar `SDL_Joystick` cru, ou `evdev` direto, e traduzir pelo `buttons.map`**,
-   como o launcher faz. É o único caminho que funciona nos três, e é o que o
-   `neon-drift` já faz por evdev — o defeito dele é ter **também** o caminho SDL,
-   com um segundo mapa que diverge (AGENTS §12.74).
+   como o launcher faz. É o único caminho que funciona nos três aparelhos **no
+   hardware cru**, e é o que o `neon-drift` já faz por evdev — o defeito dele é
+   ter **também** o caminho SDL, com um segundo mapa que diverge (AGENTS §12.74).
+   Com o `Giochi Gamepad` na imagem, `SDL_GameController` volta a ser viável
+   (atualização acima), desde que se abra pelo nome.
 
 **O gate que ficou no repositório:** `device/<aparelho>/kernel-required.txt`
 declara `CONFIG_INPUT_EVDEV` e `CONFIG_INPUT_JOYSTICK`, então um build que perca

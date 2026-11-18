@@ -6,6 +6,8 @@ escrever issue pela API** — `POST`/`PATCH` devolvem `401 Requires authenticati
 não há `gh`, não há token e não há credential helper (medido em 17/11/2026).
 
 O conteúdo do **contrato** está em [`../contrato-de-entrada.md`](../contrato-de-entrada.md).
+O **guia de implementação** por stack (evdev, SDL, engine, launcher) está em
+[`../entrada-para-equipes.md`](../entrada-para-equipes.md).
 Os arquivos desta pasta são o **recorte por equipe**: o que cada uma precisa ler,
 sem o resto.
 

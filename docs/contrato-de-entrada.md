@@ -3,16 +3,28 @@
 Resposta curta à pergunta que decide a arquitetura de qualquer jogo: **vou
 precisar adaptar código por console?**
 
-**Não, se o jogo ler `evdev` + `/etc/giochi/buttons.map`.** Isso está garantido
-nos três aparelhos habilitados e é medido, não prometido.
+**Não — se o jogo abrir o controle virtual `Giochi Gamepad`.** Ele existe em
+todo aparelho com o mesmo layout: 17 botões, 4 eixos em -32767..32767, num nó
+só. Um caminho de leitura serve para todos, e aparelho novo não muda o jogo
+(seção 0).
 
-**Sim — para sempre — se o jogo usar `SDL_GameController`.** Isso não é uma
-limitação nossa que dá para consertar no sistema: é como o SDL2 classifica
-dispositivo, e o resultado varia por aparelho. Ver
-[`AGENTS.md` §12.74](../AGENTS.md) para o caso real que quebrou.
+**Também não — se o jogo usar `SDL_GameController`,** desde que a imagem
+carregue o virtual: ele é o nó único que o SDL2 exige, e o
+`gamecontrollerdb.txt` faz `Button::A` coincidir com o `a` do mapa. Em imagem
+anterior ao contrato (ou com o daemon parado), isso volta a variar por
+aparelho.
+
+**Sim, sempre — se o jogo abrir os nós físicos** (`gpio-keys`, `adc-joystick`,
+`rocknix-joypad`) e assumir um formato único: aí o layout é o da placa, e o
+resultado varia. Ver `AGENTS.md` §12.74 para o caso real que quebrou.
 
 Este documento existe para que ninguém descubra isso do jeito caro: com o jogo
 pronto e o aparelho na mão.
+
+> **Para implementar**, o guia por stack (evdev, SDL_GameController,
+> SDL_Joystick, engine e launcher) está em
+> [`entrada-para-equipes.md`](entrada-para-equipes.md). Este documento é a
+> referência do **contrato**; aquele é o **como fazer**.
 
 ---
 
@@ -37,7 +49,7 @@ todo console sem uma linha de `if` por aparelho.
 | **um nó** com botões e eixos | é o que o `SDL_GameController` exige; sem isso o SDL não reconhece controle em aparelho de nós separados |
 | **17 códigos fixos** | o mesmo `bN` significa a mesma coisa em todo console, mesmo quando o aparelho não tem o botão (X35H não tem `home`) |
 | **4 eixos em -32767..32767** | uma fórmula de normalização serve para todos; o Y já sai desinvertido quando o hardware inverte |
-| **`flat=32` nos quatro eixos** | a zona morta é do sistema, não de cada jogo |
+| **`flat=32` nos quatro eixos** | folga de ruído de centro; a zona morta de **jogabilidade** continua sendo escolha do jogo |
 | **GUID estável** | o SDL casa o mapeamento de `gamecontrollerdb.txt`, então `Button::A` é o `a` do mapa em todo aparelho |
 
 **Aparelho novo não muda nada nos jogos.** Ele entra editando
@@ -83,7 +95,12 @@ o que o `cobrinha`, o `giochi-defender` e o `giochi-tower` fazem.
 
 ---
 
-## 2. O que **varia** — e por que não dá para consertar no sistema
+## 2. O que **varia no hardware cru** — e por isso o virtual existe
+
+> Esta seção descreve o **hardware**, não o que o app vê. Um app que abre o
+> `Giochi Gamepad` não encontra nenhuma destas diferenças; elas são a razão de
+> o daemon existir e o que um app legado (que lê o físico) ainda precisa
+> tratar.
 
 ### 2.1 Quantos nós de input existem, e o que tem em cada um
 
@@ -98,7 +115,7 @@ mainline oferece. Unificar exigiria levar o `rocknix-joypad` (fora da árvore)
 para a X55 — possível, mas é mudança de driver de hardware num aparelho que
 hoje boota, e não se faz por conveniência de app.
 
-### 2.2 `SDL_GameController` funciona em um e não no outro
+### 2.2 No hardware cru, `SDL_GameController` funciona em um e não no outro
 
 O SDL2 reconhece o nó como game controller quando **o mesmo nó** tem
 `BTN_SOUTH` **e** eixos com `ABS_X`/`ABS_Y`
@@ -178,18 +195,22 @@ armadilha do §12.45 é ferramenta de diagnóstico que só funciona com o produt
 desligado. E como as duas fontes emitem a **mesma** transição, aplicar as duas em
 máscara de bits dá o mesmo estado.
 
-1. **Leia `/etc/giochi/buttons.map`.** Não fixe código evdev no jogo — o X35S
-   troca A/B, e amanhã outro aparelho pode trocar outra coisa.
-2. **Ignore o que não conhece.** Código fora do mapa é tecla de volume, power
-   key ou ruído. Um `if` que loga e segue custa uma linha; um `match` exaustivo
-   quebra o jogo no aparelho novo.
+1. **Abra o `Giochi Gamepad` pelo nome.** Os códigos dele são os do contrato, e
+   não mudam por aparelho. Se o seu caso é ler o **físico**, aí sim leia
+   `/etc/giochi/buttons.map` e nunca fixe código evdev — o X35S troca A/B, e
+   amanhã outro aparelho pode trocar outra coisa.
+2. **Ignore o que não conhece.** No virtual, o único código fora do contrato é
+   ruído; no físico, há tecla de volume e power key. Um `if` que loga e segue
+   custa uma linha; um `match` exaustivo quebra o jogo no aparelho novo.
 3. **Não some duas fontes.** Se você tem caminho evdev e caminho SDL, escolha um
    por execução — nunca `bits_evdev | bits_sdl`. Foi a soma que criou o sintoma
    do §12.74: cada fonte estava "certa" sozinha.
-4. **Se precisar do SDL, use `SDL_Joystick` cru**, não `SDL_GameController`. O
-   joystick não exige mapeamento e existe nos três aparelhos; o gamecontroller
-   não existe na X55 nem na X35H.
-5. **Escala de analógico vem do mapa**, não de constante no código.
+4. **Se usar SDL, prefira `SDL_GameController` numa imagem com o virtual** — é o
+   caminho que dá `Button::A` = o `a` do mapa, e funciona nos três aparelhos.
+   `SDL_Joystick` cru também serve, mas aí a numeração `bN` é a ordem crescente
+   dos códigos: `b0` é o `b`, não o `a`.
+5. **Escala de analógico vem do mapa** — e só se você lê o físico. Pelo virtual
+   a faixa é sempre -32767..32767.
 
 O item 3 é o que mais importa e o mais fácil de violar sem perceber: somar parece
 defensivo ("uso o que tiver"), e é justamente o que produz o botão com duas
@@ -201,8 +222,10 @@ funções.
 
 | Item | Estado |
 | --- | --- |
-| `giochi-gamepad` na imagem | código, serviço, kernel e mapeamento prontos; **nenhuma imagem gravada o contém ainda** — precisa de rebuild |
+| `giochi-gamepad` na imagem | código, serviço, kernel, mapeamento **e o fix do `SYN_REPORT`** (§12.75) prontos; as imagens do run `44184129584` têm o virtual mas são anteriores ao fix — **rebuild obrigatório** antes de gravar |
 | `js0` em todo aparelho | `CONFIG_INPUT_JOYDEV=y` nos três desde `4018875`; **não está em nenhuma imagem gravada ainda** — as duas imagens são anteriores |
+| prova de entrega | `scripts/entrada-probe.py` roda no PC (device sintético via `uinput`) e reprova quando o evento não chega; `giochi-selftest` **não** substitui isso, porque confere o nó e as capabilities |
+| multi-controle | não suportado: o daemon funde todos os físicos num único virtual (jogador 2 entra como jogador 1) |
 | faixa do analógico do X35H | não medida no aparelho (o mapa herda o da X55, mesma arquitetura) |
 | `rocknix-joypad` na X55 | não empacotado para ela; unificaria os nós, mas é mudança de driver |
 | jogo de referência sem mapa fixo | nenhum dos jogos do `GIOCHI-GAMES` serve de exemplo hoje — o `neon-drift` é o caso de estudo do que não fazer (§12.74) |

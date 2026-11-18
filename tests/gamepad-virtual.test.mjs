@@ -270,6 +270,25 @@ test("o daemon reexamina /dev/input e ignora o próprio device", () => {
         "o laço de poll é a janela em que devices novos são procurados");
 });
 
+test("o virtual emite SYN_REPORT — sem ele o evdev não entrega pacote nenhum", () => {
+    // DEFEITO MEDIDO EM 18/11/2026, com um device físico sintético via uinput:
+    // o daemon logava a tradução (`b phys=304 -> canon=304 v=1`) e o app que
+    // lia `/dev/input/eventN` do virtual recebia ZERO eventos. O evdev só
+    // publica o pacote quando chega `EV_SYN/SYN_REPORT` — é ali que
+    // `client->packet_head` avança e o `read()` do cliente acorda.
+    const codigo = semComentario(FONTE, "c");
+    const iSyn = codigo.indexOf("ev[k].type == EV_SYN");
+    const iKey = codigo.indexOf("ev[k].type == EV_KEY");
+    assert.ok(iSyn > 0 && iKey > 0,
+        "o laço tem de tratar EV_SYN e EV_KEY explicitamente");
+    assert.ok(iSyn < iKey,
+        "o SYN do físico tem de ser tratado antes da tradução do evento");
+    assert.match(codigo, /out\.code = SYN_REPORT/,
+        "o virtual tem de fechar o pacote com SYN_REPORT");
+    assert.match(codigo, /perror\("giochi-gamepad: write EV_SYN"\)/,
+        "o write do SYN_REPORT tem de ir para o uinput, com erro visível");
+});
+
 test("o daemon não faz EVIOCGRAB — o diagnóstico continua funcionando", () => {
     // A lição do §12.45: ferramenta de diagnóstico que exige o produto
     // desligado não é usável. Tomar os devices físicos deixaria `evtest`,

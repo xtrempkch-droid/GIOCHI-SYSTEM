@@ -5257,6 +5257,75 @@ O corpo também está versionado na cópia da sessão
 acrescentar medição, edite os dois, ou só a issue, que é a fonte que a outra
 equipe lê.
 
+### 12.75 O controle virtual existia, traduzia — e não entregava nada
+
+Encontrado em 18/11/2026 ao **validar o contrato antes de comunicá-lo**. O
+`giochi-gamepad` subia, abria os devices físicos, logava a tradução e criava o
+`Giochi Gamepad` com as capabilities certas (17 botões, 4 eixos,
+`-32767..32767`). Um app que abrisse o nó virtual, porém, recebia **zero
+eventos** — sem erro em lugar nenhum.
+
+#### Como foi medido
+
+No host, com um device **físico sintético** criado por `uinput` (17 `BTN_*` e
+`ABS_X/Y/RX/RY`) e o `giochi-gamepad` rodando contra o `buttons.map` real:
+
+```text
+daemon (verboso):   b  phys=304 -> canon=304 v=1
+                    b  phys=304 -> canon=304 v=0
+leitura do virtual: (nada)
+```
+
+Depois da correção, a mesma leitura devolveu:
+
+```text
+(1, BTN_SOUTH, 1), (0, SYN_REPORT, 0)
+(1, BTN_SOUTH, 0), (0, SYN_REPORT, 0)
+```
+
+E as duas metades que os times vão usar ficaram provadas no mesmo probe:
+
+| Teste | Resultado |
+| --- | --- |
+| mapa do X35S (troca A/B de propósito) | físico `BTN_SOUTH` → virtual `BTN_EAST`; físico `BTN_EAST` → virtual `BTN_SOUTH` |
+| mapa da X55, eixo X | físico 15 → virtual **-32767**; físico 1023 → **32767** |
+| mapa da X55, eixo Y (invertido) | físico 1023 → **-32767**; físico 15 → **32767** |
+
+#### A causa
+
+O `evdev` **não publica evento por evento**: ele acumula no buffer do cliente e
+só libera o pacote quando chega `EV_SYN/SYN_REPORT`. É nesse evento que
+`client->packet_head` avança, e é por ele que `evdev_read()` espera. O daemon
+escrevia `EV_KEY` e `EV_ABS` no `uinput`, mas **nunca escrevia o `SYN_REPORT`**
+— então o kernel tinha os eventos, o cliente não os via.
+
+É a mesma família do §12.29/§12.30/§12.51: a ferramenta provou a **intenção**
+("o daemon traduziu") e não a **consequência** ("o app recebeu"). O selftest
+também não pegava, porque ele confere a **existência** e as **capabilities** do
+nó virtual — as duas estavam certas.
+
+#### A correção
+
+No laço de eventos, tratar `EV_SYN` antes de `EV_KEY`/`EV_ABS` e **repassar o
+`SYN_REPORT` do físico** para o `uinput`, mesmo quando nada foi traduzido (o
+pacote pode conter só código que este aparelho não tem, como volume).
+
+O reprodutor ficou no repositório: **`scripts/entrada-probe.py`**. Ele cria um
+device físico sintético por `uinput`, sobe o daemon contra um `buttons.map` real
+e compara o que sai do virtual com o contrato — código canônico, faixa das duas
+pontas de cada eixo, e presença do `SYN_REPORT`. Sem `/dev/uinput` gravável ele
+diz `SKIP` e sai 0 (§12.34); violação do contrato sai 1.
+
+Verificado por mutação: removendo o bloco do `EV_SYN` do daemon e apontando o
+probe para esse binário, ele reprova com
+`nenhum EV_KEY chegou ao virtual — é o §12.75` e **exit 1**. É a diferença que
+importa: o teste de texto do `tests/gamepad-virtual.test.mjs` garante que o
+código está lá; o probe garante que ele **funciona**.
+
+**Lição de método:** "o device existe e tem os botões" não é "o app recebe os
+botões". Quando o contrato é uma promessa de **entrega**, o teste tem de
+exercitar a entrega, nem que seja com um device sintético.
+
 ## 13. Aparelhos
 
 | ID | Pasta | SoC | Arch | Status | Falta |
@@ -6548,7 +6617,7 @@ traduz o hardware de cada placa para ele:
 | **17 códigos fixos** | mesmo `bN` = mesma coisa em todo console, inclusive quando o aparelho não tem o botão (X35H não tem `home`) |
 | **4 eixos em -32767..32767** | uma fórmula de normalização serve para todos |
 | **Y/RY desinvertidos** quando o hardware inverte (X55: `1023..15`) | senão o eixo vira ao contrário, sem erro |
-| **`flat=32`** nos quatro | a zona morta é do sistema, não de cada jogo |
+| **`flat=32`** nos quatro | folga de ruído de centro; a zona morta de jogabilidade é do jogo |
 | **GUID estável** + `gamecontrollerdb.txt` | `Button::A` do SDL = o `a` do `buttons.map` |
 
 **Aparelho novo não muda nada nos jogos**: entra editando `buttons.map`.
@@ -6674,6 +6743,11 @@ causa — que é o certo: ele roda no aparelho, onde a config já virou realidad
 
 ### As imagens com o contrato existem (run 44184129584, commit 87c8422)
 
+> **Ressalva de 18/11/2026, e ela é grave:** essas imagens são **anteriores ao
+> §12.75**. O daemon delas não escreve `EV_SYN/SYN_REPORT`, então o nó virtual
+> existe, o selftest dá `PASS` e **nenhum app recebe evento**. Elas não servem
+> para validar o contrato em campo — é preciso um build **posterior** ao fix.
+
 O build que carrega tudo isto — `panel-diag.sh`, o `selftest` novo, o daemon, o
 `gamecontrollerdb.txt`, `CONFIG_INPUT_UINPUT=y` e `CONFIG_INPUT_JOYDEV=y` — passou
 **nos três aparelhos**:
@@ -6701,10 +6775,12 @@ Quem quiser ver o binário: baixar pela interface, ou gravar a imagem e rodar
 ### Estado e pendências
 
 ```text
-suíte   608/608 + 1 skip
-imagem  as imagens COM o contrato já existem (run 44184129584) — falta GRAVAR
-        no cartão e conferir no aparelho: `giochi-selftest` deve dar PASS no
-        controle virtual, não SKIP
+suíte   635 casos (634 passam, 1 skip) em 68 arquivos — medido em 18/11/2026
+imagem  as imagens COM o contrato já existem (run 44184129584) — mas são
+        anteriores ao §12.75 (sem `SYN_REPORT`): o virtual existe e o app não
+        recebe evento. Rebuild obrigatório; depois, GRAVAR no cartão e conferir
+        no aparelho: `giochi-selftest` deve dar PASS no controle virtual, não
+        SKIP
         (a que está no R35S é de 15/11: sem uinput no kernel, sem daemon,
          e com o buttons.map anterior à seção de eixos)
 ```
