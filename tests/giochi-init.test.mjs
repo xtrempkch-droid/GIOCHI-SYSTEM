@@ -293,3 +293,46 @@ test("o contrato do giochi-controllers está escrito", async () => {
   assert.match(texto, /saída 0/);
   assert.match(texto, /saída ≠0|saída diferente/);
 });
+
+test("marcador de console livre ÓRFÃO é removido: o aparelho volta a ter interface", async () => {
+  // Medido no R35S em 20/11/2026: o `giochi-ports` marca
+  // `/run/giochi/dev-free-console` para pegar o DRM, e grava o próprio PID ao
+  // lado. Matando o wrapper com `kill -9`, o trap não roda, o marcador fica — e
+  // o `giochi-init` respeita o arquivo e NÃO sobe o launcher. Resultado: tela
+  // parada, sem nada dizendo por quê.
+  //
+  // A cura é o PID: arquivo de estado sem dono não pode ser definitivo.
+  const dir = await montaRaiz({ saidaLauncher: 0 });
+  const marcador = path.join(dir, "run/giochi/dev-free-console");
+  await mkdir(path.dirname(marcador), { recursive: true });
+  await writeFile(marcador, "");
+  // PID que com certeza não existe (acima do pid_max comum).
+  await writeFile(`${marcador}.pid`, "4194303\n");
+
+  // O caminho do marcador é do AMBIENTE, não do script: sem esta variável o
+  // init olharia o `/run/giochi` real e o teste não testaria nada.
+  await roda(dir, 8000, { GIOCHI_DEV_FREE_FILE: marcador });
+
+  await assert.rejects(
+    () => stat(marcador),
+    "o marcador órfão sobreviveu: o aparelho ficaria sem interface para sempre",
+  );
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("marcador com dono VIVO é respeitado", async () => {
+  // O outro lado, e é o que impede a cura de virar um `rm` sempre-verde: com o
+  // wrapper vivo, o marcador tem de continuar valendo — senão o launcher sobe
+  // por cima do port e os dois brigam pelo DRM.
+  const dir = await montaRaiz({ saidaLauncher: 0 });
+  const marcador = path.join(dir, "run/giochi/dev-free-console");
+  await mkdir(path.dirname(marcador), { recursive: true });
+  await writeFile(marcador, "");
+  await writeFile(`${marcador}.pid`, `${process.pid}\n`);
+
+  await roda(dir, 6000, { GIOCHI_DEV_FREE_FILE: marcador });
+
+  const still = await stat(marcador).then(() => true, () => false);
+  assert.ok(still, "marcador com dono vivo foi removido — o launcher subiria por cima do port");
+  await rm(dir, { recursive: true, force: true });
+});

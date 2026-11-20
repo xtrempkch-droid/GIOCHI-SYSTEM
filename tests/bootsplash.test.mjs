@@ -414,8 +414,15 @@ test("o console de texto é assumido quando o launcher não é a interface", () 
   const main = INIT.slice(INIT.indexOf("main()"));
   const inicioRamo = main.indexOf('-f "$DEV_FREE_FILE"');
   assert.ok(inicioRamo > 0, "não achei o ramo da flag de desenvolvimento");
-  const ramoDev = main.slice(inicioRamo, inicioRamo + 900);
+  // Recorte ESTRUTURAL, não por número de caracteres: o ramo vai do teste do
+  // arquivo até a atribuição que marca o aviso como dado (`dev_aviso=1`).
+  // A janela fixa de 900 chars quebrava a cada linha nova dentro do ramo — foi
+  // o que aconteceu em 20/11/2026, ao entrar a auto-cura do marcador órfão.
+  const fimRamo = main.indexOf("dev_aviso=1", inicioRamo);
+  assert.ok(fimRamo > inicioRamo, "não achei o fim do ramo da flag de desenvolvimento");
+  const ramoDev = main.slice(inicioRamo, fimRamo);
   assert.match(ramoDev, /assumir_console/, "o modo dev também precisa do console");
+  assert.match(ramoDev, /stop_splash/, "e o splash tem de sair antes, no modo dev também");
 });
 
 test("o DEFERRED_TAKEOVER continua, e agora tem contrapartida", () => {

@@ -391,6 +391,23 @@ Duas coisas que o launcher **não** deve fazer:
    assinatura, e o contrato das duas chaves (§12.41) não cobre esse conteúdo. O
    launcher deve mostrá-los como **sideload**, não como o que veio da loja.
 
+### Como rodar (e como testar hoje)
+
+```bash
+giochi-ports --status          # o que está instalado, e quem tem o DRM
+giochi-ports --liberar-drm     # abre a GUI; devolve a interface ao sair
+giochi-ports --rodar form      # roda um port instalado
+```
+
+`--liberar-drm` para o launcher pelo mecanismo que o `giochi-init` já conhece
+(`/run/giochi/dev-free-console`) e **devolve a interface** quando a GUI sai. Ele
+grava o próprio PID ao lado do marcador: se morrer sem limpar, o `giochi-init`
+vê o dono morto e se cura sozinho, em vez de deixar o aparelho sem interface.
+
+O que **não** funciona, e foi medido: rodar a GUI com o launcher no ar. O SDL
+falha em inicializar vídeo (`kmsdrm not available`) e a tela não muda — por isso
+o `giochi-ports` recusa, com a mensagem apontando `--liberar-drm`.
+
 ### Para testar sem tirar a interface do ar
 
 Existe `/run/giochi/dev-free-console`: com esse arquivo, o `giochi-init` **não**

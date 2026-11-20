@@ -321,35 +321,47 @@ com "parece legal".
 
 ## 7. O que foi MEDIDO em 20/11/2026, no R35S
 
-Tudo abaixo é do aparelho, com a imagem `commit=e0d74e6` mais o runtime
-instalado à mão em `/user/opt` — não é leitura de código.
+Tudo abaixo é do aparelho, com o runtime instalado em `/usr` (como a imagem
+final faz) e o `PortMaster.zip` extraído em `/user/ports`.
 
 | Verificação | Resultado |
 | --- | --- |
 | `python3` 3.12.9 com `ssl`, `zlib`, `ctypes`, `unicodedata`, `xml`, `lzma` | **roda** |
-| `bwrap` 0.11.0 | **roda**, rootfs read-only, `/user` gravável, 5 processos visíveis |
+| `bwrap` 0.11.0 | **roda**: rootfs read-only, `/user` gravável, 5 processos visíveis |
 | `control.txt` com `/roms` → `/user` e `OS_NAME=Giochi` | `CFW_NAME=Giochi`, `funcs.txt` carregado |
 | `pugwash` detecta o aparelho | `device: game console r36s`, `gpu_driver: panfrost`, `glibc: 2.41` |
-| GUI no KMSDRM | **DRM master + 2 framebuffers alocados** (debugfs) |
-| GUI dentro do `bwrap` | idem, com o rootfs congelado |
-| `giochi-selftest` | `PASS 42 · WARN 1 · FAIL 0 · SKIP 3`, com o bloco novo de ports |
+| GUI no KMSDRM | **DRM master + framebuffers** (debugfs) |
+| **um port real** (`FORM`, 125 KB, do registry) | **60 fps** (16,7 ms), `opengles2`, `vsync on`, `input: r36s_Gamepad`, botões respondendo |
+| `giochi-ports --liberar-drm` | para o launcher, roda, e **devolve a interface** ao sair |
+| `giochi-selftest` | `PASS 42 · WARN 1 · FAIL 0 · SKIP 3` |
+
+### Três defeitos que só apareceram rodando um port
+
+Cada um produz um sintoma que não aponta para a causa:
+
+| Sintoma | Causa | Correção |
+| --- | --- | --- |
+| `Permission denied` em **todo** binário | eu tinha extraído o zip um nível fundo demais; o layout é `<ports>/<nome>.sh` + `<ports>/<nome>/` | documentado em `giochi-ports --rodar` |
+| `Argument list too long` em **todo** `exec` | o `control.txt` exporta o `gamecontrollerdb.txt` inteiro (472 KB) em `SDL_GAMECONTROLLERCONFIG`; **uma string de ambiente não pode passar de 128 KB** (`MAX_ARG_STRLEN`) | o nosso DB (2 KB) é montado por cima do deles — e de quebra o mapa passa a ser o do projeto (`a = BTN_EAST`) |
+| `can't create /root/pm_dialog.txt: Read-only file system` | o sandbox congela `/`, e o PortMaster escreve em `$HOME` | `--bind /user/home /root` |
+
+E um de operação: **`TERM` no wrapper não parava o port**. Um `trap` de shell só
+roda quando o comando em primeiro plano termina, então o sinal ficava em fila
+enquanto o jogo rodava (medido: `timeout 30`, port seguindo por 152 s). Agora o
+`bwrap` roda em segundo plano com `wait`, e o trap mata o filho.
 
 ## 7-A. O que continua NÃO medido
 
-1. **Um port de verdade instalado e jogado.** O que rodou foi a **GUI** e a
-   detecção; baixar um port depende de DNS no aparelho (o teste usou o `zip`
-   enviado por `scp`). O `giochi-ports --version` imprime a detecção e sai — é
-   um smoke test, não uma partida.
-2. **A instalação pela GUI com rede.** O aparelho não tinha DNS configurado; a
-   GUI anunciou `No internet connection found, running in offline mode`.
-3. **RetroArch**, de que a família libretro depende (§3.7). GPL-3.0, fora da
+1. **Baixar um port pela GUI.** O aparelho de teste não tem DNS (o `udhcpd` não
+   anuncia gateway, por desenho — §12.66), então rodou tudo em modo offline. Para
+   habilitar: `ip_forward=1` no aparelho **e** NAT no PC (`iptables -t nat -A
+   POSTROUTING -o <saída> -j MASQUERADE`), que exige root no host.
+2. **RetroArch**, de que a família libretro depende (§3.7). GPL-3.0, fora da
    imagem — teria de vir pela loja.
-4. **Desempenho de `box64`/wine** num aparelho de 1 GB: o cenário mais pesado do
-   catálogo, e nada disso foi exercitado.
-5. **A partição de dados** (`/user`) não existe: hoje `/user` é um diretório no
+3. **Desempenho de `box64`/wine** num aparelho de 1 GB: o cenário mais pesado do
+   catálogo. O `FORM` é nativo.
+4. **A partição de dados** (`/user`) não existe: hoje `/user` é um diretório no
    rootfs, criado pelo post-build (§18, item 3).
-6. **O `exec` do launcher** — sem ele, abrir o PortMaster exige o launcher sair
-   antes. Foi assim que o teste obteve o DRM master.
 
 ## 8. Como repetir o teste (o que foi feito, na ordem)
 

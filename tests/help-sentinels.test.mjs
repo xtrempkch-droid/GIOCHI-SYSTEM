@@ -92,13 +92,51 @@ test("todo script com sentinela tem os DOIS marcadores", () => {
   assert.deepEqual(problemas, [], problemas.join("\n  "));
 });
 
-test("o --help dos scripts do ROOTFS não imprime prosa de seção", () => {
-  // No aparelho não existe `man` nem SSH garantido: o `--help` é a documentação.
-  // Uma saída que começa com "## RNDIS, e não ECM" não responde "como eu uso".
+test("todo --help do ROOTFS que usa sentinela imprime ajuda, não código", () => {
+  // A versão anterior listava TRÊS scripts à mão, e o `giochi-ports` nasceu
+  // fora da lista — com o `--help` imprimindo 133 linhas de código, por causa do
+  // `sed` sem âncora que reabria a faixa na própria linha do comando.
+  // Cobertura por caso num defeito de classe é o §12.50.
+  //
+  // A regra é a consequência: se a saída saiu do bloco de ajuda, TODA linha é
+  // comentário de ajuda. Qualquer linha de código (`exit 0`, `esac`, `;;`)
+  // aparece como linha que não começa com `#` — e é isso que reprova.
+  const dir = path.join(ROOT, "device/common/rootfs-overlay/usr/bin");
+  const problemas = [];
+  for (const nome of readdirSync(dir)) {
+    const arquivo = path.join(dir, nome);
+    const texto = readFileSync(arquivo, "utf8");
+    if (!texto.includes(`# ${SENTINELA}`)) continue;
+
+    let saida;
+    try {
+      saida = execFileSync("sh", [arquivo, "--help"], { encoding: "utf8", timeout: 15000 });
+    } catch (erro) {
+      // `--help` tem de sair 0: é a documentação do aparelho, não um erro.
+      problemas.push(`${nome}: --help saiu diferente de 0 (${erro.status})`);
+      continue;
+    }
+    if (saida.length > 1200) problemas.push(`${nome}: --help com ${saida.length} chars`);
+    if (/^## /m.test(saida)) problemas.push(`${nome}: --help imprime título de seção ("## …")`);
+
+    const linhas = saida.split("\n").filter((l) => l.trim() !== "");
+    if (linhas.length === 0) problemas.push(`${nome}: --help não imprimiu nada`);
+    // As linhas de ajuda vêm do `awk` com `sub(/^# ?/, "")`: o bloco original é
+    // todo `#`. Linha que não é comentário veio do CORPO do script.
+    const vazadas = linhas.filter((l) => !/^\s/.test(l) && /^(esac|exit|;;|case|\}\s*$)/.test(l));
+    if (vazadas.length) {
+      problemas.push(`${nome}: --help vazou código (${vazadas.length} linha(s), ex.: "${vazadas[0].trim()}")`);
+    }
+  }
+  assert.deepEqual(problemas, [], problemas.join("\n  "));
+});
+
+test("os scripts do ROOTFS com ajuda por sentinela dizem o uso", () => {
   const casos = [
     ["giochi-usb", ["uso:", "giochi-usb --host"]],
     ["giochi-usbnet", ["uso:", "giochi-usbnet --ms"]],
     ["giochi-buttons", ["giochi-buttons --axes"]],
+    ["giochi-ports", ["uso:", "giochi-ports --liberar-drm"]],
   ];
   const dir = path.join(ROOT, "device/common/rootfs-overlay/usr/bin");
   for (const [nome, esperados] of casos) {
@@ -109,11 +147,6 @@ test("o --help dos scripts do ROOTFS não imprime prosa de seção", () => {
         `${nome} --help não menciona "${esperado}"`,
       );
     }
-    assert.ok(
-      !/^## /m.test(saida),
-      `${nome} --help imprime título de seção ("## …"), que não é uso`,
-    );
-    assert.ok(saida.length < 1200, `${nome} --help com ${saida.length} chars: prosa demais`);
   }
 });
 

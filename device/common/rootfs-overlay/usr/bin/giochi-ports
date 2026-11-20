@@ -5,6 +5,8 @@
 # giochi-system:help:begin
 # Uso:
 #   giochi-ports                 # abre a GUI do PortMaster (em sandbox)
+#   giochi-ports --liberar-drm   # para o launcher, abre a GUI, e o devolve
+#   giochi-ports --rodar 2048    # roda um port instalado (libera o DRM antes)
 #   giochi-ports --sem-sandbox   # roda direto, SEM isolamento (por sua conta)
 #   giochi-ports --status        # onde ele está, e se o sandbox está disponível
 #   giochi-ports -- <args>       # argumentos vão para o pugwash
@@ -81,11 +83,57 @@ achar_python() {
     return 1
 }
 
+# Quem tem o /dev/dri/card0 aberto. Lê /proc e não usa `ps` — o `ps` desta
+# imagem só mostra a própria TTY (§12.46), e aqui a pergunta é sobre OUTRO
+# processo.
+quem_tem_o_drm() {
+    for f in /proc/[0-9]*/fd/*; do
+        case "$(readlink "$f" 2>/dev/null)" in
+            /dev/dri/card0) echo "${f#/proc/}" | cut -d/ -f1; return 0 ;;
+        esac
+    done
+    return 1
+}
+
+# Libera o DRM para a GUI, pelo mecanismo que o `giochi-init` já conhece:
+# `dev-free-console` faz o supervisor NÃO reiniciar o launcher enquanto o
+# arquivo existir. SIGTERM é o sinal certo — o init zera a cota em saída por
+# sinal (§12.45), então isto não gasta restart e não faz o supervisor desistir.
+# A flag é verificada a cada volta, então também vale com o launcher já no ar.
+DEV_FREE_FILE="${GIOCHI_DEV_FREE_FILE:-/run/giochi/dev-free-console}"
+
+liberar_drm() {
+    mkdir -p "$(dirname "$DEV_FREE_FILE")" 2>/dev/null || true
+    : >"$DEV_FREE_FILE" || return 1
+    pid="$(quem_tem_o_drm)"
+    [ -z "$pid" ] && return 0
+    aviso "liberando o DRM: parando o PID $pid (o launcher) — o supervisor o trará de volta ao sair"
+    kill -TERM "$pid" 2>/dev/null || true
+    i=0
+    while [ "$i" -lt 60 ]; do
+        [ -z "$(quem_tem_o_drm)" ] && return 0
+        sleep 0.1 2>/dev/null || sleep 1
+        i=$((i + 1))
+    done
+    return 1
+}
+
+devolver_drm() {
+    rm -f "$DEV_FREE_FILE" "$DEV_FREE_FILE.pid" 2>/dev/null || true
+}
+
 modo="${1:-}"
+LIBERAR_DRM=0
+RODAR_PORT=""
 case "$modo" in
     --help|-h)
-        sed -n '/giochi-system:help:begin/,/giochi-system:help:end/p' "$0" \
-            | grep -v 'giochi-system:help:'
+        # `awk` com padrão ANCORADO, como o `giochi-buttons`: com `sed` sem `^…$`
+        # o próprio comando abaixo (que cita os dois marcadores numa linha só)
+        # reabre a faixa e imprime o resto do arquivo. Medido no R35S em
+        # 20/11/2026: `--help` saía com 133 linhas, quase todas de código.
+        awk '/^# giochi-system:help:begin$/ { dentro = 1; next }
+             /^# giochi-system:help:end$/   { exit }
+             dentro                         { sub(/^# ?/, ""); print }' "$0"
         exit 0
         ;;
     --status)
@@ -104,7 +152,26 @@ case "$modo" in
         else
             echo "estado:      nao roda ainda"
         fi
+        ep="$(quem_tem_o_drm)"
+        if [ -n "$ep" ]; then
+            echo "DRM:         ocupado pelo PID $ep (o launcher) — use --liberar-drm"
+        else
+            echo "DRM:         livre"
+        fi
         exit 0
+        ;;
+    --liberar-drm)
+        LIBERAR_DRM=1
+        shift
+        ;;
+    --rodar)
+        # O `pugwash` NÃO roda port: ele instala, gerencia e sai deixando um
+        # marcador de "frontend, atualize sua lista". Quem executa o port é o
+        # frontend do CFW — no nosso caso, o launcher, quando ele listar
+        # `/user/ports`. Enquanto isso não existe, este modo é o que permite
+        # testar um port de verdade no aparelho.
+        RODAR_PORT="${2:-}"
+        shift 2 2>/dev/null || shift
         ;;
     --sem-sandbox)
         shift
@@ -137,8 +204,12 @@ fi
 
 if [ "$modo" = "--sem-sandbox" ]; then
     aviso "SEM sandbox, a pedido: o codigo dos ports roda com o rootfs gravavel."
+    [ "$LIBERAR_DRM" = "1" ] && liberar_drm
     cd "$pm" || exit 1
-    exec "$py" ./pugwash "$@"
+    "$py" ./pugwash "$@"
+    rc=$?
+    [ "$LIBERAR_DRM" = "1" ] && devolver_drm
+    exit $rc
 fi
 
 if [ -z "$BWRAP" ]; then
@@ -149,25 +220,137 @@ if [ -z "$BWRAP" ]; then
     exit 1
 fi
 
-# --ro-bind / /          rootfs congelado; nada de instalar em /usr ou /etc
-# --dev-bind /dev /dev   DRM, input, uinput, tty0, snd (ver o cabecalho)
-# --bind /user /user     onde ele escreve: ports, jogos, runtimes
-# --tmpfs /tmp           nada sobrevive ao processo
-# --proc /proc           muitos ports leem /proc
-# --unshare-all          pid/net/uts/ipc/user/mount proprios
-# --share-net            menos a rede: instalar depende dela
-# --die-with-parent      se o launcher cair, o port nao fica orfao
-# --new-session          sem terminal de controle: Ctrl-C no pai nao o mata
-# --chdir                o pm_launch faz `cd $controlfolder` de qualquer forma
-exec "$BWRAP" \
-    --ro-bind / / \
-    --dev-bind /dev /dev \
-    --bind /user /user \
-    --tmpfs /tmp \
-    --proc /proc \
-    --unshare-all \
-    --share-net \
-    --die-with-parent \
-    --new-session \
-    --chdir "$pm" \
-    "$py" ./pugwash "$@"
+# --rodar: o port é um `.sh` dentro de /user/ports/<nome>/. Resolve o nome do
+# diretório OU o do arquivo, sem exigir que os dois sejam iguais (não são: o
+# `2048` mora em `2048/2048.sh`, mas `StardewValley` mora em
+# `stardewvalley/StardewValley.sh`).
+if [ -n "$RODAR_PORT" ]; then
+    # Dois layouts convivem, e é a convenção do EmulationStation:
+    #
+    #   /user/ports/<nome>.sh          + /user/ports/<nome>/    (o instalado pelo
+    #                                                           PortMaster)
+    #   /user/ports/<nome>/<nome>.sh                            (o feito à mão)
+    #
+    # O nome do diretório e o do arquivo não coincidem sempre
+    # (`stardewvalley/StardewValley.sh`), então a comparação é sem caixa.
+    alvo="$(printf '%s' "$RODAR_PORT" | tr 'A-Z' 'a-z')"
+    PORT_SH=""
+    for f in "$PORTS_DIR"/*.sh "$PORTS_DIR"/*/*.sh; do
+        [ -f "$f" ] || continue
+        base="${f##*/}"
+        base="${base%.sh}"
+        pasta="$(dirname "$f")"
+        pasta="${pasta##*/}"
+        if [ "$(printf '%s' "$base" | tr 'A-Z' 'a-z')" = "$alvo" ] ||
+           [ "$(printf '%s' "$pasta" | tr 'A-Z' 'a-z')" = "$alvo" ]; then
+            PORT_SH="$f"
+            break
+        fi
+    done
+    if [ -z "$PORT_SH" ]; then
+        aviso "port '$RODAR_PORT' nao encontrado em $PORTS_DIR"
+        aviso "instalados: $(for f in "$PORTS_DIR"/*.sh; do [ -f "$f" ] && printf '%s ' "${f##*/}"; done)"
+        exit 1
+    fi
+    PORT_DIR="$(dirname "$PORT_SH")"
+    aviso "rodando ${PORT_SH##*/} (de $PORT_DIR)"
+    # Port desenha: precisa do DRM, sempre.
+    LIBERAR_DRM=1
+fi
+
+# O KMSDRM é exclusivo: com o launcher no ar o SDL nem inicializa o vídeo, e a
+# mensagem (`kmsdrm not available`) não diz quem está com o card. Medido duas
+# vezes — no kmscube (§12.72) e no próprio PortMaster (20/11/2026).
+if [ "$LIBERAR_DRM" = "1" ]; then
+    # `trap` e não só o `rm` do fim: se a GUI for morta por sinal (o `timeout`
+    # do teste, um Ctrl-C, o OOM killer num aparelho de 1 GB), o marcador
+    # ficaria e o aparelho voltaria SEM interface — o `giochi-init` respeita o
+    # arquivo e não sobe o launcher. Marcar é fácil; desmarcar tem de ser
+    # garantido.
+    trap 'devolver_drm' EXIT
+    if ! liberar_drm; then
+        aviso "não consegui liberar o DRM: ainda há processo com /dev/dri/card0."
+        exit 1
+    fi
+else
+    ocupante="$(quem_tem_o_drm)"
+    if [ -n "$ocupante" ]; then
+        aviso "o DRM está ocupado pelo PID $ocupante — o KMSDRM é exclusivo, então"
+        aviso "o SDL vai falhar com 'kmsdrm not available'."
+        aviso
+        aviso "  giochi-ports --liberar-drm   para o launcher, abre a GUI, e devolve"
+        aviso "                               a interface quando ela terminar"
+        exit 1
+    fi
+fi
+
+# ── as montagens ────────────────────────────────────────────────────────────
+#
+# --ro-bind / /            rootfs congelado; nada de instalar em /usr ou /etc
+# --dev-bind /dev /dev     DRM, input, uinput, tty0, snd
+# --bind /user /user       onde ele escreve: ports, jogos, runtimes
+# --bind /user/home /root  $HOME gravável (o control.txt escreve
+#                          /root/pm_dialog.txt; sem isto, "Read-only file system")
+# --tmpfs /tmp             nada sobrevive ao processo
+# --proc /proc             muitos ports leem /proc
+# --unshare-all            pid/net/uts/ipc/user/mount próprios
+# --share-net              menos a rede: instalar depende dela
+# --die-with-parent        se o launcher cair, o port não fica órfão
+# --new-session            sem terminal de controle: Ctrl-C no pai não o mata
+#
+# Expandido SEM aspas de propósito: são literais fixos, sem espaço e sem glob.
+# Caminho que venha de variável (o `$pm`) entra entre aspas, separado.
+BW_BASE="--ro-bind / / --dev-bind /dev /dev --bind /user /user --bind /user/home /root --tmpfs /tmp --proc /proc --unshare-all --share-net --die-with-parent --new-session"
+
+# ── o gamecontrollerdb.txt, e um limite do kernel que ele estoura ──
+#
+# O `control.txt` do PortMaster exporta o mapeamento inteiro numa variável de
+# ambiente:
+#
+#   sdl_controllerconfig="$(< "$SDL_GAMECONTROLLERCONFIG_FILE")"
+#   export SDL_GAMECONTROLLERCONFIG="$sdl_controllerconfig"
+#
+# e o `gamecontrollerdb.txt` deles tem 472 KB. **Uma única string de ambiente
+# não pode passar de MAX_ARG_STRLEN (128 KB)**, então TODO `exec` depois disso
+# falha com `Argument list too long` — medido no R35S em 20/11/2026, e o
+# sintoma não aponta para o mapa: parece binário quebrado.
+#
+# A correção é montar o NOSSO arquivo por cima do deles. São 2 KB, e o efeito
+# colateral é o que se quer: o mapeamento passa a ser o do projeto, com
+# `a = BTN_EAST` (a convenção do plástico, §12.74), em vez do automático do SDL2
+# com `a = BTN_SOUTH`.
+GAMEDB=/etc/giochi/gamecontrollerdb.txt
+if [ -f "$GAMEDB" ]; then
+    BW_BASE="$BW_BASE --ro-bind $GAMEDB $pm/gamecontrollerdb.txt"
+fi
+
+# O `bwrap` roda em SEGUNDO PLANO e o shell espera com `wait`. Não é estilo: um
+# `trap` de shell só roda quando o comando em primeiro plano termina, então um
+# TERM no wrapper ficava ENFILEIRADO enquanto o port rodava — medido no R35S em
+# 20/11/2026, com `timeout 30` e o port seguindo por 152 s. Com `wait`, o sinal
+# interrompe e o trap pode matar o filho (o `bwrap` mata os netos por
+# `--die-with-parent`).
+if [ -n "$PORT_SH" ]; then
+    # `bash`, e não `/bin/sh`: os port scripts usam `exec > >(tee ...)`, que é
+    # sintaxe do bash. O `sh` desta imagem é o busybox ash e morreria nela.
+    if [ -x /bin/bash ]; then PORT_SHELL=/bin/bash; else PORT_SHELL=/bin/sh; fi
+    "$BWRAP" $BW_BASE --chdir "$PORT_DIR" "$PORT_SHELL" "$PORT_SH" "$@" &
+else
+    "$BWRAP" $BW_BASE --chdir "$pm" "$py" ./pugwash "$@" &
+fi
+BW_PID=$!
+
+# O PID do wrapper vai para um arquivo: se ele for morto com `kill -9`, o trap
+# não roda e o marcador ficaria — o `giochi-init` lê este arquivo e se cura.
+if [ "$LIBERAR_DRM" = "1" ]; then
+    echo $$ >"$DEV_FREE_FILE.pid" 2>/dev/null || true
+    trap 'kill -TERM "$BW_PID" 2>/dev/null; wait "$BW_PID" 2>/dev/null; devolver_drm; exit 143' TERM INT
+fi
+
+wait "$BW_PID"
+rc=$?
+
+# O `trap` do EXIT já devolve o marcador; este `exit` só propaga o status da
+# GUI. Sem o trap, um `kill -9` no meio deixaria o aparelho sem interface — e o
+# arquivo pode ser removido à mão por SSH (`rm /run/giochi/dev-free-console`).
+exit $rc

@@ -151,7 +151,7 @@ o que foi medido, e deixar a decisão com quem responde pelo código.
 
 | Verificação | Resultado |
 | --- | --- |
-| `node tests/run-all.mjs` | **652/652 + 1 skip**, 72 arquivos (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, panel-diag 17, gamepad-virtual 12, selftest-contract 21, issues-vizinhos 5, portmaster 7, …) |
+| `node tests/run-all.mjs` | **659/659 + 1 skip**, 72 arquivos (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, panel-diag 17, gamepad-virtual 12, selftest-contract 21, issues-vizinhos 5, portmaster 7, …) |
 | `node scripts/validate-devices.mjs` | OK — 7 devices, 1 habilitado |
 | `node scripts/list-devices.mjs --github-matrix` | matriz com `qemu-aarch64` |
 | matriz com `--device powkiddy-x55 --allow-draft` | devolve **só** o X55 |
@@ -566,7 +566,7 @@ absoluto** do host — §12.40).
 
 ## 10. Testes
 
-`node tests/run-all.mjs` → **652/652 + 1 skip**, em **72 arquivos**. A tabela abaixo é uma
+`node tests/run-all.mjs` → **659/659 + 1 skip**, em **72 arquivos**. A tabela abaixo é uma
 seleção dos que prendem contratos de projeto; a lista completa é `ls tests/` e
 `tests/runner-coverage.test.mjs` **falha** se algum arquivo existir sem estar
 importado no `run-all.mjs` — foi assim que dois testes desta revisão quase
@@ -603,7 +603,7 @@ ficaram fora da contagem.
 | `tests/sdl-input-probe.test.mjs` | 6 | o probe pergunta `SDL_IsGameController` e imprime o mapeamento (não só conta joysticks), não abre vídeo sem `--video` (não rouba o DRM master), cruza `bN`→código evdev, e prende a convenção `a = BTN_EAST` dos mapas contra a do SDL2 com o mapa **medido** no R35S (§12.74) |
 | `tests/gamepad-virtual.test.mjs` | 9 | o controle VIRTUAL: layout canônico igual nos três aparelhos, mapa que troca A/B é traduzido, faixa de eixo normalizada com inversão, `CONFIG_INPUT_UINPUT` no fragmento **e** no gate, GUID do DB casa com o `id` do daemon, `a:b1` e não o automático `b0`, e sem `EVIOCGRAB` (§29) |
 | `tests/portmaster.test.mjs` | 7 | a avaliação do PortMaster: veredito **app de loja** (não imagem), a distinção MIT-da-GUI × GPL-2.0/LGPL-do-payload, os tamanhos medidos, medido ≠ estimado, o gancho `mod_<CFW>.txt`, a invariante de que python3 de alvo só mora no fragmento **opt-in**, e nada do pacote no overlay (§32) |
-| `tests/portmaster-runtime.test.mjs` | 10 | o runtime do PortMaster na imagem: os **seis** símbolos do python3 com o motivo de cada um (`PYEXPAT` e `XZ` só apareceram rodando), `bz2` fora com a justificativa, o desenho do sandbox item por item (`--ro-bind`, `--bind /user`, `--unshare-all`, `--share-net`, `--die-with-parent`), a recusa em rodar sem isolamento, o aviso de `/roms` ausente, o wiring no `build-device.sh` **na chamada** do prepare-config, e o `OS_NAME`/symlink no post-build (§33) |
+| `tests/portmaster-runtime.test.mjs` | 14 | o runtime do PortMaster na imagem: os **seis** símbolos do python3 com o motivo de cada um (`PYEXPAT` e `XZ` só apareceram rodando), `bz2` fora com a justificativa, o desenho do sandbox item por item (`--ro-bind`, `--bind /user`, `--unshare-all`, `--share-net`, `--die-with-parent`), a recusa em rodar sem isolamento, o aviso de `/roms` ausente, o wiring no `build-device.sh` **na chamada** do prepare-config, o `OS_NAME`/symlink no post-build, o encaminhamento de sinal ao `bwrap`, o PID de auto-cura do marcador, o `$HOME` gravável e a troca do `gamecontrollerdb.txt` (§33-§34) |
 
 ## 10-A. O sistema base — acesso antes de interface
 
@@ -7475,3 +7475,64 @@ E a armadilha de diagnóstico: `for p in /proc/[0-9]*; do ... | grep -q
 giochi-init` casa com o **próprio shell** que contém o padrão na linha de
 comando, e `kill` nele derruba a sessão SSH. É o §12.46 do lado do teste; o
 `giochi-selftest` já exclui `$$` e `$PPID`, e um script de teste também precisa.
+
+## 34. Um port de verdade rodando — e os quatro defeitos que só ele mostrou (20/11/2026)
+
+A §33 provou a GUI. Esta prova o **port**: um jogo do registry do PortMaster
+(`FORM`, 125 KB, `rtr: true`, runtime vazio) instalado em `/user/ports` e
+rodando no R35S, dentro do sandbox.
+
+```text
+giochi-ports --rodar form
+
+FORM video: opengles2 renderer, vsync on
+FORM input: controller r36s_Gamepad
+FORM 25 s: chip 69.2 C, clock 1200 MHz, frames 16.7 ms (slowest 17.3), held buttons 00000
+```
+
+**60 fps estáveis** (16,7 ms), 5 framebuffers, `form` como DRM master, botões
+respondendo. `giochi-selftest`: `PASS 42 · WARN 1 · FAIL 0 · SKIP 3`.
+
+### Os quatro defeitos, e nenhum deles aparece sem rodar o jogo
+
+| Sintoma | Causa | Correção |
+| --- | --- | --- |
+| `Permission denied` em **todo** binário do port | layout de instalação: o zip vai em `<ports>/`, não em `<ports>/<nome>/` — é a convenção do EmulationStation (`<ports>/<nome>.sh` + `<ports>/<nome>/`) | `--rodar` aceita os dois layouts, comparando sem caixa |
+| `Argument list too long` em **todo** `exec` | o `control.txt` exporta o `gamecontrollerdb.txt` inteiro (472 KB) em `SDL_GAMECONTROLLERCONFIG`, e **uma string de ambiente não pode passar de `MAX_ARG_STRLEN` (128 KB)** | o nosso DB (2 KB) é montado por cima do deles — e o mapa passa a ser o do projeto (`a = BTN_EAST`, §12.74) |
+| `can't create /root/pm_dialog.txt: Read-only file system` | o sandbox congela `/` e o PortMaster escreve em `$HOME` | `--bind /user/home /root` |
+| `TERM` no wrapper não parava o port | **um `trap` de shell só roda quando o comando em primeiro plano termina** — o sinal ficava em fila enquanto o jogo rodava (medido: `timeout 30`, port seguindo por 152 s) | `bwrap` em segundo plano + `wait`; o trap mata `$BW_PID` |
+
+O segundo é o mais instrutivo: o sintoma acusa **binário quebrado** e a causa é
+uma variável de ambiente grande demais. E o limite é do kernel, não do shell —
+`MAX_ARG_STRLEN` é 32 páginas. Um `gamecontrollerdb.txt` de 472 KB nunca caberia.
+
+### Auto-cura: arquivo de estado sem dono não pode ser definitivo
+
+O `giochi-ports` marca `/run/giochi/dev-free-console` para pegar o DRM, e o
+`giochi-init` respeita o arquivo e **não sobe o launcher**. Matando o wrapper com
+`kill -9`, o `trap` não roda, o marcador fica — e o aparelho volta **sem
+interface**, sem nada dizendo por quê. Aconteceu duas vezes nesta sessão.
+
+Agora o wrapper grava o próprio PID em `dev-free-console.pid`, e o
+`giochi-init` — ao ver o marcador — pergunta se o dono ainda vive:
+`kill -0 "$DEV_PID"`. Dono morto ⇒ remove os dois e volta ao normal. Dois testes
+prendem os dois lados: órfão é removido, **dono vivo é respeitado** (senão a cura
+viraria um `rm` sempre-verde e o launcher subiria por cima do port).
+
+### A regra de operação que custou tempo, de novo
+
+**Não suba um segundo `giochi-init` com o `respawn` do inittab ativo.** Os dois
+sobem launchers que disputam o DRM; o segundo falha cinco vezes e o supervisor
+desiste (`launcher-parado`, `quedas=5`, `ultimo_status=1`) — e o `selftest`
+reporta `DESISTIU` com o aparelho funcionando. É o §12.45 ao contrário: o
+marcador existe para "tela parada", e passa a aparecer com a tela no ar.
+
+Para pegar o DRM: `giochi-ports --liberar-drm`, que é o caminho que devolve a
+interface sozinho. Para depurar sem launcher: `/run/giochi/dev-free-console`.
+
+### O que continua sem medição
+
+Baixar um port **pela GUI**: o aparelho de teste não resolve DNS (o `udhcpd`
+não anuncia gateway nem DNS, por desenho — §12.66 item 1), então tudo rodou em
+modo offline. Liga-se com `ip_forward=1` no aparelho **e** NAT no PC, que exige
+root no host. E `box64`/wine num aparelho de 1 GB — o `FORM` é nativo.

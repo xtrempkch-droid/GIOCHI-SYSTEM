@@ -148,3 +148,65 @@ test("o post-build grava OS_NAME e o symlink /roms", async () => {
   // amostra de 25 ports, 7 citam /roms literalmente.
   assert.match(t, /7 citam/, "o número medido tem de estar no comentário");
 });
+
+test("o giochi-ports encaminha sinal e sabe rodar um port", async () => {
+  const t = await readFile(
+    path.join(ROOT, "device/common/rootfs-overlay/usr/bin/giochi-ports"),
+    "utf8",
+  );
+  // Um `trap` de shell só roda quando o comando em PRIMEIRO PLANO termina. Com o
+  // `bwrap` em foreground, o TERM ficava enfileirado enquanto o jogo rodava —
+  // medido: `timeout 30` e o port seguindo por 152 s, com a interface parada
+  // atrás dele. O `&` + `wait` é o que faz o sinal chegar.
+  assert.match(t, /\$\{BWRAP\}|\$BWRAP[^\n]*&/, "o bwrap tem de rodar em segundo plano");
+  assert.match(t, /wait "\$BW_PID"/);
+  assert.match(t, /kill -TERM "\$BW_PID"/, "o trap tem de matar o filho, não só sair");
+});
+
+test("o marcador tem PID ao lado, e o init se cura quando o dono morre", async () => {
+  const ports = await readFile(
+    path.join(ROOT, "device/common/rootfs-overlay/usr/bin/giochi-ports"),
+    "utf8",
+  );
+  // Arquivo de estado sem dono não pode ser definitivo: `kill -9` no wrapper
+  // deixa o marcador, e o init respeitaria o arquivo e não subiria o launcher —
+  // tela parada, sem nada dizendo por quê.
+  assert.match(ports, /DEV_FREE_FILE\.pid/);
+  const init = await readFile(
+    path.join(ROOT, "device/common/rootfs-overlay/usr/bin/giochi-init"),
+    "utf8",
+  );
+  assert.match(init, /DEV_FREE_FILE\.pid/);
+  assert.match(init, /kill -0 "\$DEV_PID"/, "o init tem de perguntar se o dono ainda vive");
+});
+
+test("$HOME é gravável dentro do sandbox", async () => {
+  // Medido no R35S: `can't create /root/pm_dialog.txt: Read-only file system`.
+  // O `control.txt` e o `PortMasterDialog.txt` escrevem em `$HOME`.
+  const t = await readFile(
+    path.join(ROOT, "device/common/rootfs-overlay/usr/bin/giochi-ports"),
+    "utf8",
+  );
+  assert.match(t, /--bind \/user\/home \/root/);
+});
+
+test("o gamecontrollerdb.txt do PortMaster é substituído pelo nosso", async () => {
+  // O deles tem 472 KB e o `control.txt` o exporta inteiro em
+  // SDL_GAMECONTROLLERCONFIG; uma string de ambiente não passa de 128 KB
+  // (MAX_ARG_STRLEN), então TODO exec falha com "Argument list too long".
+  // O nosso tem 2 KB — e é o mapa do projeto, com `a = BTN_EAST`.
+  const t = await readFile(
+    path.join(ROOT, "device/common/rootfs-overlay/usr/bin/giochi-ports"),
+    "utf8",
+  );
+  assert.match(t, /MAX_ARG_STRLEN|128 KB/);
+  assert.match(t, /--ro-bind \$GAMEDB \$pm\/gamecontrollerdb\.txt/);
+
+  // E o arquivo que ele monta é o nosso, com o GUID do controle virtual.
+  const db = await readFile(
+    path.join(ROOT, "device/common/giochi-gamepad/gamecontrollerdb.txt"),
+    "utf8",
+  );
+  assert.match(db, /06005931091200000100000001000000/);
+  assert.ok(Buffer.byteLength(db) < 128 * 1024, "o DB tem de caber no limite do kernel");
+});

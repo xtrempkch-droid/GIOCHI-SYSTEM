@@ -495,6 +495,19 @@ main() {
         # Verificada a cada volta, então `touch` no meio de uma sessão também
         # funciona — o launcher sai na próxima queda deliberada e não volta.
         if [ -f "$DEV_FREE_FILE" ]; then
+            # AUTO-CURA: quem marca o console livre é o `giochi-ports`, e ele
+            # grava o próprio PID ao lado. Se o wrapper morrer de forma que o
+            # trap não rode (`kill -9`), o marcador ficaria e o aparelho
+            # voltaria SEM interface — medido no R35S em 20/11/2026, ao matar o
+            # wrapper à mão. Um arquivo de estado sem dono não pode ser
+            # definitivo.
+            DEV_PID="$(cat "$DEV_FREE_FILE.pid" 2>/dev/null || true)"
+            if [ -n "$DEV_PID" ] && ! kill -0 "$DEV_PID" 2>/dev/null; then
+                log "console livre órfão (PID $DEV_PID não existe) — removendo e voltando ao normal"
+                rm -f "$DEV_FREE_FILE" "$DEV_FREE_FILE.pid"
+                dev_aviso=0
+                continue
+            fi
             if [ "$dev_aviso" != "1" ]; then
                 log "console livre para desenvolvimento ($DEV_FREE_FILE) — launcher NÃO será iniciado"
                 log "remova o arquivo para voltar ao normal"
