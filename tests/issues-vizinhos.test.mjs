@@ -88,12 +88,30 @@ test("os títulos do README não são o do GIOCHI-GAMES", () => {
     assert.ok(repos.has("GIOCHI-APP") && repos.has("GIOCHI-OS"),
         `faltam os pedidos do APP ou do OS; achei ${[...repos].join(", ")}`);
 
+    // O título tem de ser ESPECÍFICO do assunto do arquivo, e não de uma lista
+    // fixa de palavras. A versão anterior exigia `/joystick|entrada|Gamepad/`
+    // em toda linha da tabela — e reprovou a issue do PortMaster, que é outro
+    // assunto. Cobertura por caso num defeito de classe (§12.50).
+    //
+    // A âncora que continua valendo é a que pega o defeito real de 17/11: o
+    // título do `GAMES #2` colado em todas.
+    const TITULO_DO_GAMES = /Contrato de entrada: mirar o controle virtual/i;
     for (const e of entradas) {
         assert.ok(e.titulo.length > 25,
             `o título de ${e.repo} é curto demais (${e.titulo}) — precisa dizer ` +
             `o que a equipe faz, não o nome do contrato`);
-        assert.match(e.titulo, /joystick|entrada|Gamepad|enumerar|analógico|junção/i,
-            `o título de ${e.repo} não diz sobre o que é: ${e.titulo}`);
+        assert.doesNotMatch(e.titulo, TITULO_DO_GAMES,
+            `${e.repo} está com o título do GAMES #2 — é o defeito de 17/11`);
+
+        // E o título tem de compartilhar assunto com o PRÓPRIO corpo.
+        const corpo = readFileSync(join(PASTA, e.arquivo), "utf8").toLowerCase();
+        const palavras = e.titulo.toLowerCase()
+            .split(/[^a-zà-ú0-9]+/i)
+            .filter((w) => w.length >= 5);
+        const comuns = palavras.filter((w) => corpo.includes(w));
+        assert.ok(comuns.length >= 1,
+            `o título de ${e.arquivo} ("${e.titulo}") não tem nenhuma palavra em ` +
+            `comum com o corpo — um dos dois está no lugar errado`);
     }
 });
 
@@ -102,17 +120,44 @@ test("cada corpo carrega a instrução que aquela equipe precisa seguir", () => 
     // fontes de input dentro do jogo. Colar aquele texto no APP deixa a equipe
     // sem saber o que fazer com o `EvdevInput::open` dela. O recorte é o motivo
     // de os arquivos existirem.
+    // A chave é o ARQUIVO, não o repo: o APP tem duas issues sobre assuntos
+    // diferentes (o contrato de entrada e o PortMaster), e indexar por repo
+    // forçava uma delas a passar sem verificação — ou, pior, a ser verificada
+    // contra o assunto da outra.
     const esperado = {
-        "GIOCHI-APP": /EvdevInput|vigi|enumer/i,
-        "GIOCHI-OS": /jun[çc][ãa]o|imagem/i,
+        "APP-enumeracao-e-analogico.md": /EvdevInput|vigi|enumer/i,
+        "OS-documentar-na-juncao.md": /jun[çc][ãa]o|imagem/i,
+        "APP-ports-e-loja.md": /portmaster|giochi-ports|\/user\/ports/i,
     };
     for (const e of arquivosDaTabela()) {
-        const re = esperado[e.repo];
-        if (!re) continue;
+        const re = esperado[e.arquivo];
+        assert.ok(re,
+            `${e.arquivo} está na tabela sem verificação de conteúdo neste teste — ` +
+            `um corpo trocado passaria. Acrescente o assunto esperado aqui.`);
         const texto = readFileSync(join(PASTA, e.arquivo), "utf8");
         assert.match(texto, re,
             `${e.arquivo} não fala do que ${e.repo} tem de fazer (${re}) — ` +
             `parece ter sido trocado pelo corpo de outra equipe, que é o defeito ` +
             `que aconteceu em 17/11`);
+    }
+});
+
+test("o pedido do PortMaster ao APP existe e é sobre ports, não sobre entrada", () => {
+    // O corpo tem de estar autossuficiente: quem abre a issue no repo do app lê
+    // só ele. Se faltar o comando que roda um port, ou o nome do binário, a
+    // equipe tem de perguntar — e o canal tem janela de horário (§12-B).
+    const texto = readFileSync(join(PASTA, "APP-ports-e-loja.md"), "utf8");
+    for (const obrigatorio of [
+        /giochi-ports/,                 // o binário que eles vão chamar
+        /--rodar/,                      // o argumento
+        /\/user\/apps/,                 // onde o wrapper mora
+        /metadata\.json/,               // o arquivo que a detecção deles lê
+        /kind.*app/i,                   // o campo que decide a aba
+        /Encerrar|encerrar|Painter/,     // o que eles JÁ fazem (o DRM)
+        /sideload/i,                    // o pedido de transparência na loja
+    ]) {
+        assert.match(texto, obrigatorio,
+            `APP-ports-e-loja.md não menciona ${obrigatorio} — o corpo precisa ` +
+            `ser autossuficiente para quem só lê a issue`);
     }
 });

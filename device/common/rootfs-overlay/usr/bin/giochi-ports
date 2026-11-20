@@ -103,10 +103,18 @@ quem_tem_o_drm() {
 DEV_FREE_FILE="${GIOCHI_DEV_FREE_FILE:-/run/giochi/dev-free-console}"
 
 liberar_drm() {
+    # Se ninguém tem o card, NÃO se cria o marcador: é o caso de quem foi
+    # lançado pelo launcher, que já destrói o `Painter` antes do `spawn` e
+    # devolve o DRM master (medido no código deles: "o filho recebe kmsdrm not
+    # available" sem isso). Marcar ali seria mentir para o `giochi-init` sobre um
+    # console que não está livre — e se o port morresse com o marcador, o
+    # launcher não voltaria.
+    pid="$(quem_tem_o_drm)"
+    if [ -z "$pid" ]; then
+        return 0
+    fi
     mkdir -p "$(dirname "$DEV_FREE_FILE")" 2>/dev/null || true
     : >"$DEV_FREE_FILE" || return 1
-    pid="$(quem_tem_o_drm)"
-    [ -z "$pid" ] && return 0
     aviso "liberando o DRM: parando o PID $pid (o launcher) — o supervisor o trará de volta ao sair"
     kill -TERM "$pid" 2>/dev/null || true
     i=0
@@ -347,8 +355,11 @@ BW_PID=$!
 
 # O PID do wrapper vai para um arquivo: se ele for morto com `kill -9`, o trap
 # não roda e o marcador ficaria — o `giochi-init` lê este arquivo e se cura.
+#
+# Só quando o marcador EXISTE: lançado pelo launcher (que já liberou o DRM) não
+# há marcador a proteger, e criar o `.pid` sozinho deixaria lixo no /run.
 if [ "$LIBERAR_DRM" = "1" ]; then
-    echo $$ >"$DEV_FREE_FILE.pid" 2>/dev/null || true
+    [ -f "$DEV_FREE_FILE" ] && { echo $$ >"$DEV_FREE_FILE.pid" 2>/dev/null || true; }
     trap 'kill -TERM "$BW_PID" 2>/dev/null; wait "$BW_PID" 2>/dev/null; devolver_drm; exit 143' TERM INT
 fi
 

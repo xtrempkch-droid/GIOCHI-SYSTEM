@@ -26,6 +26,7 @@ instrução. Selecionar tudo e colar é o passo inteiro.
 | --- | --- | --- | --- |
 | `GIOCHI-APP` | Controle virtual "Giochi Gamepad": preferir na enumeração, e o analógico agora tem faixa única | [`APP-enumeracao-e-analogico.md`](APP-enumeracao-e-analogico.md) | **aberta como `#1`, mas com o corpo errado** — precisa substituir |
 | `GIOCHI-OS` | Documentar e garantir o contrato de entrada: o controle virtual "Giochi Gamepad" na junção | [`OS-documentar-na-juncao.md`](OS-documentar-na-juncao.md) | **aberta como `#1`, mas com o corpo errado** — precisa substituir |
+| `GIOCHI-APP` | PortMaster: listar os ports e oferecer como app de loja (sideload) | [`APP-ports-e-loja.md`](APP-ports-e-loja.md) | **a abrir** — a API não aceita escrita daqui (401) |
 
 Já corretas, não precisam de nada:
 

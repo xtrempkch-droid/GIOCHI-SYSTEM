@@ -312,3 +312,27 @@ test("o replay do gate nos três handhelds está registrado", async () => {
   assert.match(doc, /34 s[íi]mbolos/);
   assert.match(doc, /assert-config/);
 });
+
+test("`--rodar` não marca console livre quando o DRM já está livre", async () => {
+  // O launcher mata o `Painter` antes do `spawn` (medido no código deles:
+  // "o filho recebe kmsdrm not available" sem isso). Então, quando ele chama o
+  // `giochi-ports`, o DRM JÁ está livre — e criar o marcador ali seria mentir
+  // para o `giochi-init` sobre um console que não está livre. Se o port
+  // morresse com o marcador, o launcher não voltaria e a tela ficaria parada.
+  const t = await readFile(
+    path.join(ROOT, "device/common/rootfs-overlay/usr/bin/giochi-ports"),
+    "utf8",
+  );
+
+  // A ordem dentro de `liberar_drm` é o que garante: consulta ANTES de marcar.
+  const fn = t.slice(t.indexOf("liberar_drm()"), t.indexOf("devolver_drm()"));
+  const consulta = fn.indexOf('pid="$(quem_tem_o_drm)"');
+  const marcador = fn.indexOf(': >"$DEV_FREE_FILE"');
+  assert.ok(consulta > 0 && marcador > consulta,
+    "o marcador tem de ser criado DEPOIS de saber quem tem o DRM — senão um " +
+    "console livre de verdade fica marcado como ocupado");
+
+  // E o `.pid` só nasce se o marcador existir.
+  assert.match(t, /\[ -f "\$DEV_FREE_FILE" \] && \{ echo \$\$ >"\$DEV_FREE_FILE\.pid"/,
+    "o `.pid` sem marcador deixaria lixo no /run e o init o leria à toa");
+});

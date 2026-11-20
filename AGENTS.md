@@ -151,7 +151,7 @@ o que foi medido, e deixar a decisão com quem responde pelo código.
 
 | Verificação | Resultado |
 | --- | --- |
-| `node tests/run-all.mjs` | **662/662 + 1 skip**, 72 arquivos (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, panel-diag 17, gamepad-virtual 12, selftest-contract 21, issues-vizinhos 5, portmaster 7, …) |
+| `node tests/run-all.mjs` | **664/664 + 1 skip**, 72 arquivos (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, panel-diag 17, gamepad-virtual 12, selftest-contract 21, issues-vizinhos 5, portmaster 7, …) |
 | `node scripts/validate-devices.mjs` | OK — 7 devices, 1 habilitado |
 | `node scripts/list-devices.mjs --github-matrix` | matriz com `qemu-aarch64` |
 | matriz com `--device powkiddy-x55 --allow-draft` | devolve **só** o X55 |
@@ -566,7 +566,7 @@ absoluto** do host — §12.40).
 
 ## 10. Testes
 
-`node tests/run-all.mjs` → **662/662 + 1 skip**, em **72 arquivos**. A tabela abaixo é uma
+`node tests/run-all.mjs` → **664/664 + 1 skip**, em **72 arquivos**. A tabela abaixo é uma
 seleção dos que prendem contratos de projeto; a lista completa é `ls tests/` e
 `tests/runner-coverage.test.mjs` **falha** se algum arquivo existir sem estar
 importado no `run-all.mjs` — foi assim que dois testes desta revisão quase
@@ -598,12 +598,12 @@ ficaram fora da contagem.
 | `tests/bootlog-dmesg-spam.test.mjs` | 4 | o `awk` REAL do `giochi-bootlog` sobre 300 repetições do charger: agrupa, conta, e **preserva** as duas linhas de `fbcon` que estavam no meio |
 | `tests/hardware-x55.test.mjs` | 5 | o que o X55 desmentiu: `model`×`compatible` normalizados, `present=0` ≠ 0%, fbcon ausente ≠ `CONFIG_ROTATION` desligado, sem `dropbear` no status, `giochi-usb` sem role-switch |
 | `tests/panel-diag.test.mjs` | 17 | a tela que não acende: driver de painel reconhecido nos três nomes (hx8394/st7703/generic-dsi), veredito pela **consequência** (`fb0` + conector) e não pelo nome, o caminho por SSH analisando, `--iface` chegando ao `ssh` como **um** argumento, e o formato real do `giochi-boot.log` |
-| `tests/issues-vizinhos.test.mjs` | 5 | o material que só pode ser colado à mão: corpo inteiro, sem HTML, sem H1, e cada arquivo falando do que **aquela** equipe tem de fazer (trocar dois de lugar reprova) |
+| `tests/issues-vizinhos.test.mjs` | 6 | o material que só pode ser colado à mão: corpo inteiro, sem HTML, sem H1, cada arquivo falando do que **aquela** equipe tem de fazer (trocar dois de lugar reprova), título que não é o do `GAMES #2` e que casa com o próprio corpo, e o pedido do PortMaster autossuficiente (§35) |
 | `tests/gamepad-virtual.test.mjs` | 12 | o contrato de entrada: GUID recalculado por `crc16` do nome (não literal copiado), `a:b1`, sem `EVIOCGRAB`, e a guarda do `HOST_DIR` no post-build |
 | `tests/sdl-input-probe.test.mjs` | 6 | o probe pergunta `SDL_IsGameController` e imprime o mapeamento (não só conta joysticks), não abre vídeo sem `--video` (não rouba o DRM master), cruza `bN`→código evdev, e prende a convenção `a = BTN_EAST` dos mapas contra a do SDL2 com o mapa **medido** no R35S (§12.74) |
 | `tests/gamepad-virtual.test.mjs` | 9 | o controle VIRTUAL: layout canônico igual nos três aparelhos, mapa que troca A/B é traduzido, faixa de eixo normalizada com inversão, `CONFIG_INPUT_UINPUT` no fragmento **e** no gate, GUID do DB casa com o `id` do daemon, `a:b1` e não o automático `b0`, e sem `EVIOCGRAB` (§29) |
 | `tests/portmaster.test.mjs` | 7 | a avaliação do PortMaster: veredito **app de loja** (não imagem), a distinção MIT-da-GUI × GPL-2.0/LGPL-do-payload, os tamanhos medidos, medido ≠ estimado, o gancho `mod_<CFW>.txt`, a invariante de que python3 de alvo só mora no fragmento **opt-in**, e nada do pacote no overlay (§32) |
-| `tests/portmaster-runtime.test.mjs` | 17 | o runtime do PortMaster na imagem: os **seis** símbolos do python3 com o motivo de cada um (`PYEXPAT` e `XZ` só apareceram rodando), `bz2` fora com a justificativa, o desenho do sandbox item por item (`--ro-bind`, `--bind /user`, `--unshare-all`, `--share-net`, `--die-with-parent`), a recusa em rodar sem isolamento, o aviso de `/roms` ausente, o wiring no `build-device.sh` **na chamada** do prepare-config, o `OS_NAME`/symlink no post-build, o encaminhamento de sinal ao `bwrap`, o PID de auto-cura do marcador, o `$HOME` gravável e a troca do `gamecontrollerdb.txt` (§33-§34) |
+| `tests/portmaster-runtime.test.mjs` | 18 | o runtime do PortMaster na imagem: os **seis** símbolos do python3 com o motivo de cada um (`PYEXPAT` e `XZ` só apareceram rodando), `bz2` fora com a justificativa, o desenho do sandbox item por item (`--ro-bind`, `--bind /user`, `--unshare-all`, `--share-net`, `--die-with-parent`), a recusa em rodar sem isolamento, o aviso de `/roms` ausente, o wiring no `build-device.sh` **na chamada** do prepare-config, o `OS_NAME`/symlink no post-build, o encaminhamento de sinal ao `bwrap`, o PID de auto-cura do marcador, o `$HOME` gravável, a troca do `gamecontrollerdb.txt`, o `--rodar` que não marca console livre quando o DRM já está livre, e a checagem de símbolo contra o Kconfig real (§33-§35) |
 
 ## 10-A. O sistema base — acesso antes de interface
 
@@ -7536,3 +7536,55 @@ Baixar um port **pela GUI**: o aparelho de teste não resolve DNS (o `udhcpd`
 não anuncia gateway nem DNS, por desenho — §12.66 item 1), então tudo rodou em
 modo offline. Liga-se com `ip_forward=1` no aparelho **e** NAT no PC, que exige
 root no host. E `box64`/wine num aparelho de 1 GB — o `FORM` é nativo.
+
+## 35. O contrato com o launcher, e a issue que ele gerou (20/11/2026)
+
+Fechamento da §34: o pedido para o `Giochi app` está escrito e versionado em
+[`docs/issues-para-outros-repos/APP-ports-e-loja.md`](docs/issues-para-outros-repos/APP-ports-e-loja.md).
+O que a leitura do código deles **mudou** no pedido vale registrar.
+
+### O `exec` do §11 não é necessário para isto
+
+Eu ia pedir o `exec` (que o `docs/integracao.md` deles trata como decisão
+futura). Lido o `app/launcher/crates/ui-sdl/src/main.rs`, o launcher **já faz**:
+
+```rust
+// Consome o `App`: o `Painter` morre aqui e o DRM master é liberado.
+// Sem isso o filho recebe `kmsdrm not available` — medido no X35H.
+let estado = app.encerrar();
+match system::lancar_com_saida(&alvo, Some(&map)) { ... }
+```
+
+Ou seja: quando o launcher lança um filho, o DRM **já está livre**. O
+`kmsdrm not available` que eu media acontecia porque o `giochi-ports` estava
+sendo chamado **fora** do ciclo do launcher.
+
+Consequência de desenho: o pedido reduziu a **formato de alvo**, e a forma
+recomendada não exige mudança nenhuma no app — o PortMaster publica
+`/user/apps/<slug>/` com `metadata.json {"kind":"app"}` e um `entrypoint` que
+faz `exec giochi-ports --rodar <nome>`. O `RAIZ_APP_USUARIO` deles já detecta.
+
+### E isso exigiu um ajuste aqui
+
+`liberar_drm` marcava `/run/giochi/dev-free-console` **antes** de consultar quem
+tinha o card. No caminho do launcher o card já está livre, então ele criava o
+marcador sem motivo — e, se o port morresse com o marcador, o `giochi-init` não
+subiria o launcher e a tela ficaria parada. Agora a consulta vem primeiro, e o
+`.pid` só nasce se o marcador existir. Medido no R35S: `--rodar form` com o DRM
+livre roda o port e **não** deixa marcador nem `.pid`.
+
+### A lição de método
+
+O pedido a outra equipe só é preciso depois de ler o **código** dela, não a
+documentação dela. O `docs/integracao.md` do app descreve o `exec` como decisão
+futura, e eu ia pedir algo que já não era o gargalo — o `encerrar()` do
+`Painter` resolve. Ler o fonte custou menos que uma rodada de ida e volta no
+canal.
+
+E o teste das issues versionadas tinha o mesmo vício que ele existe para
+prevenir: exigia `/joystick|entrada|Gamepad/` no título de **toda** linha da
+tabela, e reprovou a issue do PortMaster, que é outro assunto. Trocado por duas
+invariantes de classe: o título não pode ser o do `GAMES #2` (o defeito real de
+17/11) e tem de compartilhar assunto com o próprio corpo. A verificação de
+conteúdo passou a ser indexada por **arquivo**, não por repo — o APP tem duas
+issues de assuntos diferentes.

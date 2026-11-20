@@ -421,18 +421,60 @@ desenha, com o rootfs congelado. O que **não** provou: um port baixado e jogado
 
 ## 9. O que falta, e é do `Giochi app`
 
-Só uma peça: o launcher precisa **sair** (ou fazer `exec`) antes de abrir o
-PortMaster, porque o KMSDRM é exclusivo — medido duas vezes, no `kmscube`
-(§12.72) e aqui. Sem isso, `giochi-ports` responde `kmsdrm not available` e a
-tela não muda.
+Lido no código deles em 20/11/2026 (`app/launcher/crates/ui-sdl/src/main.rs`,
+`catalogo.rs`, `system.rs`), o launcher **já faz a parte difícil**:
 
-A ordem que funciona hoje, e não exige código novo do app:
-
-```text
-giochi-init → launcher (DRM) → usuário escolhe "Ports"
-           → launcher SAI → giochi-ports (DRM) → GUI
-           → GUI sai → ::respawn: sobe o launcher de novo
+```rust
+// Consome o `App`: o `Painter` morre aqui e o DRM master é liberado.
+// Sem isso o filho recebe `kmsdrm not available` — medido no X35H.
+let estado = app.encerrar();
+match system::lancar_com_saida(&alvo, Some(&map)) { ... }
 ```
 
-O `::respawn:` do inittab já devolve o launcher quando o `giochi-ports` termina.
-É o mesmo ciclo que o `giochi-godot` usa (§ godot.fragment).
+Ou seja: o `exec` que o `docs/integracao.md` deles trata como decisão futura
+**não é necessário** para isto. Quando o launcher lança um filho, o DRM já está
+livre. O `kmsdrm not available` que eu media acontecia porque o `giochi-ports`
+estava sendo chamado **fora** do ciclo do launcher.
+
+O que falta é só o **formato do alvo**. Duas formas, e a primeira não exige
+mudança nenhuma no app:
+
+### A. Wrapper em `/user/apps` — zero mudança no launcher
+
+O `Alvo` deles é `{ dir, entrypoint }` e executa `<dir>/<entrypoint>` com
+`cwd = dir`, sem argumentos. Então o PortMaster publica, por port:
+
+```text
+/user/apps/<slug>/
+├── metadata.json    {"kind": "app", "name": "<título>"}
+└── <slug>           #!/bin/sh
+                     exec giochi-ports --rodar <nome>
+```
+
+`/user/apps` já é detectado (`RAIZ_APP_USUARIO` em `deteccao.rs`), `kind: "app"`
+já decide a aba, e `giochi-ports` faz o resto. **Nada a mudar no launcher.**
+
+E o `--rodar` foi ajustado para este caminho: quando o DRM já está livre (o caso
+do launcher), ele **não** cria o marcador de console livre nem o `.pid` —
+medido no R35S em 20/11/2026. Marcar ali seria mentir ao `giochi-init` sobre um
+console que não está livre, e se o port morresse com o marcador o launcher não
+voltaria.
+
+### B. Aba "Ports" própria — exige `args` no `Alvo`
+
+Só vale se quiserem os ports separados dos apps. O `Alvo` ganharia
+`args: Vec<String>` (vazio por padrão, que é o caso de todo jogo e app de hoje),
+e a detecção uma raiz `/user/ports`. É **aditivo**: nada instalado precisa ser
+reempacotado.
+
+### A ordem que funciona hoje, sem código novo
+
+```text
+giochi-init → launcher (DRM) → usuário escolhe o port
+           → launcher encerra o Painter (já faz)
+           → giochi-ports --rodar (DRM livre) → port
+           → port sai → launcher volta, criando a janela do zero
+```
+
+O pedido está versionado em
+[`issues-para-outros-repos/APP-ports-e-loja.md`](issues-para-outros-repos/APP-ports-e-loja.md).
