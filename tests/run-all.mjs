@@ -73,3 +73,4 @@ import "./entrada-probe.test.mjs";
 import "./panel-diag.test.mjs";
 import "./issues-vizinhos.test.mjs";
 import "./release-e-gz.test.mjs";
+import "./portmaster.test.mjs";

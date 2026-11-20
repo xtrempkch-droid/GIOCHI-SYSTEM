@@ -38,6 +38,10 @@
   gamepad. Licença BSD-3/MIT e evdev **funcionam**; falta backend de janela em
   KMSDRM no pyglet (só há X11). O remendo de geometry shader foi **medido** em
   [`scripts/arcade-probe/`](../scripts/arcade-probe/README.md) e funciona.
+- [PortMaster: dá para pôr?](evaluacao-portmaster.md) — a GUI é **MIT**, mas o
+  pacote traz `gptokeyb2` (**GPL-2.0**) e 7-Zip (**LGPL**): cabe como **app de
+  loja** em `/user`, não na imagem. Números medidos (24,6 MB de pacote,
+  614 MiB–1,87 GiB de runtimes) e as três peças de integração que faltam.
 - [Driver de GPU: a decisão](gpu-drivers.md) — o que acontece se o panfrost
   nunca tiver geometry shader. O driver bloqueia **exatamente uma** coisa
   (arcade sem patch); launcher e Godot Compatibility passam. As três saídas e

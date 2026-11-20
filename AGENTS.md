@@ -151,7 +151,7 @@ o que foi medido, e deixar a decisão com quem responde pelo código.
 
 | Verificação | Resultado |
 | --- | --- |
-| `node tests/run-all.mjs` | **607/607 + 1 skip**, 66 arquivos (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, panel-diag 17, gamepad-virtual 12, selftest-contract 21, issues-vizinhos 5, …) |
+| `node tests/run-all.mjs` | **641/641 + 1 skip**, 67 arquivos (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, panel-diag 17, gamepad-virtual 12, selftest-contract 21, issues-vizinhos 5, portmaster 7, …) |
 | `node scripts/validate-devices.mjs` | OK — 7 devices, 1 habilitado |
 | `node scripts/list-devices.mjs --github-matrix` | matriz com `qemu-aarch64` |
 | matriz com `--device powkiddy-x55 --allow-draft` | devolve **só** o X55 |
@@ -566,7 +566,7 @@ absoluto** do host — §12.40).
 
 ## 10. Testes
 
-`node tests/run-all.mjs` → **607/607 + 1 skip**, em **66 arquivos**. A tabela abaixo é uma
+`node tests/run-all.mjs` → **641/641 + 1 skip**, em **67 arquivos**. A tabela abaixo é uma
 seleção dos que prendem contratos de projeto; a lista completa é `ls tests/` e
 `tests/runner-coverage.test.mjs` **falha** se algum arquivo existir sem estar
 importado no `run-all.mjs` — foi assim que dois testes desta revisão quase
@@ -602,6 +602,7 @@ ficaram fora da contagem.
 | `tests/gamepad-virtual.test.mjs` | 12 | o contrato de entrada: GUID recalculado por `crc16` do nome (não literal copiado), `a:b1`, sem `EVIOCGRAB`, e a guarda do `HOST_DIR` no post-build |
 | `tests/sdl-input-probe.test.mjs` | 6 | o probe pergunta `SDL_IsGameController` e imprime o mapeamento (não só conta joysticks), não abre vídeo sem `--video` (não rouba o DRM master), cruza `bN`→código evdev, e prende a convenção `a = BTN_EAST` dos mapas contra a do SDL2 com o mapa **medido** no R35S (§12.74) |
 | `tests/gamepad-virtual.test.mjs` | 9 | o controle VIRTUAL: layout canônico igual nos três aparelhos, mapa que troca A/B é traduzido, faixa de eixo normalizada com inversão, `CONFIG_INPUT_UINPUT` no fragmento **e** no gate, GUID do DB casa com o `id` do daemon, `a:b1` e não o automático `b0`, e sem `EVIOCGRAB` (§29) |
+| `tests/portmaster.test.mjs` | 7 | a avaliação do PortMaster: veredito **app de loja** (não imagem), a distinção MIT-da-GUI × GPL-2.0/LGPL-do-payload, os tamanhos medidos, medido ≠ estimado, o gancho `mod_<CFW>.txt`, e as duas premissas que, se virarem falsas, mudam o veredito (imagem sem python3; nada embarcado no overlay) (§32) |
 
 ## 10-A. O sistema base — acesso antes de interface
 
@@ -7300,3 +7301,82 @@ Duas consequências de planejamento, e a segunda é a que muda decisão:
   com a sequência errada costuma deixar a tela apagada *e* o link DSI travado,
   então a segunda tentativa não aconteceria no mesmo boot. É por isso que a
   escolha tem de ser declarada, não tentada.
+
+## 32. PortMaster: cabe como app de loja, não na imagem (20/11/2026)
+
+Pergunta do dono do projeto: *"olhando nosso repositório, seria possível pôr o
+PortMaster? e qual custo"*. A resposta é **sim, com uma condição de lugar** —
+avaliação completa em
+[`docs/evaluacao-portmaster.md`](docs/evaluacao-portmaster.md), presa por
+`tests/portmaster.test.mjs`.
+
+### O que foi medido (release `2026.11.17-0700`)
+
+| Peça | Número | Consequência |
+| --- | --- | --- |
+| `PortMaster-GUI` | **MIT** | passa na regra de licença |
+| `PortMaster.zip` | **24 642 993 B** | é o pacote inteiro, com os binários |
+| `PortMaster/pugwash` | 3 087 B, `#!/usr/bin/env python3` | **precisa de python3 no aparelho** |
+| `PortMaster-New` | MIT, `ports/` com **≥1000** entradas | catálogo, não pacote |
+| `runtimes.popular.aarch64.zip` | **644 376 025 B** | o conjunto "popular" no cartão |
+| `runtimes.all.aarch64.zip` | **2 007 136 147 B** | o conjunto completo |
+
+E o detalhe que decide: o pacote traz **`gptokeyb2` (GPL-2.0)** e
+**7-Zip (`7zzs`, LGPL-2.1 + unRAR)**. Pela regra do §15 — GPL/AGPL/LGPL fora da
+imagem assinada — **embarcar está bloqueado por licença**, e isso não depende de
+tamanho.
+
+### O que já temos (medido, não suposto)
+
+`CONFIG_SQUASHFS=y`, `CONFIG_BLK_DEV_LOOP=y`, `CONFIG_TMPFS=y` no kernel dos dois
+handhelds em cache; `losetup`, `mount -o loop`, `unzip` e `tar` no busybox 1.37.0;
+`/dev/uinput` e o controle virtual com GUID estável (§29); SDL2 com KMSDRM. Ou
+seja: **a camada difícil existe**. Falta python3 e configuração.
+
+### O que falta, e onde
+
+1. **python3** — não está na imagem (só como `BR2_TARGET_UBOOT_NEEDS_PYTHON3`, de
+   host). Buildroot 2025.02 traz 3.12.9; bastam `SSL`, `ZLIB`, `UNICODEDATA`
+   (`idna` importa `unicodedata`) e o `libffi` que o `ctypes` já puxa.
+   **15–25 MB, estimado** — o comando para medir está no documento.
+2. **o diretório dos ports** — `control.txt` fixa `/$directory/ports` com
+   `directory=roms`, e nós não temos `/roms`. O gancho oficial é
+   `mod_<CFW>.txt`, que roda depois do `control.txt` e antes de cada port
+   calcular `GAMEDIR`: um `export directory=user` leva tudo para `/user/ports`,
+   que já está declarado no `pontos-de-montagem`. Precisa de `OS_NAME=Giochi` no
+   `/etc/os-release` (hoje o nosso nome está em `/etc/giochi-system-release`, que
+   ele não lê).
+3. **o launcher** — enumerar `/user/ports/*.sh` e **fechar o DRM antes** de abrir
+   o PortMaster (KMSDRM é exclusivo, §12.72). É o `exec` do §11, que é do
+   `Giochi app`.
+4. **RetroArch**, para a família de ports libretro: medido em `ports/2048` — o
+   script chama `retroarch -L 2048_libretro.so`, e o `port.json` dele diz
+   `"runtime": null`. O metadado não avisa; o script sim.
+
+### O veredito, e o que ele não é
+
+- **A (recomendado):** PortMaster como **app de loja** em `/user` — 0 MB de
+  imagem, 24,6 MB + runtimes no cartão, licença ok, e o python podendo vir como
+  payload do app (o `forge.json` já tem `runtime`: `godot | retroarch | proton`).
+- **B (bloqueado):** embarcar — bate no §4 do documento e na regra do §15.
+- **C:** não fazer. É o estado atual; o custo é a funcionalidade.
+
+**O segundo bloqueio não é técnico, é de confiança:** o PortMaster baixa `.zip`
+sem assinatura e executa o `.sh` de dentro **como root**, porque os ports montam
+squashfs (`stardewvalley` monta `mono-…squashfs` com `$ESUDO mount`). Isso é o
+oposto do contrato das duas chaves (§12.41). Se entrar, entra como **sideload
+declarado** — e o launcher precisa marcar esses jogos como não assinados.
+
+### O que NÃO está medido
+
+O tamanho real do python3; se o `pugwash` **sobe** numa CFW desconhecida (lido no
+código: nada aborta — mas ler não é rodar); RetroArch; e o desempenho de
+`box64`/wine num aparelho de 1 GB. O primeiro teste é de **10 minutos e zero
+build**: extrair o `PortMaster.zip` em `/user/ports` no aparelho livre, com um
+`mod_Buildroot.txt` de três linhas, e chamar `./pugwash`.
+
+**A lição de método, se ela aparecer de novo:** a pergunta "dá para pôr X?" tem
+três respostas diferentes — *dá para embarcar*, *dá para instalar* e *dá para
+rodar*. Aqui a primeira é a que está bloqueada, e as outras duas são baratas. É a
+mesma separação do `libmali` (§15): o que não pode entrar na imagem assinada pode
+entrar pela loja, e essa distinção é de licença antes de ser de espaço.
