@@ -728,6 +728,50 @@ else
     skip "sem controle virtual — imagem anterior ao contrato de entrada"
 fi
 
+# ── ports de terceiros (PortMaster) ──────────────────────────
+#
+# Mesma lógica de três estados do controle virtual: o que existe é PROMETIDO.
+# Sem este bloco, quem instala o PortMaster em /user/ports vê o ícone não abrir e
+# não tem por onde começar — e as três peças que faltam (python3, bwrap, /roms)
+# falham de formas diferentes e silenciosas.
+PM_DIR=/user/ports/PortMaster
+if [ -f "$PM_DIR/pugwash" ] || [ -f /usr/bin/giochi-ports ]; then
+    PM_FALTA=""
+    command -v python3 >/dev/null 2>&1 || PM_FALTA="$PM_FALTA python3"
+    command -v bwrap   >/dev/null 2>&1 || PM_FALTA="$PM_FALTA bubblewrap"
+
+    if [ ! -f "$PM_DIR/pugwash" ]; then
+        # Metade do caminho: o runtime está na imagem e o pacote não está
+        # instalado. Isso é o normal de quem buildou sem instalar — não é FAIL.
+        if [ -n "$PM_FALTA" ]; then
+            fail "runtime de ports incompleto — falta:$PM_FALTA"
+            say "         o PortMaster é instalado em /user, mas o interpretador e o"
+            say "         sandbox vêm da imagem (GIOCHI_WITH_PORTMASTER=1 no build)"
+        else
+            pass "runtime de ports pronto (python3 + bwrap); PortMaster ainda não instalado"
+            say "         instale o .zip em $PM_DIR — veja docs/evaluacao-portmaster.md"
+        fi
+    elif [ -n "$PM_FALTA" ]; then
+        fail "PortMaster instalado mas NÃO roda — falta:$PM_FALTA"
+        say "         o pugwash é '#!/usr/bin/env python3' e é o sandbox que impede"
+        say "         o código dos ports de escrever no rootfs"
+    elif [ ! -d /roms ]; then
+        # Medido no R35S em 20/11/2026: sem /roms o control.txt do PortMaster
+        # falha em SILÊNCIO ao carregar funcs.txt, e os ports seguem sem
+        # pm_finish/pm_message — o jogo abre e não termina direito.
+        fail "PortMaster instalado, mas /roms não existe"
+        say "         o control.txt deriva controlfolder de '/\$directory/ports/PortMaster'"
+        say "         e sem /roms falha em silêncio; a imagem deve trazer /roms -> /user"
+    else
+        PM_VER=$(cat "$PM_DIR/version" 2>/dev/null || echo "?")
+        pass "PortMaster $PM_VER instalado, com python3, sandbox e /roms"
+        say "         rode com: giochi-ports   (a GUI precisa do DRM, então o"
+        say "         launcher tem de sair antes — é o exec pendente no §11)"
+    fi
+else
+    skip "sem runtime de ports — imagem sem GIOCHI_WITH_PORTMASTER"
+fi
+
 # ── áudio ────────────────────────────────────────────────────
 head2 "áudio"
 

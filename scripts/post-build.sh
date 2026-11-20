@@ -270,6 +270,61 @@ if [ -n "${GIOCHI_BUILD_INFO_LINHAS:-}" ]; then
     echo "post-build: /etc/giochi/build-info.txt gravado"
 fi
 
+# ── /etc/os-release: o nome da distro é o que terceiros leem ──
+#
+# O Buildroot **sempre** regrava `/usr/lib/os-release` em `target-finalize`,
+# com `NAME=Buildroot` cravado (Makefile, linha 772 do 2025.02). Um arquivo no
+# overlay seria sobrescrito — mas o post-build roda DEPOIS daquela escrita
+# (linha 808), então aqui é o lugar certo.
+#
+# Por que isto importa, medido no R35S em 20/11/2026 com o `control.txt` do
+# PortMaster: ele resolve o nome do sistema por `OS_NAME` → `NAME` → `ID`, e
+# com o `os-release` do Buildroot o resultado é `CFW_NAME=Buildroot` — um nome
+# que colide com qualquer outra imagem Buildroot do mundo, e que fez o
+# `source $controlfolder/mod_${CFW_NAME}.txt` procurar `mod_Buildroot.txt`.
+#
+# `OS_NAME` vem primeiro na lista deles justamente para quem tem nome de
+# produto em cima de uma base genérica. É o nosso caso.
+mkdir -p "$TARGET_DIR/usr/lib"
+if [ -f "$TARGET_DIR/etc/giochi-system-release" ]; then
+    # O nosso já tem NAME/ID/PRETTY_NAME com o produto. Só falta o OS_NAME, e
+    # os campos que o Buildroot publica e que algum software pode ler.
+    {
+        cat "$TARGET_DIR/etc/giochi-system-release"
+        echo "OS_NAME=\"Giochi\""
+        echo "VERSION_ID=\"${GIOCHI_VERSION_ID:-1.0.0}\""
+        echo "BUILDROOT_VERSION=\"${GIOCHI_BUILDROOT_VERSION:-2025.02}\""
+    } >"$TARGET_DIR/usr/lib/os-release"
+    # O /etc/os-release do Buildroot é symlink para cá; recria por garantia
+    # (o `ln -sf` do Buildroot aponta para ../usr/lib/os-release a partir de /etc).
+    rm -f "$TARGET_DIR/etc/os-release"
+    ln -sf ../usr/lib/os-release "$TARGET_DIR/etc/os-release"
+    echo "post-build: /etc/os-release com OS_NAME=Giochi (NAME/ID do produto)"
+else
+    echo "post-build: AVISO — /etc/giochi-system-release ausente;" >&2
+    echo "post-build:         o os-release fica o do Buildroot (NAME=Buildroot)." >&2
+fi
+
+# ── /user e /roms → /user: o diretório de dados que existe sempre ──
+#
+# O contrato do app (§12.41) reserva `/user` para dados do usuário, e a
+# partição de dados que monta ali ainda não está implementada. Enquanto ela não
+# existe, `/user` é um diretório no rootfs — e é o que permite o PortMaster
+# instalar e rodar hoje, sem esperar a partição.
+#
+# `/roms` é o nome que o PortMaster espera. Medido numa amostra de 25 ports do
+# registry (20/11/2026): **7 citam `/roms/` literalmente** e 7 usam
+# `$directory`. Reescrever `directory` no `mod_<CFW>.txt` conserta os 7 do
+# segundo grupo e deixa os outros 7 apontando para um caminho inexistente — por
+# isso o symlink, que conserta os dois. O `directory` fica `roms`, que é o
+# default deles e o que menos surpreende código de terceiro.
+#
+# Os dois são aditivos: se a partição de dados passar a montar em /user, o
+# symlink continua válido e o mkdir vira no-op sob a montagem.
+mkdir -p "$TARGET_DIR/user"
+ln -sfn /user "$TARGET_DIR/roms"
+echo "post-build: /user criado e /roms -> /user (caminho que o PortMaster espera)"
+
 # ── script de init sem +x é serviço que não sobe, em silêncio ──
 #
 # `rcS` e `rcK` chamam cada `/etc/init.d/S??*` como `$i start` / `$i stop`.

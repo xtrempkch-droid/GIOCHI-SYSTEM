@@ -450,6 +450,17 @@ main() {
     dev_aviso=0
     headless_aviso=0
 
+    # Uma arrancada nova é uma cota nova — então o rastro da desistência
+    # anterior sai. Sem isto, quem reinicia o serviço à mão (ou quem matou o
+    # launcher de propósito para pegar o DRM master, medido em 20/11/2026)
+    # deixa o marcador no disco para sempre, e o `giochi-selftest` reporta
+    # `[FAIL] giochi-init DESISTIU` num aparelho que está com a interface no ar.
+    #
+    # Um FAIL falso é pior que teste nenhum: ele ensina o operador a ignorar o
+    # bloco inteiro (§12.34, §12.22). Se o launcher continuar quebrado, a
+    # desistência é regravada normalmente depois das $RESTART_MAX quedas.
+    rm -f "$PARADA_FILE" 2>/dev/null || true
+
     while :; do
         # Alvo sem tela — declarado pelo aparelho, não adivinhado.
         #

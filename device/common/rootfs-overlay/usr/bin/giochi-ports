@@ -1,0 +1,173 @@
+#!/bin/sh
+# ============================================================
+# giochi-ports — roda o PortMaster sem entregar o aparelho a ele
+# ============================================================
+# giochi-system:help:begin
+# Uso:
+#   giochi-ports                 # abre a GUI do PortMaster (em sandbox)
+#   giochi-ports --sem-sandbox   # roda direto, SEM isolamento (por sua conta)
+#   giochi-ports --status        # onde ele está, e se o sandbox está disponível
+#   giochi-ports -- <args>       # argumentos vão para o pugwash
+# giochi-system:help:end
+#
+# ## Por que isto existe
+#
+# O PortMaster é uma loja de "ports": ele baixa um `.zip` de um repositório
+# público, **sem assinatura**, e executa o `.sh` de dentro **como root** — porque
+# os ports montam squashfs (`$ESUDO mount mono-….squashfs`) e mexem em
+# `/dev/tty0`. O código que roda ali é de terceiros, e não passa por nenhuma
+# chave nossa (o contrato das duas chaves é o §12.41 do AGENTS).
+#
+# A resposta não é "confiar". É **cercar**: o `bubblewrap` põe o processo num
+# namespace com o rootfs em somente-leitura. O port continua rodando, e o que ele
+# não pode mais é instalar binário em `/usr/bin`, alterar `/etc`, matar o
+# launcher ou enxergar o cartão inteiro.
+#
+# ## O que o sandbox garante, e o que NÃO garante
+#
+# Garante (medido, `tests/portmaster.test.mjs` prende o desenho):
+#   - rootfs (`/`) somente-leitura — o pior estrago possível some;
+#   - `/user` só — o resto do disco não aparece;
+#   - PID/net/UTS/IPC namespaces próprios — não vê nem mata processo de fora;
+#   - `/tmp` próprio.
+#
+# NÃO garante:
+#   - **privacidade de dados**: `/user` é gravável e é onde ficam os jogos. Um
+#     port malicioso pode apagar os jogos do usuário. Isto é inerente: o
+#     PortMaster *é* um instalador, ele precisa escrever ali;
+#   - **contenção de recursos**: não há cgroup/limite de CPU ou RAM;
+#   - **rede**: é compartilhada de propósito (§ abaixo).
+#
+# Como o sistema inteiro roda como root, o processo continua sendo root **dentro**
+# do namespace. O ganho não é "virar usuário sem privilégio" — é "não alcançar o
+# que está fora das montagens", que é o que os namespaces dão de graça.
+#
+# ## Por que a rede é compartilhada
+#
+# Baixar port e runtime é a função dele. `--unshare-net` deixaria a GUI abrir e
+# não instalar nada — defeito silencioso, do tipo que este repositório combate
+# (§12.15). O que se isola é o filesystem e os processos, não a rede.
+#
+# ## Por que `/dev` inteiro e não um `/dev` mínimo
+#
+# O port precisa de `/dev/dri` (desenhar), `/dev/input` (botões), `/dev/uinput`
+# (o `gptokeyb`), `/dev/tty0` (o `printf '\033c'` deles) e `/dev/snd` (áudio).
+# Montar só esses à mão é mais seguro no papel e frágil na prática: cada port
+# novo pode pedir outro nó, e o sintoma seria "o jogo não abre" — a família do
+# §12.15. O `--dev-bind` mantém o `/dev` do aparelho.
+
+set -u
+
+PORTS_DIR=/user/ports
+PM_DIR="$PORTS_DIR/PortMaster"
+BWRAP="$(command -v bwrap 2>/dev/null || true)"
+
+aviso() { echo "giochi-ports: $*" >&2; }
+
+achar_pm() {
+    for d in "$PM_DIR" /roms/ports/PortMaster /opt/tools/PortMaster /PortMaster; do
+        if [ -f "$d/pugwash" ]; then
+            echo "$d"
+            return 0
+        fi
+    done
+    return 1
+}
+
+achar_python() {
+    for p in /usr/bin/python3 /usr/local/bin/python3; do
+        [ -x "$p" ] && { echo "$p"; return 0; }
+    done
+    return 1
+}
+
+modo="${1:-}"
+case "$modo" in
+    --help|-h)
+        sed -n '/giochi-system:help:begin/,/giochi-system:help:end/p' "$0" \
+            | grep -v 'giochi-system:help:'
+        exit 0
+        ;;
+    --status)
+        pm="$(achar_pm || true)"
+        py="$(achar_python || true)"
+        echo "PortMaster:  ${pm:-ausente} (procurei em $PM_DIR, /roms/ports, /opt/tools, /PortMaster)"
+        echo "python3:     ${py:-AUSENTE — ligue GIOCHI_WITH_PORTMASTER=1 no build}"
+        echo "sandbox:     ${BWRAP:-AUSENTE — ligue GIOCHI_WITH_PORTMASTER=1 no build}"
+        if [ -n "$pm" ]; then
+            echo "versao:      $(cat "$pm/version" 2>/dev/null || echo '(arquivo version ausente)')"
+        fi
+        if [ -n "$pm" ] && [ -n "$py" ] && [ -n "$BWRAP" ]; then
+            echo "estado:      pronto (com sandbox)"
+        elif [ -n "$pm" ] && [ -n "$py" ]; then
+            echo "estado:      roda, mas SEM sandbox -- o codigo dos ports corre solto"
+        else
+            echo "estado:      nao roda ainda"
+        fi
+        exit 0
+        ;;
+    --sem-sandbox)
+        shift
+        ;;
+esac
+
+pm="$(achar_pm)" || {
+    aviso "PortMaster nao encontrado."
+    aviso "Instale em $PM_DIR (o .zip do PortMaster, extraido)."
+    aviso "Veja docs/evaluacao-portmaster.md."
+    exit 1
+}
+
+py="$(achar_python)" || {
+    aviso "python3 ausente: o pugwash e '#!/usr/bin/env python3'."
+    aviso "A imagem precisa de GIOCHI_WITH_PORTMASTER=1 no build."
+    exit 1
+}
+
+# O control.txt do PortMaster resolve o diretorio dos ports por
+# '/$directory/ports/PortMaster'. O symlink /roms -> /user (criado pelo
+# post-build) e o que faz esse caminho existir. Sem ele, o control.txt falha em
+# SILENCIO ao carregar device_info.txt/funcs.txt e os ports seguem sem
+# pm_finish/pm_message -- medido no R35S em 20/11/2026.
+if [ ! -d /roms ]; then
+    aviso "AVISO: /roms nao existe. O PortMaster deriva controlfolder de"
+    aviso "       '/\$directory/ports/PortMaster' e vai falhar ao carregar"
+    aviso "       funcs.txt. A imagem deveria trazer o symlink /roms -> /user."
+fi
+
+if [ "$modo" = "--sem-sandbox" ]; then
+    aviso "SEM sandbox, a pedido: o codigo dos ports roda com o rootfs gravavel."
+    cd "$pm" || exit 1
+    exec "$py" ./pugwash "$@"
+fi
+
+if [ -z "$BWRAP" ]; then
+    aviso "bubblewrap ausente e nao foi pedido --sem-sandbox."
+    aviso "Recusando rodar codigo de terceiro com o rootfs gravavel."
+    aviso "  opcao 1: build com GIOCHI_WITH_PORTMASTER=1 (traz o bwrap)"
+    aviso "  opcao 2: giochi-ports --sem-sandbox   (por sua conta e risco)"
+    exit 1
+fi
+
+# --ro-bind / /          rootfs congelado; nada de instalar em /usr ou /etc
+# --dev-bind /dev /dev   DRM, input, uinput, tty0, snd (ver o cabecalho)
+# --bind /user /user     onde ele escreve: ports, jogos, runtimes
+# --tmpfs /tmp           nada sobrevive ao processo
+# --proc /proc           muitos ports leem /proc
+# --unshare-all          pid/net/uts/ipc/user/mount proprios
+# --share-net            menos a rede: instalar depende dela
+# --die-with-parent      se o launcher cair, o port nao fica orfao
+# --new-session          sem terminal de controle: Ctrl-C no pai nao o mata
+# --chdir                o pm_launch faz `cd $controlfolder` de qualquer forma
+exec "$BWRAP" \
+    --ro-bind / / \
+    --dev-bind /dev /dev \
+    --bind /user /user \
+    --tmpfs /tmp \
+    --proc /proc \
+    --unshare-all \
+    --share-net \
+    --die-with-parent \
+    --new-session \
+    --chdir "$pm" \
+    "$py" ./pugwash "$@"

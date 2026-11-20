@@ -38,7 +38,9 @@
   gamepad. Licença BSD-3/MIT e evdev **funcionam**; falta backend de janela em
   KMSDRM no pyglet (só há X11). O remendo de geometry shader foi **medido** em
   [`scripts/arcade-probe/`](../scripts/arcade-probe/README.md) e funciona.
-- [PortMaster: dá para pôr?](evaluacao-portmaster.md) — a GUI é **MIT**, mas o
+- [PortMaster: dá para pôr?](evaluacao-portmaster.md) — implementado e **medido
+  no R35S**: a GUI roda e desenha, o sandbox deixa o rootfs read-only, 22,9 MiB
+  de runtime (opt-in). A GUI é **MIT**, mas o
   pacote traz `gptokeyb2` (**GPL-2.0**) e 7-Zip (**LGPL**): cabe como **app de
   loja** em `/user`, não na imagem. Números medidos (24,6 MB de pacote,
   614 MiB–1,87 GiB de runtimes) e as três peças de integração que faltam.

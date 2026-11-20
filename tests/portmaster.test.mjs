@@ -56,14 +56,18 @@ test("os números medidos estão no documento, com a fonte", async () => {
   assert.match(t, /2026\.11\.17-0700/);
 });
 
-test("o estudo separa o medido do estimado, como o §6 exige", async () => {
+test("o estudo separa o medido do estimado", async () => {
   const t = await texto();
-  assert.match(t, /estimado/i, "o tamanho do python3 tem de estar dito como estimativa");
-  assert.match(t, /15–25 MB/);
-  assert.match(t, /N[ÃA]O est[áa] medido/i);
-  // As duas perguntas que faltam são as que mais importam: subir em CFW
-  // desconhecida e RetroArch. Se o texto começar a afirmar isso, foi dedução.
-  assert.match(t, /CFW desconhecida/i);
+  // Número estimado tem de estar DITO como estimado; número medido, como
+  // medido. A regra do repositório vale para estudo de viabilidade também — foi
+  // a primeira coisa que a medição de 20/11/2026 corrigiu (15–25 MiB estimados
+  // viraram 22,9 MiB medidos).
+  assert.match(t, /MEDIDO/i, "o total tem de estar marcado como medido");
+  assert.match(t, /22,9 MiB/);
+  // O que continua sem medição tem de estar nomeado, e não sumir do documento.
+  assert.match(t, /N[ÃA]O medido/i);
+  assert.match(t, /box64|wine/i, "o desempenho continua não medido");
+  assert.match(t, /CFW desconhecida|detecta o aparelho/i);
 });
 
 test("o ponto de extensão e o diretório dos ports estão nomeados", async () => {
@@ -77,41 +81,46 @@ test("o ponto de extensão e o diretório dos ports estão nomeados", async () =
   assert.match(t, /diretorio=|directory=user/);
 });
 
-test("a imagem continua sem python3 — se mudar, o documento tem de mudar", async () => {
-  // Premissa do veredito. `BR2_TARGET_UBOOT_NEEDS_PYTHON3` é de HOST e não
-  // conta; o que se procura é o pacote de alvo (`^BR2_PACKAGE_PYTHON3`).
-  const dirs = ["config", "device", "buildroot-external"];
-  const achados = [];
-
-  async function varrer(dir) {
-    let entradas;
-    try {
-      entradas = await readdir(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const e of entradas) {
-      const p = path.join(dir, e.name);
-      if (e.isDirectory()) {
-        await varrer(p);
-      } else {
-        const conteudo = await readFile(p, "utf8").catch(() => "");
-        for (const linha of conteudo.split("\n")) {
-          if (linha.startsWith("BR2_PACKAGE_PYTHON3")) achados.push(`${path.relative(ROOT, p)}: ${linha.trim()}`);
-        }
-      }
-    }
+test("python3 de alvo só existe no fragmento OPT-IN, nunca no padrão", async () => {
+  // A premissa original ("a imagem não tem python3") virou falsa em
+  // 20/11/2026, quando `config/portmaster.fragment` entrou — e o teste antigo
+  // reprovou na hora, que é o comportamento desejado.
+  //
+  // A invariante que fica é a que importa: python3 custa 22,9 MiB medidos e só
+  // pode entrar quando alguém pede (`GIOCHI_WITH_PORTMASTER=1`). Se ele
+  // aparecer no `common.fragment` ou no defconfig de um aparelho, todo mundo
+  // paga sem escolher.
+  const padrao = ["config/common.fragment", "config/common.busybox.fragment"];
+  for (const rel of padrao) {
+    const conteudo = await readFile(path.join(ROOT, rel), "utf8");
+    const linhas = conteudo
+      .split("\n")
+      .filter((l) => l.startsWith("BR2_PACKAGE_PYTHON3"));
+    assert.deepEqual(linhas, [], `${rel} liga python3 de alvo: só o fragmento opt-in pode`);
   }
 
-  for (const d of dirs) await varrer(path.join(ROOT, d));
-
+  // E o defconfig do aparelho também não — é o arquivo que sempre entra.
+  const device = path.join(ROOT, "device");
+  const suspeitos = [];
+  for (const pasta of await readdir(device, { withFileTypes: true })) {
+    if (!pasta.isDirectory()) continue;
+    for (const arquivo of ["defconfig", "buildroot.fragment"]) {
+      const p = path.join(device, pasta.name, arquivo);
+      const conteudo = await readFile(p, "utf8").catch(() => "");
+      if (/^BR2_PACKAGE_PYTHON3/m.test(conteudo)) suspeitos.push(`${pasta.name}/${arquivo}`);
+    }
+  }
   assert.deepEqual(
-    achados,
+    suspeitos,
     [],
-    "a imagem passou a ter python3 de alvo. O §3.1 do docs/evaluacao-portmaster.md " +
-      "diz que ele NÃO está na imagem (é o custo do caminho B) — atualize o estudo, " +
-      `e diga se o PortMaster passa a ser de graça no rootfs: ${achados.join(", ")}`,
+    "python3 no defconfig/buildroot.fragment de um aparelho: quem não pediu passa a pagar 22,9 MiB",
   );
+
+  // E o opt-in tem de existir, com build-device.sh ligando de fato.
+  const frag = await readFile(path.join(ROOT, "config/portmaster.fragment"), "utf8");
+  assert.match(frag, /^BR2_PACKAGE_PYTHON3=y$/m);
+  const build = await readFile(path.join(ROOT, "scripts/build-device.sh"), "utf8");
+  assert.match(build, /GIOCHI_WITH_PORTMASTER/);
 });
 
 test("nada do PortMaster está embarcado hoje", async () => {

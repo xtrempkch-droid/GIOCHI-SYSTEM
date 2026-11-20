@@ -78,8 +78,7 @@ const existe = async (p) => {
   }
 };
 
-test("o init cria o diretório de configuração, que a imagem não tem", async () => {
-  // Medido no rootfs.ext4 de 04/11: `/user` não existia. O launcher grava
+test("o init cria o diretório de configuração, que a imagem não tem", async () => {  // Medido no rootfs.ext4 de 04/11: `/user` não existia. O launcher grava
   // brilho, volume e rotação ali, então sem o diretório ele fica sem estado.
   const dir = await montaRaiz({ comLauncher: true });
   const config = path.join(dir, ".config/giochi");
@@ -245,6 +244,31 @@ test("a desistência deixa rastro em arquivo, não só no console", async () => 
   assert.match(texto, /^quedas=5$/m);
   assert.match(texto, /^ultimo_status=7$/m);
   assert.match(texto, /^launcher=\/.*giochi-launcher$/m);
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("uma arrancada nova apaga o rastro da desistência anterior", async () => {
+  // Medido no R35S em 20/11/2026: matei o launcher à mão para pegar o DRM
+  // master, o supervisor desistiu e gravou o marcador. Depois de subir o
+  // `giochi-init` de novo, com o launcher rodando e a tela desenhando, o
+  // `giochi-selftest` continuava dizendo
+  //   [FAIL] giochi-init DESISTIU de reiniciar o launcher
+  // — um FAIL falso, e um FAIL falso ensina o operador a ignorar o bloco
+  // inteiro (§12.34, §12.22).
+  //
+  // Se o launcher continuar quebrado, a desistência é regravada depois das
+  // $RESTART_MAX quedas: o teste do caso anterior prende esse lado.
+  const dir = await montaRaiz({ saidaLauncher: 0 });
+  const marca = path.join(dir, "run/giochi/launcher-parado");
+  await mkdir(path.dirname(marca), { recursive: true });
+  await writeFile(marca, "motivo=quedas_repetidas\nquedas=5\n");
+
+  await roda(dir, 4000);
+
+  await assert.rejects(
+    () => stat(marca),
+    "o marcador da desistência anterior sobreviveu a uma arrancada nova",
+  );
   await rm(dir, { recursive: true, force: true });
 });
 

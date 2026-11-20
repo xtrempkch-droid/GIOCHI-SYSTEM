@@ -1,0 +1,80 @@
+# ── PortMaster: runtime de ports de terceiros (OPCIONAL) ───────────────────
+#
+# OPCIONAL e NÃO é o padrão. Entra no build com:
+#
+#   GIOCHI_WITH_PORTMASTER=1 bash scripts/build-device.sh <device>
+#
+# ── para que serve ─────────────────────────────────────────────────────────
+#
+# O PortMaster (MIT) é uma loja de "ports" — jogos empacotados para handhelds.
+# Ele NÃO é binário: `PortMaster/pugwash` é `#!/usr/bin/env python3` (3 087 B,
+# medido no release 2026.11.17-0700). Sem python3 no aparelho ele não sobe.
+#
+# E ele executa o `.sh` de dentro de cada port **como root**, porque os ports
+# montam squashfs (`$ESUDO mount mono-….squashfs`). É por isso que este
+# fragmento traz também o `bubblewrap`: o port roda com um uid não privilegiado
+# dentro de um namespace, com o rootfs em somente-leitura. Ver
+# `docs/evaluacao-portmaster.md` §5.
+#
+# ── o que NÃO entra aqui, e por quê ────────────────────────────────────────
+#
+# O `PortMaster.zip` (24,6 MB) NÃO vai para a imagem: ele carrega
+# `gptokeyb2` (GPL-2.0) e `7zzs` (LGPL-2.1 + unRAR), e a regra do §15 recusa
+# GPL/AGPL/LGPL na imagem assinada. Ele é instalado em `/user` — pela loja ou
+# à mão — e o `giochi-ports` roda de lá.
+#
+# O mesmo vale para o RetroArch, de que a família de ports libretro depende
+# (`ports/2048/2048.sh` chama `retroarch -L …`): GPL-3.0, fora da imagem.
+#
+# ── custo medido (build do r35s, Buildroot 2025.02, 20/11/2026) ───────────
+#
+# **22,7 MiB** no total, medido com `du -sk` no `target/`:
+#
+#   usr/lib/python3.12/           15,4 MiB   (stdlib, formato .pyc)
+#   usr/lib/libpython3.12.so.1.0   7,1 MiB
+#   usr/bin/python3.12            8,7 KiB
+#   usr/bin/bwrap                88 KiB
+#   usr/lib/libcap.so.2.73       56 KiB
+#
+# A estimativa do documento era 15–25 MiB; o número real está no alto da faixa
+# porque a stdlib compilada em `.pyc` continua sendo o grosso. É a razão de
+# este fragmento ser opt-in em vez de padrão.
+
+# O interpretador. `select BR2_PACKAGE_LIBFFI` vem de graça — é o `ctypes` que
+# o PySDL2 (GUI do PortMaster) usa.
+BR2_PACKAGE_PYTHON3=y
+
+# `.pyc` só: a stdlib compilada é menor, e nada desta árvore precisa do `.py`
+# da stdlib. Ports trazem os próprios `.py`, e o interpretador os lê do mesmo
+# jeito — a escolha vale para os arquivos que NÓS instalamos.
+BR2_PACKAGE_PYTHON3_PYC_ONLY=y
+
+# `requests`/`urllib3` (baixar port e runtime) → `_ssl` e `_hashlib`. Sem isto
+# o `python3.mk` marca os dois como `n/a` e o PortMaster falha em toda
+# requisição HTTPS, com erro que parece de rede.
+BR2_PACKAGE_PYTHON3_SSL=y
+
+# `zipfile`: o `pylibs.zip` e os ports são `.zip`.
+BR2_PACKAGE_PYTHON3_ZLIB=y
+
+# `idna` (dependência do `requests`) importa `unicodedata`. Sem ele o import
+# morre em runtime, não no build.
+BR2_PACKAGE_PYTHON3_UNICODEDATA=y
+
+# `xml.etree.ElementTree` do `harbourmaster/util/proxy.py`. Sem `pyexpat` o
+# `import xml` falha com "No module named 'xml'" e a GUI nem abre — MEDIDO no
+# R35S em 20/11/2026, com o python3 sem este símbolo.
+BR2_PACKAGE_PYTHON3_PYEXPAT=y
+
+# `lzma`: o `pugwash` extrai as fontes Noto de um `.xz` no primeiro start.
+# Sem ele: "unable to extract the Noto fonts: lzma module is not available" —
+# aviso, não erro, e a GUI segue sem as fontes CJK. MEDIDO no mesmo teste.
+BR2_PACKAGE_PYTHON3_XZ=y
+
+# `bz2` NÃO entra: o único uso é o sink de log comprimido do `loguru`
+# (`loguru/_file_sink.py`, extensão `.bz2`), que este fluxo nunca escolhe.
+# Custa ~100 kB; some da lista pelo mesmo critério do resto do repositório.
+
+# O sandbox: namespace de mount/pid/rede + uid não privilegiado, para rodar
+# código de terceiro sem entregar o aparelho. `select BR2_PACKAGE_LIBCAP`.
+BR2_PACKAGE_BUBBLEWRAP=y

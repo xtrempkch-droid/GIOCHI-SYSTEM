@@ -9,13 +9,18 @@
 >
 > | Onde | Custo | Situação |
 > | --- | --- | --- |
-> | **imagem** | python3 (15–25 MB **estimado**) + 24,6 MB do pacote, em todo aparelho | **bloqueado pela nossa regra de licença** (§4) |
+> | **imagem** | **22,9 MiB medidos** (python3 + bubblewrap) — e **nada** do pacote | é o `GIOCHI_WITH_PORTMASTER=1`, opt-in (§3.1) |
 > | **cartão (`/user`)** | 24,6 MB do pacote + **614 MiB** (runtimes "popular") ou **1,87 GiB** ("all") + os jogos | é onde ele deve morar |
 > | **engenharia** | 3 peças nossas (pequenas) + 1 no `Giochi app` | §3 |
 >
 > O que **não** é custo: gráfico, entrada e sistema de arquivos. O nosso
 > SDL2/KMSDRM, o controle virtual com GUID estável e o kernel com squashfs +
 > loop já são exatamente o que o PortMaster espera — medido no §2.
+>
+> **O pacote continua bloqueado pela nossa regra de licença** (`gptokeyb2`
+> GPL-2.0, `7zzs` LGPL-2.1): o que a imagem ganha é o **runtime** (python3 +
+> bubblewrap), opt-in por `GIOCHI_WITH_PORTMASTER=1`; o pacote é instalado em
+> `/user` pelo usuário ou pela loja.
 
 ---
 
@@ -82,45 +87,93 @@ então a versão serve. Subopções que o PortMaster precisa, lidas no `Config.i
 | `BR2_PACKAGE_PYTHON3_UNICODEDATA` | `idna` (IDNA de domínio) importa `unicodedata`; sem ele o `requests` quebra em host não-ASCII |
 | `libffi` | `ctypes` (o `PySDL2` é ctypes puro) — já é dependência automática do pacote |
 
-`BR2_PACKAGE_PYTHON3_BZIP2` e `_XZ` **não** são necessários para o fluxo normal
-(`.zip`); só se algum port trouxer `.tar.bz2`.
+**Tamanho: 22,9 MiB — MEDIDO** em 20/11/2026 no build do r35s:
 
-**Tamanho: 15–25 MB — estimado, não medido.** A conta: `libpython3.12.so`
-(~5 MB) + stdlib sem testes (`≈8–12 MB`, e `unicodedata` sozinho ~1 MB) +
-módulos. Para virar número, o comando é um só, num `work/` já construído
-(acrescentar pacote é seguro, §12.27):
+| Peça | Tamanho |
+| --- | --- |
+| `usr/lib/python3.12/` (stdlib em `.pyc`) | 15,4 MiB |
+| `usr/lib/libpython3.12.so.1.0` | 7,1 MiB |
+| `usr/bin/python3.12` | 8,7 KiB |
+| `usr/bin/bwrap` + `libcap` | 144 KiB |
+| `libffi`, `liblzma`, `libexpat` | ~0,4 MiB |
 
-```bash
-# depois de BR2_PACKAGE_PYTHON3=y + os três módulos no common.fragment
-GIOCHI_SYSTEM_KEEP_WORK=1 bash scripts/build-in-container.sh r35s
-du -sh ~/.cache/giochi-system/work/r35s/build/target/usr/lib/python3.12
-```
+**Dois módulos que a estimativa não previa**, e os dois só apareceram rodando:
 
-### 3.2 o diretório dos ports: nós não temos `/roms`
+| Símbolo | Sem ele |
+| --- | --- |
+| `BR2_PACKAGE_PYTHON3_PYEXPAT` | `ModuleNotFoundError: No module named 'xml'` no import do `harbourmaster/util/proxy.py` — a GUI **não abre** |
+| `BR2_PACKAGE_PYTHON3_XZ` | `unable to extract the Noto fonts: lzma module is not available` — aviso, e as fontes CJK não entram |
+
+`BR2_PACKAGE_PYTHON3_BZIP2` fica de fora: o único uso é o sink de log `.bz2` do
+`loguru` (`_file_sink.py`), que este fluxo nunca escolhe.
+
+### 3.2 o diretório dos ports: `/roms` → `/user` (medido, e o `mod` NÃO resolve)
 
 `control.txt` fixa `export directory="roms"` → os ports vão para
 `/roms/ports/<jogo>`. Nós não temos `/roms`; temos `/user` **já declarado** em
 [`pontos-de-montagem`](../device/common/rootfs-overlay/etc/giochi/pontos-de-montagem).
 
-O PortMaster foi desenhado para CFW desconhecida: `pm_launch.txt` e **todo** port
-script fazem
+A primeira proposta foi um `mod_<CFW>.txt` com `export directory=user`. **A
+medição derrubou essa ideia, por duas razões independentes:**
 
-```bash
-source $controlfolder/control.txt
-[ -f "${controlfolder}/mod_${CFW_NAME}.txt" ] && source "${controlfolder}/mod_${CFW_NAME}.txt"
-get_controls
+1. **O `control.txt` recalcula `controlfolder` antes de o mod rodar.** Ele tem
+   uma cadeia fixa (`/PortMaster`, `/opt/system/Tools/PortMaster`,
+   `/opt/tools/PortMaster`, senão `/$directory/ports/PortMaster`) e **ignora a
+   variável que o stub passou**. Como ele usa `$directory` *antes* de o mod ser
+   carregado, mudar `directory` no mod não muda `controlfolder`.
+2. **28% dos ports citam `/roms/` literalmente.** Medido numa amostra de 25
+   ports do registry (20/11/2026): **7 com `/roms/` literal** e **7 com
+   `$directory`**. Reescrever `directory` conserta metade e deixa a outra metade
+   apontando para um caminho que não existe.
+
+O que funciona é **um symlink**: `/roms` → `/user`. Ele conserta os dois grupos,
+porque `/$directory/ports` e `/roms/ports` passam a ser o mesmo inode. O
+`directory` fica `roms`, que é o default deles e o que menos surpreende código
+de terceiro.
+
+Medido no R35S em 20/11/2026, com o symlink e `OS_NAME=Giochi`:
+
+```text
+CFW_NAME      = [Giochi]                    (era "Buildroot")
+controlfolder = [/roms/ports/PortMaster]    (o symlink resolve)
+directory     = [roms]
+funcs.txt carregado? pm_finish=[function]   (sem o symlink, falhava em SILÊNCIO)
+device_info carregado? PM_VERSION, capabilities
 ```
 
-Então o gancho existe e é oficial: `mod_<CFW>.txt` roda **depois** do
-`control.txt` e **antes** de o port calcular `GAMEDIR="/$directory/ports/<jogo>"`.
-Um `export directory=user` ali move tudo para `/user/ports` sem patch nenhum.
+Sem o symlink, o `control.txt` falha com `No such file or directory` ao carregar
+`device_info.txt` e `funcs.txt` **e continua** — os ports ficam sem
+`pm_finish`/`pm_message`, e o sintoma é "o jogo abre e não volta".
 
-`CFW_NAME` vem de `OS_NAME` → `NAME` → `ID` do `/etc/os-release`
-(`device_info.txt` linhas 107–115). Hoje o nosso `os-release` diz
-`NAME=Buildroot` (medido no target do r35s), então o nome do arquivo seria
-`mod_Buildroot.txt` — que colide com qualquer imagem Buildroot pura. Melhor:
-`OS_NAME=Giochi` no `os-release` (hoje ele está em `/etc/giochi-system-release`,
-que o PortMaster **não lê**) e o gancho `mod_Giochi.txt`.
+O `mod_Giochi.txt` continua existindo, mas para o que é **nosso** (marcar a CFW,
+exportar ambiente), nunca para reescrever caminho.
+
+### 3.2-A `OS_NAME` no `os-release` é o que faz a CFW ser reconhecida
+
+O `device_info.txt` resolve o nome por `OS_NAME` → `NAME` → `ID`. O
+`/etc/os-release` do Buildroot diz `NAME=Buildroot`, então sem correção o
+`CFW_NAME` sai **`Buildroot`** — um nome que colide com qualquer imagem
+Buildroot do mundo, e que faz o `source mod_${CFW_NAME}.txt` procurar o arquivo
+errado.
+
+O Buildroot **sempre** regrava `/usr/lib/os-release` em `target-finalize`
+(`Makefile`, linha 773 no 2025.02), então um arquivo no overlay seria
+sobrescrito. O post-build roda **depois** (linha 808) e é lá que se escreve.
+
+E há o efeito colateral que prova o mecanismo: o `harbourmaster` do PortMaster
+**detecta o aparelho** por esse nome. Medido no R35S com a imagem de teste:
+
+```text
+{'name': 'giochi', 'version': '2025.02', 'kernel_version': '6.12.0',
+ 'device': 'game console r36s', 'model': 'Game Console R36S',
+ 'resolution': (640, 480), 'refresh_rate': 60, 'gpu_driver': 'panfrost',
+ 'glibc': '2.41', 'ram': 1024,
+ 'capabilities': ['1gb', '4:3', '640x480', 'aarch64', 'analog_0', 'analog_1',
+                  'analog_2', 'power', 'restore', 'rumble', 'en_US']}
+```
+
+Ou seja: ele **não** recusou o aparelho desconhecido. Ele o classificou, com GPU,
+RAM e resolução corretas.
 
 ### 3.3 o nome do aparelho mente — e já sabemos disso
 
@@ -151,15 +204,49 @@ Isso não é bloqueio de arquitetura; é ordem de trabalho. Hoje, a alternativa
 funcional é o PortMaster ser iniciado **pelo** launcher (que fecha o DRM antes) e
 o `giochi-init` não reiniciar nada no meio.
 
-### 3.6 os ports rodam como root e montam squashfs
+### 3.6 o sandbox: `bubblewrap`, medido no aparelho
 
-Exemplo medido (`ports/stardewvalley/StardewValley.sh`): monta
-`mono-6.12.0.122-aarch64.squashfs` com `$ESUDO mount`, roda o jogo, desmonta.
-Vários fazem `chmod 666 /dev/tty0`, `pidof`/`kill -9` do `gptokeyb` e
-`systemctl restart oga_events` (esse último é no-op fora do ArkOS).
+Os ports rodam como root e montam squashfs (`$ESUDO mount mono-….squashfs`), e
+o código é de terceiro, baixado **sem assinatura**. A resposta não é confiar:
+é cercar. `giochi-ports` (no overlay comum) executa o `pugwash` sob `bwrap`;
+sem `bwrap` ele **recusa** rodar, a menos que se peça `--sem-sandbox`.
 
-Consequência: **não dá para rodar PortMaster como usuário sem privilégio.** Ele
-é, por desenho, código de terceiro com root. É o assunto do §5.
+Medido no R35S em 20/11/2026, com o kernel desta árvore (6.12, `CONFIG_USER_NS=y`):
+
+| Teste | Resultado |
+| --- | --- |
+| escrever no rootfs (`/usr/bin/racunho`) | `Read-only file system` — **bloqueado** |
+| escrever em `/user/ports/` | **OK** |
+| processos visíveis de dentro | **5** (de ~40 fora do namespace) |
+| o launcher aparece de dentro? | **não** |
+| rede | compartilhada (`--share-net`), 2 interfaces |
+| `/roms` → `/user` de dentro | visível e correto |
+
+E a GUI rodou **dentro** do sandbox: `harbourmaster` detectou o aparelho, e a
+captura do `debugfs` do DRM mostra o processo como master e dono de dois
+framebuffers:
+
+```text
+             command  tgid dev master a
+             python3  4564   0   y    y
+
+    allocated by = python3   refcount=2
+    allocated by = python3   refcount=1
+```
+
+**O que o sandbox NÃO dá**, e está escrito no cabeçalho do script para não virar
+promessa:
+
+- **privacidade de dados**: `/user` é gravável e é onde ficam os jogos;
+- **contenção de recursos**: não há cgroup nem limite de CPU/RAM;
+- **drop de privilégio**: o sistema roda como root e o `bwrap` mapeia o uid; o
+  ganho é não alcançar o que está fora das montagens, não virar usuário comum.
+
+E um custo de operação que apareceu no teste: **dois `giochi-init` ao mesmo tempo
+sobem dois launchers disputando o DRM**, o segundo falha cinco vezes e o
+supervisor desiste — regravando o marcador de parada. Não suba o `giochi-init`
+à mão com o `respawn` do inittab ativo; para pegar o DRM use
+`/run/giochi/dev-free-console`, que existe exatamente para isso.
 
 ### 3.7 uma família de ports exige RetroArch
 
@@ -207,10 +294,10 @@ sistema.
 
 | Item | Custo |
 | --- | --- |
-| imagem | **0 MB** |
+| imagem | **22,9 MiB** (python3 + bwrap) se ligar `GIOCHI_WITH_PORTMASTER=1`; **0 MB** se o python vier como payload do app |
 | cartão | 24,6 MB + 614 MiB (popular) ou 1,87 GiB (all) + jogos |
-| nosso código | `mod_Giochi.txt` (~10 linhas), `PortMaster.sh` stub, `OS_NAME=Giochi` no os-release |
-| `Giochi app` | enumerar `/user/ports/*.sh` e lançar (pedido deles); fechar o DRM antes |
+| nosso código | `giochi-ports` (~180 linhas), `OS_NAME=Giochi` no post-build, `/roms` → `/user`, `config/portmaster.fragment`, gate do `python3-dirclean` |
+| `Giochi app` | enumerar `/user/ports/*.sh`, lançar, e **fechar o DRM antes** (o `exec` do §11) |
 | licença | ok — nada GPL na imagem |
 | segurança | sideload declarado (§5) |
 
@@ -222,7 +309,7 @@ como o quarto). Aí a imagem continua sem python3 e só quem instala paga.
 
 | Item | Custo |
 | --- | --- |
-| imagem | 24,6 MB do pacote (dá para cortar ~6 MB removendo os 7z de armhf/x86_64) **+ python3**: 15–25 MB estimado |
+| imagem | 24,6 MB do pacote (dá para cortar ~6 MB removendo os 7z de armhf/x86_64) **+ 22,9 MiB** de python3/bwrap **medidos** |
 | licença | **bloqueado** (§4) |
 | ganho | o PortMaster está lá sem depender da loja |
 
@@ -232,26 +319,75 @@ Válido, e é o estado atual. O custo de C é a funcionalidade, não o risco —
 por isso que este documento existe: para a decisão ser tomada com os números, não
 com "parece legal".
 
-## 7. O que NÃO está medido
+## 7. O que foi MEDIDO em 20/11/2026, no R35S
 
-1. **O tamanho do python3** — 15–25 MB é estimativa com a conta aberta no §3.1.
-   O comando para medir está lá.
-2. **Se o PortMaster sobe numa CFW desconhecida.** Lido no código: `CFW_NAME`
-   vira `Buildroot`, `param_device` fica vazio, `DEVICE` fica vazio e ele copia o
-   `gamecontrollerdb.txt` inteiro — nada aborta. Mas **ler não é rodar**: o teste
-   é extrair o `PortMaster.zip` em `/user` num aparelho e chamar `./pugwash`.
-3. **RetroArch** não está na imagem, e uma família de ports depende dele (§3.7).
-4. **Desempenho real** — o R35S tem 1 GB; o `box64`+jogo é o cenário mais pesado
-   do catálogo, e nada disso foi medido aqui.
-5. **A partição de dados** (`/user`) **não existe** ainda (§18, item 3). O
-   caminho A depende dela para ser mais que um punhado de MB no rootfs.
+Tudo abaixo é do aparelho, com a imagem `commit=e0d74e6` mais o runtime
+instalado à mão em `/user/opt` — não é leitura de código.
 
-## 8. Se for para frente: a ordem barata
+| Verificação | Resultado |
+| --- | --- |
+| `python3` 3.12.9 com `ssl`, `zlib`, `ctypes`, `unicodedata`, `xml`, `lzma` | **roda** |
+| `bwrap` 0.11.0 | **roda**, rootfs read-only, `/user` gravável, 5 processos visíveis |
+| `control.txt` com `/roms` → `/user` e `OS_NAME=Giochi` | `CFW_NAME=Giochi`, `funcs.txt` carregado |
+| `pugwash` detecta o aparelho | `device: game console r36s`, `gpu_driver: panfrost`, `glibc: 2.41` |
+| GUI no KMSDRM | **DRM master + 2 framebuffers alocados** (debugfs) |
+| GUI dentro do `bwrap` | idem, com o rootfs congelado |
+| `giochi-selftest` | `PASS 42 · WARN 1 · FAIL 0 · SKIP 3`, com o bloco novo de ports |
 
-1. **10 minutos, zero build:** extrair `PortMaster.zip` em `/user/ports` no
-   aparelho que estiver livre, com um `mod_Buildroot.txt` de 3 linhas, e chamar
-   `./pugwash`. Isso responde o §7.2 e o §7.3 sem tocar na imagem.
-2. **Só então** medir o python3 (§3.1) — se o passo 1 já funcionar com o python
-   de um runtime da loja, a imagem não paga nada.
-3. A decisão de produto (loja x imagem) fica com o dono do projeto; o que este
-   documento entrega é o preço de cada lado.
+## 7-A. O que continua NÃO medido
+
+1. **Um port de verdade instalado e jogado.** O que rodou foi a **GUI** e a
+   detecção; baixar um port depende de DNS no aparelho (o teste usou o `zip`
+   enviado por `scp`). O `giochi-ports --version` imprime a detecção e sai — é
+   um smoke test, não uma partida.
+2. **A instalação pela GUI com rede.** O aparelho não tinha DNS configurado; a
+   GUI anunciou `No internet connection found, running in offline mode`.
+3. **RetroArch**, de que a família libretro depende (§3.7). GPL-3.0, fora da
+   imagem — teria de vir pela loja.
+4. **Desempenho de `box64`/wine** num aparelho de 1 GB: o cenário mais pesado do
+   catálogo, e nada disso foi exercitado.
+5. **A partição de dados** (`/user`) não existe: hoje `/user` é um diretório no
+   rootfs, criado pelo post-build (§18, item 3).
+6. **O `exec` do launcher** — sem ele, abrir o PortMaster exige o launcher sair
+   antes. Foi assim que o teste obteve o DRM master.
+
+## 8. Como repetir o teste (o que foi feito, na ordem)
+
+O caminho que funcionou, sem reflashar imagem — e é o que serve para o próximo
+aparelho:
+
+1. **Runtime fora do rootfs.** Compile `python3` + `bubblewrap` no `work/` do
+   aparelho e copie para `/user/opt`. É o que permite testar sem rebuild de 2 h.
+   ```bash
+   GIOCHI_WITH_PORTMASTER=1 docker run ... make python3 bubblewrap
+   scp <runtime>.tgz root@10.55.0.2:/tmp/
+   ```
+2. **`/roms` → `/user`** e **`OS_NAME=Giochi`** no `/etc/os-release` do aparelho
+   (o post-build da imagem final fará os dois).
+3. **O pacote**: baixar `PortMaster.zip` no PC e `scp` (o aparelho de teste não
+   tinha DNS), extrair em `/user/ports`.
+4. **Provar o vídeo** com o DRM livre. O caminho **seguro** é
+   `touch /run/giochi/dev-free-console` e reiniciar o launcher; o caminho que
+   usei (matar o launcher) funciona e deixa o marcador de desistência, que o
+   `giochi-init` passou a limpar numa arrancada nova.
+
+O que o teste **provou**: o PortMaster 2026.11.17 roda, identifica o aparelho e
+desenha, com o rootfs congelado. O que **não** provou: um port baixado e jogado.
+
+## 9. O que falta, e é do `Giochi app`
+
+Só uma peça: o launcher precisa **sair** (ou fazer `exec`) antes de abrir o
+PortMaster, porque o KMSDRM é exclusivo — medido duas vezes, no `kmscube`
+(§12.72) e aqui. Sem isso, `giochi-ports` responde `kmsdrm not available` e a
+tela não muda.
+
+A ordem que funciona hoje, e não exige código novo do app:
+
+```text
+giochi-init → launcher (DRM) → usuário escolhe "Ports"
+           → launcher SAI → giochi-ports (DRM) → GUI
+           → GUI sai → ::respawn: sobe o launcher de novo
+```
+
+O `::respawn:` do inittab já devolve o launcher quando o `giochi-ports` termina.
+É o mesmo ciclo que o `giochi-godot` usa (§ godot.fragment).

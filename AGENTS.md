@@ -151,7 +151,7 @@ o que foi medido, e deixar a decisão com quem responde pelo código.
 
 | Verificação | Resultado |
 | --- | --- |
-| `node tests/run-all.mjs` | **641/641 + 1 skip**, 67 arquivos (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, panel-diag 17, gamepad-virtual 12, selftest-contract 21, issues-vizinhos 5, portmaster 7, …) |
+| `node tests/run-all.mjs` | **652/652 + 1 skip**, 72 arquivos (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, panel-diag 17, gamepad-virtual 12, selftest-contract 21, issues-vizinhos 5, portmaster 7, …) |
 | `node scripts/validate-devices.mjs` | OK — 7 devices, 1 habilitado |
 | `node scripts/list-devices.mjs --github-matrix` | matriz com `qemu-aarch64` |
 | matriz com `--device powkiddy-x55 --allow-draft` | devolve **só** o X55 |
@@ -566,7 +566,7 @@ absoluto** do host — §12.40).
 
 ## 10. Testes
 
-`node tests/run-all.mjs` → **641/641 + 1 skip**, em **67 arquivos**. A tabela abaixo é uma
+`node tests/run-all.mjs` → **652/652 + 1 skip**, em **72 arquivos**. A tabela abaixo é uma
 seleção dos que prendem contratos de projeto; a lista completa é `ls tests/` e
 `tests/runner-coverage.test.mjs` **falha** se algum arquivo existir sem estar
 importado no `run-all.mjs` — foi assim que dois testes desta revisão quase
@@ -602,7 +602,8 @@ ficaram fora da contagem.
 | `tests/gamepad-virtual.test.mjs` | 12 | o contrato de entrada: GUID recalculado por `crc16` do nome (não literal copiado), `a:b1`, sem `EVIOCGRAB`, e a guarda do `HOST_DIR` no post-build |
 | `tests/sdl-input-probe.test.mjs` | 6 | o probe pergunta `SDL_IsGameController` e imprime o mapeamento (não só conta joysticks), não abre vídeo sem `--video` (não rouba o DRM master), cruza `bN`→código evdev, e prende a convenção `a = BTN_EAST` dos mapas contra a do SDL2 com o mapa **medido** no R35S (§12.74) |
 | `tests/gamepad-virtual.test.mjs` | 9 | o controle VIRTUAL: layout canônico igual nos três aparelhos, mapa que troca A/B é traduzido, faixa de eixo normalizada com inversão, `CONFIG_INPUT_UINPUT` no fragmento **e** no gate, GUID do DB casa com o `id` do daemon, `a:b1` e não o automático `b0`, e sem `EVIOCGRAB` (§29) |
-| `tests/portmaster.test.mjs` | 7 | a avaliação do PortMaster: veredito **app de loja** (não imagem), a distinção MIT-da-GUI × GPL-2.0/LGPL-do-payload, os tamanhos medidos, medido ≠ estimado, o gancho `mod_<CFW>.txt`, e as duas premissas que, se virarem falsas, mudam o veredito (imagem sem python3; nada embarcado no overlay) (§32) |
+| `tests/portmaster.test.mjs` | 7 | a avaliação do PortMaster: veredito **app de loja** (não imagem), a distinção MIT-da-GUI × GPL-2.0/LGPL-do-payload, os tamanhos medidos, medido ≠ estimado, o gancho `mod_<CFW>.txt`, a invariante de que python3 de alvo só mora no fragmento **opt-in**, e nada do pacote no overlay (§32) |
+| `tests/portmaster-runtime.test.mjs` | 10 | o runtime do PortMaster na imagem: os **seis** símbolos do python3 com o motivo de cada um (`PYEXPAT` e `XZ` só apareceram rodando), `bz2` fora com a justificativa, o desenho do sandbox item por item (`--ro-bind`, `--bind /user`, `--unshare-all`, `--share-net`, `--die-with-parent`), a recusa em rodar sem isolamento, o aviso de `/roms` ausente, o wiring no `build-device.sh` **na chamada** do prepare-config, e o `OS_NAME`/symlink no post-build (§33) |
 
 ## 10-A. O sistema base — acesso antes de interface
 
@@ -7380,3 +7381,97 @@ três respostas diferentes — *dá para embarcar*, *dá para instalar* e *dá p
 rodar*. Aqui a primeira é a que está bloqueada, e as outras duas são baratas. É a
 mesma separação do `libmali` (§15): o que não pode entrar na imagem assinada pode
 entrar pela loja, e essa distinção é de licença antes de ser de espaço.
+
+## 33. PortMaster implementado e medido no R35S (20/11/2026)
+
+A §32 respondeu "dá para pôr?". Esta é a implementação, e o que ela **mudou** do
+que a §32 tinha previsto — três das cinco premissas estavam erradas ou
+incompletas, e todas as três só apareceram rodando.
+
+### O que roda hoje
+
+| Peça | Onde | Estado |
+| --- | --- | --- |
+| `config/portmaster.fragment` | opt-in `GIOCHI_WITH_PORTMASTER=1` | python3 + bubblewrap, **22,9 MiB medidos** |
+| `giochi-ports` | overlay comum, `/usr/bin` | acha o pacote, o python e o sandbox; **recusa** rodar sem isolamento |
+| `/etc/os-release` com `OS_NAME=Giochi` | `post-build.sh` | é o que faz o `CFW_NAME` deixar de ser `Buildroot` |
+| `/roms` → `/user` | `post-build.sh` | o que faz os ports acharem o caminho |
+| bloco no `giochi-selftest` | rootfs | `[PASS] PortMaster … instalado, com python3, sandbox e /roms` |
+
+### O que a §32 previu errado, medido
+
+| §32 dizia | Fato medido |
+| --- | --- |
+| "`mod_Giochi.txt` com `export directory=user` resolve" | **não resolve.** O `control.txt` recalcula `controlfolder` **antes** do mod rodar, e **28% dos ports citam `/roms` literal** (7 de 25 na amostra). A solução é o symlink `/roms` → `/user` |
+| "15–25 MB estimado" | **22,9 MiB**, e com **dois módulos que faltavam**: `PYEXPAT` (`xml`) e `XZ` (`lzma`) |
+| "XZ não é necessário" | **é**: o `pugwash` extrai as Noto fonts de um `.tar.xz` |
+| "python3 precisa de SSL/ZLIB/UNICODEDATA" | certo, mas incompleto — sem `PYEXPAT` a GUI **não abre**: `ModuleNotFoundError: No module named 'xml'` |
+
+### O sandbox: o que o `bubblewrap` dá, medido
+
+Medido no R35S, kernel 6.12 (`CONFIG_USER_NS=y` já estava ligado):
+
+| Teste | Resultado |
+| --- | --- |
+| escrever em `/usr/bin` | `Read-only file system` — bloqueado |
+| escrever em `/user` | OK |
+| processos visíveis | 5, de ~40 fora |
+| launcher visível de dentro | não |
+| rede | compartilhada (`--share-net`) |
+
+**Não é drop de privilégio**: o uid continua 0 dentro do namespace. O ganho é não
+alcançar o que está fora das montagens. Isso está escrito no cabeçalho do
+`giochi-ports` — prometer mais seria o §12.15.
+
+### O resultado no aparelho
+
+```text
+{'name': 'giochi', 'device': 'game console r36s', 'gpu_driver': 'panfrost',
+ 'glibc': '2.41', 'resolution': (640, 480), 'refresh_rate': 60, 'ram': 1024,
+ 'capabilities': ['1gb','4:3','640x480','aarch64','analog_0','analog_1',
+                  'analog_2','power','restore','rumble','en_US']}
+```
+
+O `harbourmaster` do PortMaster **detectou e classificou** o aparelho, sem
+recusar CFW desconhecida. E a GUI desenhou — `debugfs` do DRM durante a execução:
+
+```text
+             command  tgid dev master a
+             python3  4564   0   y    y      ← master, autenticado
+    allocated by = python3   refcount=2
+    allocated by = python3   refcount=1      ← dois FBs, scanout ativo
+```
+
+`giochi-selftest` no aparelho: **PASS 42 · WARN 1 · FAIL 0 · SKIP 3**.
+
+### O único bloqueio que sobra é do `Giochi app`
+
+KMSDRM é exclusivo. Com o launcher no ar: `kmsdrm not available`. Com o DRM
+livre: master + framebuffers. O caminho **não** é rodar em paralelo — é o
+launcher **sair** (ou o `exec` do §11) e o `::respawn:` do inittab subir ele de
+volta quando a GUI terminar. É o mesmo ciclo do `giochi-godot`.
+
+### Dois defeitos encontrados no caminho, e são desta árvore
+
+1. **Módulo novo em python3 já compilado não entra** (§12.29 aplicado): o
+   `.config` ganhava `PYEXPAT=y`, o `make python3` dizia "nada a fazer" e o
+   `lib-dynload/` ficava sem `pyexpat`. `build-device.sh` passou a rodar
+   `python3-dirclean` quando `GIOCHI_WITH_PORTMASTER=1` num build retomado.
+2. **`/run/giochi/launcher-parado` sobrevivia a uma arrancada nova.** Matei o
+   launcher para pegar o DRM, o supervisor desistiu e gravou o marcador; depois,
+   com a interface no ar, o `selftest` dizia `[FAIL] DESISTIU` — um FAIL falso,
+   que ensina o operador a ignorar o bloco (§12.34). O `giochi-init` agora
+   remove o marcador ao arrancar: arrancada nova é cota nova.
+
+### A armadilha de operação que custou tempo
+
+**Dois `giochi-init` ao mesmo tempo sobem dois launchers disputando o DRM.** O
+segundo falha cinco vezes e o supervisor desiste. Aconteceu porque subi o
+supervisor à mão com o `respawn` do inittab ativo. Para pegar o DRM existe
+`/run/giochi/dev-free-console` — que é o mecanismo certo e eu usei o errado
+primeiro.
+
+E a armadilha de diagnóstico: `for p in /proc/[0-9]*; do ... | grep -q
+giochi-init` casa com o **próprio shell** que contém o padrão na linha de
+comando, e `kill` nele derruba a sessão SSH. É o §12.46 do lado do teste; o
+`giochi-selftest` já exclui `$$` e `$PPID`, e um script de teste também precisa.

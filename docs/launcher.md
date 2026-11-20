@@ -344,6 +344,64 @@ Se o `giochi-selftest` disser `inittab NÃO chama giochi-init` com o launcher
 presente, o `post-build` não rodou — e aí o launcher nunca subiria sem uma pista
 do motivo.
 
+## Ports de terceiros: o launcher tem de sair antes
+
+O `Giochi System` passou a suportar o **PortMaster** (loja de ports de
+terceiros) com `GIOCHI_WITH_PORTMASTER=1`. Detalhe e números em
+[`evaluacao-portmaster.md`](evaluacao-portmaster.md); aqui fica só o que muda
+para o launcher.
+
+**O KMSDRM é exclusivo, e isso já foi medido duas vezes** — com o `kmscube`
+(§12.72 do AGENTS) e com o PortMaster (20/11/2026). Com o launcher no ar:
+
+```text
+SDLError: 'Error encountered initializing the video subsystem: kmsdrm not available'
+```
+
+Com o DRM livre, o mesmo comando roda e o `debugfs` mostra o processo como
+master, dono de dois framebuffers.
+
+### O contrato, que não exige código novo no app
+
+```text
+giochi-init → launcher (DRM master)
+            → usuário escolhe "Ports"
+            → launcher SAI  (ou faz exec, quando isso existir)
+            → giochi-ports  (DRM master)  → GUI do PortMaster
+            → GUI sai
+            → ::respawn: do inittab sobe o launcher de novo
+```
+
+O `::respawn:` já devolve o launcher quando o `giochi-ports` termina — é o mesmo
+ciclo que o `giochi-godot` usa. O que o app precisa fazer é **sair**, não rodar
+em paralelo.
+
+### O que o launcher deve listar
+
+Os ports ficam em `/user/ports/<jogo>/<jogo>.sh` (e `/roms/ports` é o **mesmo**
+lugar, por symlink — é só o nome que o PortMaster usa). Um item de menu por
+`.sh`, com o `port.json` ao lado para título e imagem.
+
+Duas coisas que o launcher **não** deve fazer:
+
+1. **Abrir o `pugwash` diretamente.** Use `giochi-ports`: ele acha o python3, o
+   sandbox e o `/roms`, e recusa rodar sem isolamento em vez de entregar o
+   rootfs gravável.
+2. **Marcar os ports como assinados.** Eles vêm de um repositório público sem
+   assinatura, e o contrato das duas chaves (§12.41) não cobre esse conteúdo. O
+   launcher deve mostrá-los como **sideload**, não como o que veio da loja.
+
+### Para testar sem tirar a interface do ar
+
+Existe `/run/giochi/dev-free-console`: com esse arquivo, o `giochi-init` **não**
+sobe o launcher, e o DRM fica livre para quem estiver testando. `rm` devolve o
+comportamento normal. Foi criado para a engine e serve para o PortMaster.
+
+**Não** suba um segundo `giochi-init` à mão com o `respawn` ativo: os dois sobem
+launchers que disputam o DRM, o segundo falha cinco vezes e o supervisor
+desiste — e o `giochi-selftest` passa a reportar `DESISTIU` com a interface
+funcionando (§12.45).
+
 ## GIOCHI-ENGINE: o que a imagem tem de entregar
 
 A engine própria (`GIOCHI-ENGINE`) declara no `Cargo.toml`:

@@ -372,6 +372,30 @@ if ((WITH_GODOT)); then
   fi
   echo "  godot:     suporte Wayland (cage) — /dev via eudev, ~15-25 MB"
 fi
+# Runtime de ports de terceiros (PortMaster). NÃO é o padrão: acrescenta python3
+# e bubblewrap à imagem. Só o RUNTIME entra — o pacote do PortMaster (24,6 MB)
+# carrega gptokeyb2 (GPL-2.0) e 7zzs (LGPL-2.1) e por isso fica em /user, fora
+# da imagem assinada. Ver config/portmaster.fragment e
+# docs/evaluacao-portmaster.md.
+WITH_PORTMASTER="${GIOCHI_WITH_PORTMASTER:-0}"
+PORTMASTER_DIRCLEAN=0
+case "${WITH_PORTMASTER,,}" in
+  1|true|yes|on) WITH_PORTMASTER=1 ;;
+  *) WITH_PORTMASTER=0 ;;
+esac
+if ((WITH_PORTMASTER)); then
+  echo "  portmaster: python3 + bubblewrap (runtime) — o pacote fica em /user"
+  # Módulo novo dentro de um python3 JÁ COMPILADO não aparece (§12.29). Medido
+  # em 20/11/2026: o `.config` ganhou `PYEXPAT` e `XZ`, o `make python3` disse
+  # "nada a fazer", e o `lib-dynload/` continuou sem `_lzma` e `pyexpat` — o
+  # sintoma no aparelho é "No module named 'xml'" com o símbolo `=y`.
+  #
+  # Não há flag para esquecer: num build retomado, o pacote é limpo.
+  if ((KEEP_WORK)) && compgen -G "$BUILD_DIR/build/python3-*" >/dev/null; then
+    PORTMASTER_DIRCLEAN=1
+    echo "  portmaster: python3 já construído — sera limpo e reconfigurado (§12.29)"
+  fi
+fi
 # SDK do Buildroot (sysroot + toolchain num tarball auto-contido). NÃO é o
 # padrão, de propósito: o tarball de um aparelho com mesa+SDL2 passa de ~400 MB,
 # e o artefato de CI fica publicado por 14 dias. Para o fluxo normal — compilar
@@ -801,6 +825,19 @@ if ((WITH_GODOT)); then
   GODOT_FRAGMENT_ARGS=(--fragment "$WORK_DIR/godot.fragment")
 fi
 
+# O do PortMaster é independente do Godot (não troca /dev, não toca em eudev),
+# então pode ser combinado. Vem depois do Godot e antes dos fragmentos por área
+# pelo mesmo motivo que ele.
+PORTMASTER_FRAGMENT_ARGS=()
+if ((WITH_PORTMASTER)); then
+  if [[ ! -f "$ROOT/config/portmaster.fragment" ]]; then
+    echo "ERRO: GIOCHI_WITH_PORTMASTER=1 mas config/portmaster.fragment não existe." >&2
+    exit 2
+  fi
+  cp -a "$ROOT/config/portmaster.fragment" "$WORK_DIR/portmaster.fragment"
+  PORTMASTER_FRAGMENT_ARGS=(--fragment "$WORK_DIR/portmaster.fragment")
+fi
+
 node "$ROOT/scripts/prepare-config.mjs" \
   --config "$BUILD_DIR/.config" \
   --hostname "$HOSTNAME_VALUE" \
@@ -810,6 +847,7 @@ node "$ROOT/scripts/prepare-config.mjs" \
   --fragment "$ROOT/config/common.fragment" \
   --fragment "$FRAGMENT" \
   ${GODOT_FRAGMENT_ARGS[@]+"${GODOT_FRAGMENT_ARGS[@]}"} \
+  ${PORTMASTER_FRAGMENT_ARGS[@]+"${PORTMASTER_FRAGMENT_ARGS[@]}"} \
   ${EXTRA_FRAGMENT_ARGS[@]+"${EXTRA_FRAGMENT_ARGS[@]}"} \
   --ccache-dir "$CCACHE_ARG" \
   "${KERNEL_FRAGMENT_ARGS[@]+"${KERNEL_FRAGMENT_ARGS[@]}"}" \
@@ -956,6 +994,22 @@ if ((FORCE_UBOOT_REBUILD)); then
   fi
 fi
 
+# `GIOCHI_WITH_PORTMASTER=1` num build retomado: o python3 já construído NÃO
+# ganha módulo novo só porque o `.config` mudou — o `.stamp_configured` existe e
+# o `make` responde "nada a fazer". Medido em 20/11/2026: `PYEXPAT` e `XZ`
+# entraram no `.config` como `=y` e o `lib-dynload/` continuou sem `pyexpat` e
+# `_lzma`; no aparelho o sintoma é `No module named 'xml'` com o símbolo ligado.
+#
+# **Não é incremental** (§12.27/§12.29 aplicados ao python3), e o alvo é
+# `python3-dirclean`, com o nome do pacote — não `python-dirclean`.
+if ((PORTMASTER_DIRCLEAN)); then
+  echo "  portmaster: limpando o python3 para que os módulos novos entrem"
+  if ! make -C "$BR2_DIR" O="$BUILD_DIR" python3-dirclean >/dev/null 2>&1; then
+    echo "AVISO: 'python3-dirclean' falhou; o python3 pode sair sem pyexpat/lzma." >&2
+    echo "AVISO: o porte do PortMaster vai falhar com \"No module named 'xml'\"." >&2
+  fi
+fi
+
 # O `S50hwclock` no aparelho se recusa a gravar no RTC um ano anterior ao da
 # construção da imagem — gravar um relógio de 1970 no RTC é pior que não gravar.
 # O piso tem de vir do build, não de um número escrito à mão que envelhece.
@@ -981,6 +1035,14 @@ GIOCHI_BUILD_INFO_LINHAS="$(printf '%s\n' \
   "commit=$BUILD_COMMIT" \
   "built_at_utc=$BUILD_AT_UTC")"
 export GIOCHI_BUILD_INFO_LINHAS
+
+# O post-build grava /etc/os-release a partir do nosso release + estes dois.
+# Export, e não argumento: o Buildroot chama o post-build com só TARGET_DIR e
+# BINARIES_DIR (a mesma armadilha do §12.48).
+GIOCHI_VERSION_ID="${GIOCHI_SYSTEM_VERSION:-1.0.0}"
+export GIOCHI_VERSION_ID
+GIOCHI_BUILDROOT_VERSION="$BUILDROOT_VERSION"
+export GIOCHI_BUILDROOT_VERSION
 
 echo "Compilando com $JOBS job(s). O log fica em $LOG_FILE..."
 
