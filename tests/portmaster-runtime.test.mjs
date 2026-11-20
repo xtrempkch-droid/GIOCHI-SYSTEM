@@ -210,3 +210,28 @@ test("o gamecontrollerdb.txt do PortMaster é substituído pelo nosso", async ()
   assert.match(db, /06005931091200000100000001000000/);
   assert.ok(Buffer.byteLength(db) < 128 * 1024, "o DB tem de caber no limite do kernel");
 });
+
+test("o script roda com `set -u`: variável de um modo só existe em todos", async () => {
+  // Medido no R35S em 20/11/2026, logo depois de `--rodar` ser acrescentado: a
+  // GUI morria com `PORT_SH: parameter not set`, porque a variável só era
+  // atribuída dentro do modo que a usa. Com `set -u`, isso derruba o caminho
+  // padrão — que é o mais usado.
+  const caminho = path.join(ROOT, "device/common/rootfs-overlay/usr/bin/giochi-ports");
+  const t = await readFile(caminho, "utf8");
+  assert.match(t, /^set -u$/m, "o script usa `set -u`");
+
+  for (const nome of ["PORT_SH", "PORT_DIR", "RODAR_PORT", "LIBERAR_DRM"]) {
+    const atribuicao = t.search(new RegExp(`^${nome}=`, "m"));
+    const primeiroUso = t.indexOf(`"` + "$" + nome + `"`);
+    assert.ok(atribuicao > 0, `${nome} nunca é atribuído e o set -u derruba o script`);
+    assert.ok(
+      atribuicao < primeiroUso,
+      `${nome} é usado antes de ser atribuído (posição ${primeiroUso}) — a GUI morre com "parameter not set"`,
+    );
+  }
+
+  // E o caminho padrão (sem `--rodar`) tem de continuar rodando de verdade.
+  const { spawnSync } = await import("node:child_process");
+  const r = spawnSync("sh", [caminho, "--status"], { encoding: "utf8", timeout: 15000 });
+  assert.equal(r.status, 0, `--status falhou: ${r.stderr}`);
+});

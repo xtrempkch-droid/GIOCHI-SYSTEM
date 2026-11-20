@@ -151,7 +151,7 @@ o que foi medido, e deixar a decisão com quem responde pelo código.
 
 | Verificação | Resultado |
 | --- | --- |
-| `node tests/run-all.mjs` | **659/659 + 1 skip**, 72 arquivos (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, panel-diag 17, gamepad-virtual 12, selftest-contract 21, issues-vizinhos 5, portmaster 7, …) |
+| `node tests/run-all.mjs` | **660/660 + 1 skip**, 72 arquivos (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, panel-diag 17, gamepad-virtual 12, selftest-contract 21, issues-vizinhos 5, portmaster 7, …) |
 | `node scripts/validate-devices.mjs` | OK — 7 devices, 1 habilitado |
 | `node scripts/list-devices.mjs --github-matrix` | matriz com `qemu-aarch64` |
 | matriz com `--device powkiddy-x55 --allow-draft` | devolve **só** o X55 |
@@ -566,7 +566,7 @@ absoluto** do host — §12.40).
 
 ## 10. Testes
 
-`node tests/run-all.mjs` → **659/659 + 1 skip**, em **72 arquivos**. A tabela abaixo é uma
+`node tests/run-all.mjs` → **660/660 + 1 skip**, em **72 arquivos**. A tabela abaixo é uma
 seleção dos que prendem contratos de projeto; a lista completa é `ls tests/` e
 `tests/runner-coverage.test.mjs` **falha** se algum arquivo existir sem estar
 importado no `run-all.mjs` — foi assim que dois testes desta revisão quase
@@ -603,7 +603,7 @@ ficaram fora da contagem.
 | `tests/sdl-input-probe.test.mjs` | 6 | o probe pergunta `SDL_IsGameController` e imprime o mapeamento (não só conta joysticks), não abre vídeo sem `--video` (não rouba o DRM master), cruza `bN`→código evdev, e prende a convenção `a = BTN_EAST` dos mapas contra a do SDL2 com o mapa **medido** no R35S (§12.74) |
 | `tests/gamepad-virtual.test.mjs` | 9 | o controle VIRTUAL: layout canônico igual nos três aparelhos, mapa que troca A/B é traduzido, faixa de eixo normalizada com inversão, `CONFIG_INPUT_UINPUT` no fragmento **e** no gate, GUID do DB casa com o `id` do daemon, `a:b1` e não o automático `b0`, e sem `EVIOCGRAB` (§29) |
 | `tests/portmaster.test.mjs` | 7 | a avaliação do PortMaster: veredito **app de loja** (não imagem), a distinção MIT-da-GUI × GPL-2.0/LGPL-do-payload, os tamanhos medidos, medido ≠ estimado, o gancho `mod_<CFW>.txt`, a invariante de que python3 de alvo só mora no fragmento **opt-in**, e nada do pacote no overlay (§32) |
-| `tests/portmaster-runtime.test.mjs` | 14 | o runtime do PortMaster na imagem: os **seis** símbolos do python3 com o motivo de cada um (`PYEXPAT` e `XZ` só apareceram rodando), `bz2` fora com a justificativa, o desenho do sandbox item por item (`--ro-bind`, `--bind /user`, `--unshare-all`, `--share-net`, `--die-with-parent`), a recusa em rodar sem isolamento, o aviso de `/roms` ausente, o wiring no `build-device.sh` **na chamada** do prepare-config, o `OS_NAME`/symlink no post-build, o encaminhamento de sinal ao `bwrap`, o PID de auto-cura do marcador, o `$HOME` gravável e a troca do `gamecontrollerdb.txt` (§33-§34) |
+| `tests/portmaster-runtime.test.mjs` | 15 | o runtime do PortMaster na imagem: os **seis** símbolos do python3 com o motivo de cada um (`PYEXPAT` e `XZ` só apareceram rodando), `bz2` fora com a justificativa, o desenho do sandbox item por item (`--ro-bind`, `--bind /user`, `--unshare-all`, `--share-net`, `--die-with-parent`), a recusa em rodar sem isolamento, o aviso de `/roms` ausente, o wiring no `build-device.sh` **na chamada** do prepare-config, o `OS_NAME`/symlink no post-build, o encaminhamento de sinal ao `bwrap`, o PID de auto-cura do marcador, o `$HOME` gravável e a troca do `gamecontrollerdb.txt` (§33-§34) |
 
 ## 10-A. O sistema base — acesso antes de interface
 

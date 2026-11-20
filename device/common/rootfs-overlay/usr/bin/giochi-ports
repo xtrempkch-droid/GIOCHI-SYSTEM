@@ -125,6 +125,11 @@ devolver_drm() {
 modo="${1:-}"
 LIBERAR_DRM=0
 RODAR_PORT=""
+# `set -u` está ligado: variável usada só no modo `--rodar` precisa existir
+# sempre, senão a GUI morre com "PORT_SH: parameter not set" — medido no R35S
+# em 20/11/2026, logo depois de o modo ser acrescentado.
+PORT_SH=""
+PORT_DIR=""
 case "$modo" in
     --help|-h)
         # `awk` com padrão ANCORADO, como o `giochi-buttons`: com `sed` sem `^…$`
