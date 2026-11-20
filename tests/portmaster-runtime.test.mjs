@@ -232,6 +232,83 @@ test("o script roda com `set -u`: variável de um modo só existe em todos", asy
 
   // E o caminho padrão (sem `--rodar`) tem de continuar rodando de verdade.
   const { spawnSync } = await import("node:child_process");
-  const r = spawnSync("sh", [caminho, "--status"], { encoding: "utf8", timeout: 15000 });
+  // 60 s: o `--status` varre `/proc/*/fd/*` para achar quem tem o DRM, e isso
+  // passa de 14 s numa máquina carregada. Um timeout apertado vira teste
+  // intermitente, e intermitente é pior que lento (§12.62-B).
+  const r = spawnSync("sh", [caminho, "--status"], { encoding: "utf8", timeout: 60000 });
   assert.equal(r.status, 0, `--status falhou: ${r.stderr}`);
+});
+
+test("todo símbolo do fragmento existe no Kconfig do Buildroot (quando em cache)", async () => {
+  // A classe do §12.71: `BR2_PACKAGE_KMOD_TOOLS` vive DENTRO de
+  // `if BR2_PACKAGE_KMOD`. Sem o pai, o símbolo filho **nem existe** no Kconfig
+  // — o `olddefconfig` o descarta e o `assert-config` reprova o build. E o
+  // símbolo pode simplesmente ter nome errado (`FEATURE_TAR_GZIP`, §12.60).
+  //
+  // A pergunta certa é "este símbolo existe no Kconfig?", e ela exige a árvore
+  // real. Sem a árvore em cache o teste DIZ que pulou — não inventa veredito
+  // por heurística de nome: a primeira versão deste teste tentou dividir
+  // `BR2_PACKAGE_CA_CERTIFICATES` em pai/filho e acusou sete pacotes corretos,
+  // porque nome de pacote tem underscore à vontade.
+  const { existsSync, readdirSync, readFileSync } = await import("node:fs");
+  const { homedir } = await import("node:os");
+
+  const raizes = [];
+  for (const base of [
+    path.join(homedir(), ".cache/giochi-system/work"),
+    "/cache/work",
+  ]) {
+    if (!existsSync(base)) continue;
+    for (const dev of readdirSync(base)) {
+      const dir = path.join(base, dev, "buildroot-2025.02");
+      if (existsSync(path.join(dir, "package"))) raizes.push(dir);
+    }
+  }
+  if (raizes.length === 0) {
+    console.log("  (skip: árvore do Buildroot não está em cache nesta máquina)");
+    return;
+  }
+
+  // Junta `package/**/Config.in` e o `Config.in` da raiz num só texto.
+  const colher = (dir, saida, fundo = 0) => {
+    if (fundo > 6) return;
+    for (const nome of readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, nome.name);
+      if (nome.isDirectory()) colher(p, saida, fundo + 1);
+      else if (nome.name === "Config.in") saida.push(readFileSync(p, "utf8"));
+    }
+  };
+  const textos = [];
+  colher(path.join(raizes[0], "package"), textos);
+  textos.push(readFileSync(path.join(raizes[0], "Config.in"), "utf8"));
+  const kconfig = textos.join("\n");
+
+  const f = await readFile(FRAGMENT, "utf8");
+  const pedidos = [...f.matchAll(/^(BR2_[A-Z0-9_]+)=y$/gm)].map((m) => m[1]);
+  assert.ok(pedidos.length >= 8, `esperava os símbolos do python3/bwrap, achei ${pedidos.length}`);
+
+  const inexistentes = pedidos.filter((s) => !new RegExp(`^\\s*config ${s}$`, "m").test(kconfig));
+  assert.deepEqual(
+    inexistentes,
+    [],
+    "símbolo que não existe no Kconfig é descartado em silêncio e reprova o assert-config: " +
+      inexistentes.join(", "),
+  );
+});
+
+test("o replay do gate nos três handhelds está registrado", async () => {
+  // O `assert-config` sobre o `.config` real é a validação que importa, e ela
+  // precisa de Docker — não cabe num teste de unidade. O que cabe é garantir
+  // que a MEDIÇÃO está escrita, para a próxima pessoa saber contra o que ela
+  // foi feita e quando repetir.
+  //
+  // Medido em 20/11/2026, Buildroot 2025.02:
+  //   r35s  47 símbolos de 3 fragmentos
+  //   x55   35 símbolos de 3 fragmentos
+  //   x35h  34 símbolos de 3 fragmentos
+  const doc = await readFile(path.join(ROOT, "docs/evaluacao-portmaster.md"), "utf8");
+  assert.match(doc, /47 s[íi]mbolos/);
+  assert.match(doc, /35 s[íi]mbolos/);
+  assert.match(doc, /34 s[íi]mbolos/);
+  assert.match(doc, /assert-config/);
 });

@@ -363,6 +363,39 @@ enquanto o jogo rodava (medido: `timeout 30`, port seguindo por 152 s). Agora o
 4. **A partição de dados** (`/user`) não existe: hoje `/user` é um diretório no
    rootfs, criado pelo post-build (§18, item 3).
 
+## 7-B. O gate do build, rodado nos três handhelds
+
+O `assert-config` é quem reprova o build quando um símbolo pedido é descartado
+(§12.1), e ele só vale sobre o `.config` **depois** do `olddefconfig`. Replay do
+pipeline completo — `make <defconfig>` → `prepare-config` com
+`common + aparelho + portmaster` → `olddefconfig` → `assert-config` — feito em
+20/11/2026 com o Buildroot 2025.02:
+
+| Aparelho | `assert-config` |
+| --- | --- |
+| `r35s` | **OK — 47 símbolos** de 3 fragmentos |
+| `powkiddy-x55` | **OK — 35 símbolos** de 3 fragmentos |
+| `powkiddy-x35h` | **OK — 34 símbolos** de 3 fragmentos |
+
+E os símbolos do PortMaster presentes no `.config` final dos três:
+
+```text
+BR2_PACKAGE_PYTHON3=y            BR2_PACKAGE_PYTHON3_PYEXPAT=y
+BR2_PACKAGE_PYTHON3_SSL=y        BR2_PACKAGE_PYTHON3_XZ=y
+BR2_PACKAGE_PYTHON3_ZLIB=y       BR2_PACKAGE_BUBBLEWRAP=y
+BR2_PACKAGE_PYTHON3_UNICODEDATA=y
+```
+
+Nota de método: reproduzir isto exige copiar o defconfig do aparelho para
+`$BR2_DIR/configs/` e resolver o placeholder `__UBOOT_FRAGMENT__`, como o
+`build-device.sh` faz. Sem isso o `make` responde
+`Can't find giochi_powkiddy_x55_defconfig` — que parece erro de configuração e é
+só o arquivo não instalado no lugar onde o `make` procura.
+
+`tests/portmaster-runtime.test.mjs` prende a parte que cabe sem Docker: todo
+símbolo do fragmento tem de existir no `Kconfig` real (com a árvore em cache), e
+o número de cada replay está neste documento.
+
 ## 8. Como repetir o teste (o que foi feito, na ordem)
 
 O caminho que funcionou, sem reflashar imagem — e é o que serve para o próximo
