@@ -350,6 +350,46 @@ roda quando o comando em primeiro plano termina, então o sinal ficava em fila
 enquanto o jogo rodava (medido: `timeout 30`, port seguindo por 152 s). Agora o
 `bwrap` roda em segundo plano com `wait`, e o trap mata o filho.
 
+## 7-C. Os dois defeitos da issue #6 (corrigidos em 26/11/2026)
+
+Reportados com medição no R35S, e os dois são da mesma família do marcador de
+DRM: **estado que sobra de uma execução e mente sobre a próxima**.
+
+| Defeito | Sintoma | Causa | Correção |
+| --- | --- | --- | --- |
+| (a) sem `PYSDL2_DLL_PATH` | `No available video device` | o `pysdl2` resolve o SDL2 de `exlibs/sdl2`, a cópia do pacote, **sem KMSDRM** | `PYSDL2_DLL_PATH=/usr/lib` exportado antes de qualquer caminho que chame o `pugwash` |
+| (b) `.pugwash-reboot` sobrevive | a GUI **abre e fecha em menos de 1 s**, sem mensagem | `pugwash/main.py:129` só roda a GUI `if not reboot_file.is_file()`; o `pm_launch.txt` deles apaga antes, e o `giochi-ports` chamava direto | `rm -f` antes, **e** laço que reexecuta enquanto o pedido reaparecer |
+
+O (a) engana porque a mensagem aponta para o `pysdl2`, não para o driver. O (b)
+engana porque não há mensagem nenhuma — a janela pisca e volta.
+
+Medido no R35S em 26/11/2026, com `.pugwash-reboot` criado de propósito antes:
+
+```text
+.pugwash-reboot criado: 0 Nov 26 20:57
+pugwash vivo em t=6?  [21194 21195 21196]
+pugwash vivo em t=16? [21194 21195 21196]
+DRM: python3
+erros de vídeo no log: 0
+```
+
+E o laço de reinício, com a auto-atualização simulada:
+
+```text
+pugwash t=8:   [21473]
+.pugwash-reboot criado + TERM no pugwash
+pugwash t=+10: [21539]        ← outro PID: reabriu
+.pugwash-reboot consumido
+```
+
+O laço é **uma função** (`rodar_com_reinicio`) usada pelos dois caminhos, com e
+sem sandbox — dois laços copiados divergem na primeira correção (§12.49). E o
+port (`--rodar`) não passa por ele: `.pugwash-reboot` é do `pugwash`, não dele.
+
+Consequência a saber: cada volta do laço reabre o display, e o marcador de DRM
+continua valendo em todas elas — o supervisor só devolve a interface quando o
+wrapper **inteiro** sai. É o desejado.
+
 ## 7-A. O que continua NÃO medido
 
 1. **Baixar um port pela GUI.** O aparelho de teste não tem DNS (o `udhcpd` não

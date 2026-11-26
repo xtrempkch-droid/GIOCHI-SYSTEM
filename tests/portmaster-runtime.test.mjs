@@ -336,3 +336,64 @@ test("`--rodar` não marca console livre quando o DRM já está livre", async ()
   assert.match(t, /\[ -f "\$DEV_FREE_FILE" \] && \{ echo \$\$ >"\$DEV_FREE_FILE\.pid"/,
     "o `.pid` sem marcador deixaria lixo no /run e o init o leria à toa");
 });
+
+test("a GUI é pysdl2: PYSDL2_DLL_PATH aponta para o SDL2 da imagem", async () => {
+  // Issue #6, medido no R35S em 26/11/2026. Sem a variável, o `pysdl2` resolve o
+  // SDL2 de `exlibs/sdl2` — a cópia que o pacote do PortMaster traz, **sem
+  // KMSDRM** — e a GUI morre com "No available video device". A mensagem aponta
+  // para o pysdl2, não para o driver, então manda procurar no lugar errado.
+  //
+  // O `pm_launch.txt` deles põe no `pm_hook_gui_env()`, mas o `giochi-ports`
+  // chama o `pugwash` direto, sem passar por aquele laço.
+  const t = await readFile(
+    path.join(ROOT, "device/common/rootfs-overlay/usr/bin/giochi-ports"),
+    "utf8",
+  );
+  assert.match(t, /^PYSDL2_DLL_PATH=\/usr\/lib$/m);
+  assert.match(t, /^export PYSDL2_DLL_PATH$/m);
+
+  // Tem de valer para TODOS os caminhos que chamam o pugwash: com sandbox, sem
+  // sandbox, e o `--rodar` de um port que abra a GUI. A atribuição tem de vir
+  // antes do primeiro deles.
+  const atribuicao = t.search(/^PYSDL2_DLL_PATH=/m);
+  // Os usos REAIS, não as menções: `--sem-sandbox` aparece na ajuda e no `case`
+  // antes da atribuição, e procurar o literal reprovava o script correto.
+  const usos = [
+    ['if [ "$modo" = "--sem-sandbox" ]', "o caminho sem sandbox"],
+    ['rodar_com_reinicio "$py"', "o sem-sandbox rodando o pugwash"],
+    ['rodar_com_reinicio "$BWRAP"', "o caminho com sandbox"],
+  ];
+  for (const [literal, descricao] of usos) {
+    const pos = t.indexOf(literal);
+    assert.ok(pos > 0, `não achei ${descricao} ("${literal}") — o teste ficou desatualizado`);
+    assert.ok(atribuicao < pos,
+      `PYSDL2_DLL_PATH é atribuído depois de ${descricao} — aquele caminho fica sem o SDL2 da imagem`);
+  }
+});
+
+test("`.pugwash-reboot` é apagado antes e o reinício é honrado depois", async () => {
+  // Issue #6 (b): o `pugwash` pula a GUI e sai quando `.pugwash-reboot` existe
+  // (`pylibs/pugwash/main.py:129`). Um arquivo deixado por qualquer execução
+  // anterior fazia a GUI nunca abrir — medido: o do R35S era de 20/11 e nada
+  // abria desde então.
+  //
+  // E o contrário também importa: quando o `pugwash` pede reinício de verdade
+  // (auto-update, troca de tema), o pedido não pode ser ignorado.
+  const t = await readFile(
+    path.join(ROOT, "device/common/rootfs-overlay/usr/bin/giochi-ports"),
+    "utf8",
+  );
+
+  assert.match(t, /^PUGWASH_REBOOT=/m);
+  // O `rm` antes de qualquer execução.
+  const rm = t.indexOf('rm -f "$PUGWASH_REBOOT"');
+  const execucao = t.indexOf("rodar_com_reinicio");
+  assert.ok(rm > 0 && rm < execucao, "o `.pugwash-reboot` tem de ser apagado ANTES de rodar");
+
+  // O laço é UMA função usada por todos os caminhos: dois laços copiados
+  // divergem na primeira correção (§12.49).
+  const funcoes = (t.match(/^rodar_com_reinicio\(\)/gm) || []).length;
+  assert.equal(funcoes, 1, `a função de reinício aparece ${funcoes} vez(es); tem de ser uma`);
+  assert.match(t, /\[ -f "\$PUGWASH_REBOOT" \] \|\| break/,
+    "sem esta linha o laço nunca termina — a GUI reabriria para sempre");
+});

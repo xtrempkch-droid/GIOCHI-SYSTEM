@@ -399,6 +399,13 @@ giochi-ports --liberar-drm     # abre a GUI; devolve a interface ao sair
 giochi-ports --rodar form      # roda um port instalado
 ```
 
+O `giochi-ports` cuida das duas coisas que o pysdl2 e o PortMaster exigem e que
+ninguém mais sabe: exporta `PYSDL2_DLL_PATH=/usr/lib` (sem isso o `pysdl2` carrega
+o SDL2 do pacote, que não tem KMSDRM) e apaga o `.pugwash-reboot` antes de abrir
+(sem isso o `pugwash` pula a GUI e sai em menos de um segundo, sem mensagem).
+Frontend que chamar o `pugwash` **direto** repete a dança — e o primeiro que
+esquecer volta a ter "a loja não abre".
+
 `--liberar-drm` para o launcher pelo mecanismo que o `giochi-init` já conhece
 (`/run/giochi/dev-free-console`) e **devolve a interface** quando a GUI sai. Ele
 grava o próprio PID ao lado do marcador: se morrer sem limpar, o `giochi-init`

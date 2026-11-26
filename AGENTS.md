@@ -151,7 +151,7 @@ o que foi medido, e deixar a decisão com quem responde pelo código.
 
 | Verificação | Resultado |
 | --- | --- |
-| `node tests/run-all.mjs` | **664/664 + 1 skip**, 72 arquivos (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, panel-diag 17, gamepad-virtual 12, selftest-contract 21, issues-vizinhos 5, portmaster 7, …) |
+| `node tests/run-all.mjs` | **666/666 + 1 skip**, 72 arquivos (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, panel-diag 17, gamepad-virtual 12, selftest-contract 21, issues-vizinhos 5, portmaster 7, …) |
 | `node scripts/validate-devices.mjs` | OK — 7 devices, 1 habilitado |
 | `node scripts/list-devices.mjs --github-matrix` | matriz com `qemu-aarch64` |
 | matriz com `--device powkiddy-x55 --allow-draft` | devolve **só** o X55 |
@@ -566,7 +566,7 @@ absoluto** do host — §12.40).
 
 ## 10. Testes
 
-`node tests/run-all.mjs` → **664/664 + 1 skip**, em **72 arquivos**. A tabela abaixo é uma
+`node tests/run-all.mjs` → **666/666 + 1 skip**, em **72 arquivos**. A tabela abaixo é uma
 seleção dos que prendem contratos de projeto; a lista completa é `ls tests/` e
 `tests/runner-coverage.test.mjs` **falha** se algum arquivo existir sem estar
 importado no `run-all.mjs` — foi assim que dois testes desta revisão quase
@@ -603,7 +603,7 @@ ficaram fora da contagem.
 | `tests/sdl-input-probe.test.mjs` | 6 | o probe pergunta `SDL_IsGameController` e imprime o mapeamento (não só conta joysticks), não abre vídeo sem `--video` (não rouba o DRM master), cruza `bN`→código evdev, e prende a convenção `a = BTN_EAST` dos mapas contra a do SDL2 com o mapa **medido** no R35S (§12.74) |
 | `tests/gamepad-virtual.test.mjs` | 9 | o controle VIRTUAL: layout canônico igual nos três aparelhos, mapa que troca A/B é traduzido, faixa de eixo normalizada com inversão, `CONFIG_INPUT_UINPUT` no fragmento **e** no gate, GUID do DB casa com o `id` do daemon, `a:b1` e não o automático `b0`, e sem `EVIOCGRAB` (§29) |
 | `tests/portmaster.test.mjs` | 7 | a avaliação do PortMaster: veredito **app de loja** (não imagem), a distinção MIT-da-GUI × GPL-2.0/LGPL-do-payload, os tamanhos medidos, medido ≠ estimado, o gancho `mod_<CFW>.txt`, a invariante de que python3 de alvo só mora no fragmento **opt-in**, e nada do pacote no overlay (§32) |
-| `tests/portmaster-runtime.test.mjs` | 18 | o runtime do PortMaster na imagem: os **seis** símbolos do python3 com o motivo de cada um (`PYEXPAT` e `XZ` só apareceram rodando), `bz2` fora com a justificativa, o desenho do sandbox item por item (`--ro-bind`, `--bind /user`, `--unshare-all`, `--share-net`, `--die-with-parent`), a recusa em rodar sem isolamento, o aviso de `/roms` ausente, o wiring no `build-device.sh` **na chamada** do prepare-config, o `OS_NAME`/symlink no post-build, o encaminhamento de sinal ao `bwrap`, o PID de auto-cura do marcador, o `$HOME` gravável, a troca do `gamecontrollerdb.txt`, o `--rodar` que não marca console livre quando o DRM já está livre, e a checagem de símbolo contra o Kconfig real (§33-§35) |
+| `tests/portmaster-runtime.test.mjs` | 20 | o runtime do PortMaster na imagem: os **seis** símbolos do python3 com o motivo de cada um (`PYEXPAT` e `XZ` só apareceram rodando), `bz2` fora com a justificativa, o desenho do sandbox item por item (`--ro-bind`, `--bind /user`, `--unshare-all`, `--share-net`, `--die-with-parent`), a recusa em rodar sem isolamento, o aviso de `/roms` ausente, o wiring no `build-device.sh` **na chamada** do prepare-config, o `OS_NAME`/symlink no post-build, o encaminhamento de sinal ao `bwrap`, o PID de auto-cura do marcador, o `$HOME` gravável, a troca do `gamecontrollerdb.txt`, o `--rodar` que não marca console livre quando o DRM já está livre, e a checagem de símbolo contra o Kconfig real (§33-§35) |
 
 ## 10-A. O sistema base — acesso antes de interface
 
@@ -7588,3 +7588,47 @@ invariantes de classe: o título não pode ser o do `GAMES #2` (o defeito real d
 17/11) e tem de compartilhar assunto com o próprio corpo. A verificação de
 conteúdo passou a ser indexada por **arquivo**, não por repo — o APP tem duas
 issues de assuntos diferentes.
+
+## 36. A issue #6: a GUI não abria, e eram dois defeitos (26/11/2026)
+
+Reportada com medição no R35S. Os dois são da **mesma família do marcador de
+DRM**: estado que sobra de uma execução e mente sobre a próxima.
+
+| Defeito | Sintoma | Causa | Correção |
+| --- | --- | --- | --- |
+| (a) sem `PYSDL2_DLL_PATH` | `No available video device` | o `pysdl2` resolve o SDL2 de `exlibs/sdl2` — a cópia do pacote, **sem KMSDRM** | `PYSDL2_DLL_PATH=/usr/lib` exportado antes de qualquer caminho que chame o `pugwash` |
+| (b) `.pugwash-reboot` sobrevive | a GUI abre e fecha **em menos de 1 s**, sem mensagem | `pugwash/main.py:129` só roda `if not reboot_file.is_file()`; o `pm_launch.txt` deles apaga antes, e o `giochi-ports` chamava direto | `rm -f` antes, **e** laço que reexecuta enquanto o pedido reaparecer |
+
+O (a) engana porque a mensagem aponta para o `pysdl2`, não para o driver. O (b)
+engana porque não há mensagem nenhuma.
+
+Medido no R35S, com `.pugwash-reboot` criado de propósito antes:
+
+```text
+pugwash vivo em t=6?  [21194 21195 21196]
+pugwash vivo em t=16? [21194 21195 21196]
+DRM: python3
+erros de vídeo no log: 0
+```
+
+E o laço, com a auto-atualização simulada (arquivo criado + TERM no pugwash):
+`pugwash t=8: [21473]` → `t=+10: [21539]`, arquivo consumido.
+
+### Duas decisões que valem
+
+1. **O laço é UMA função** (`rodar_com_reinicio`), usada pelo caminho com e sem
+   sandbox. Dois laços copiados divergem na primeira correção (§12.49) — e o
+   `--sem-sandbox` é justamente o caminho que menos se testa.
+2. **O port (`--rodar`) NÃO passa pelo laço.** `.pugwash-reboot` é do `pugwash`;
+   um port que fecha não pediu reinício, e reabrir seria laço infinito.
+
+Consequência a saber: cada volta reabre o display, e o marcador de DRM vale em
+todas — o supervisor só devolve a interface quando o wrapper **inteiro** sai.
+
+### O teste que quase nasceu errado
+
+A primeira versão do teste de `PYSDL2_DLL_PATH` procurava o literal
+`--sem-sandbox` no arquivo — e o achou na **ajuda**, antes da atribuição, então
+reprovou o script correto. Trocado pelos usos reais (`if [ "$modo" = ... ]`,
+`rodar_com_reinicio ...`). É o §12.37 de novo: o teste respondeu a uma pergunta
+que não era a que se fez.

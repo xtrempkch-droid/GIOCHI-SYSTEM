@@ -215,11 +215,72 @@ if [ ! -d /roms ]; then
     aviso "       funcs.txt. A imagem deveria trazer o symlink /roms -> /user."
 fi
 
+# ── a GUI é pysdl2, e o pysdl2 traz o próprio SDL2 ─────────────────────────
+#
+# O pacote do PortMaster carrega uma cópia do SDL2 em `exlibs/sdl2`, e o
+# `pysdl2` a resolva por padrão. Essa cópia **não tem KMSDRM**, então a GUI
+# morre com:
+#
+#   sdl2.ext.err.SDLError: 'Error encountered initializing the video subsystem:
+#   No available video device'
+#
+# A mensagem aponta para o pysdl2, não para o driver, e manda procurar no lugar
+# errado. O `pm_launch.txt` deles resolve no `pm_hook_gui_env()`
+# (`export PYSDL2_DLL_PATH="/usr/lib"`), mas o `giochi-ports` chama o `pugwash`
+# direto, sem passar por aquele laço — então a variável nunca era posta.
+#
+# Medido no R35S em 26/11/2026 (issue #6): com ela, o erro passa a ser
+# `kmsdrm not available` **só** quando o card0 está ocupado, e abre quando está
+# livre. É a variável que troca o SDL2 do pacote pelo da imagem.
+PYSDL2_DLL_PATH=/usr/lib
+export PYSDL2_DLL_PATH
+
+# ── .pugwash-reboot: o pedido de reinício que sobrevive e mente ─────────────
+#
+# O `pugwash` deixa `.pugwash-reboot` quando se auto-atualiza, e no início ele
+# faz (`pylibs/pugwash/main.py:129`):
+#
+#   if not reboot_file.is_file():
+#       with pm.enable_cancellable(True):
+#           pm.run()
+#
+# Ou seja: se o arquivo EXISTE, ele **pula a GUI e sai**, sem mensagem. O
+# `pm_launch.txt` deles apaga antes de cada execução (`$ESUDO rm -f`); chamando
+# o `pugwash` direto, ninguém apagava — medido: o arquivo do R35S era de 20/11 e
+# a GUI não abria desde então.
+#
+# É a mesma família do marcador de DRM: estado que sobra de uma execução e mente
+# sobre a próxima.
+PUGWASH_REBOOT="$pm/.pugwash-reboot"
+rm -f "$PUGWASH_REBOOT" 2>/dev/null || true
+
+# Roda o `pugwash` e honra o pedido de reinício dele. É UMA função porque os dois
+# caminhos (com e sem sandbox) precisam do mesmo comportamento — dois laços
+# copiados divergem na primeira correção (§12.49).
+#
+# Roda em SEGUNDO PLANO e espera com `wait`: um `trap` de shell só roda quando o
+# comando em primeiro plano termina, então um TERM no wrapper ficava ENFILEIRADO
+# enquanto a GUI rodava — medido no R35S em 20/11/2026, com `timeout 30` e o
+# processo seguindo por 152 s. Com `wait`, o sinal interrompe e o trap pode matar
+# o filho (o `bwrap` mata os netos por `--die-with-parent`).
+rodar_com_reinicio() {
+    _rc=0
+    while :; do
+        "$@" &
+        BW_PID=$!
+        wait "$BW_PID"
+        _rc=$?
+        [ -f "$PUGWASH_REBOOT" ] || break
+        rm -f "$PUGWASH_REBOOT" 2>/dev/null || true
+    done
+    return $_rc
+}
+
 if [ "$modo" = "--sem-sandbox" ]; then
     aviso "SEM sandbox, a pedido: o codigo dos ports roda com o rootfs gravavel."
     [ "$LIBERAR_DRM" = "1" ] && liberar_drm
     cd "$pm" || exit 1
-    "$py" ./pugwash "$@"
+    rodar_com_reinicio "$py" ./pugwash "$@"
     rc=$?
     [ "$LIBERAR_DRM" = "1" ] && devolver_drm
     exit $rc
@@ -347,24 +408,40 @@ if [ -n "$PORT_SH" ]; then
     # `bash`, e não `/bin/sh`: os port scripts usam `exec > >(tee ...)`, que é
     # sintaxe do bash. O `sh` desta imagem é o busybox ash e morreria nela.
     if [ -x /bin/bash ]; then PORT_SHELL=/bin/bash; else PORT_SHELL=/bin/sh; fi
-    "$BWRAP" $BW_BASE --chdir "$PORT_DIR" "$PORT_SHELL" "$PORT_SH" "$@" &
-else
-    "$BWRAP" $BW_BASE --chdir "$pm" "$py" ./pugwash "$@" &
 fi
-BW_PID=$!
+
+BW_PID=""
 
 # O PID do wrapper vai para um arquivo: se ele for morto com `kill -9`, o trap
 # não roda e o marcador ficaria — o `giochi-init` lê este arquivo e se cura.
 #
 # Só quando o marcador EXISTE: lançado pelo launcher (que já liberou o DRM) não
 # há marcador a proteger, e criar o `.pid` sozinho deixaria lixo no /run.
+#
+# O trap referencia `$BW_PID` entre aspas SIMPLES, então ele é lido no instante
+# do sinal — é o que faz o laço de reinício abaixo não perder o sinal na
+# segunda volta.
 if [ "$LIBERAR_DRM" = "1" ]; then
     [ -f "$DEV_FREE_FILE" ] && { echo $$ >"$DEV_FREE_FILE.pid" 2>/dev/null || true; }
     trap 'kill -TERM "$BW_PID" 2>/dev/null; wait "$BW_PID" 2>/dev/null; devolver_drm; exit 143' TERM INT
 fi
 
-wait "$BW_PID"
-rc=$?
+# ── execução ───────────────────────────────────────────────────────────────
+#
+# O `bwrap` e o `--chdir` são os mesmos nos dois casos; o que muda é o comando.
+# A ordem dos literais importa: `$BW_BASE` é expandido SEM aspas (são flags
+# fixas, sem espaço), e o `$pm`/`$PORT_DIR` vai entre aspas separado.
+if [ -n "$PORT_SH" ]; then
+    # Port não pede reinício: o `.pugwash-reboot` é do pugwash, não dele. Mas o
+    # `wait` em segundo plano continua valendo pelo trap.
+    "$BWRAP" $BW_BASE --chdir "$PORT_DIR" "$PORT_SHELL" "$PORT_SH" "$@" &
+    BW_PID=$!
+    wait "$BW_PID"
+    rc=$?
+else
+    rodar_com_reinicio "$BWRAP" $BW_BASE --chdir "$pm" "$py" ./pugwash "$@"
+    rc=$?
+fi
 
 # O `trap` do EXIT já devolve o marcador; este `exit` só propaga o status da
 # GUI. Sem o trap, um `kill -9` no meio deixaria o aparelho sem interface — e o
