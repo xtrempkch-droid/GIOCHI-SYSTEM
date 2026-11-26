@@ -886,6 +886,18 @@ make -C "$BR2_DIR" O="$BUILD_DIR" olddefconfig >"$WORK_DIR/olddefconfig.log" 2>&
 # `.config` e não há divergência artificial.
 ASSERT_FRAGMENTS=(--fragment "$ROOT/config/common.fragment" --fragment "$FRAGMENT")
 ASSERT_FRAGMENTS+=(${EXTRA_FRAGMENT_ARGS[@]+"${EXTRA_FRAGMENT_ARGS[@]}"})
+# Os fragmentos CONDICIONAIS (opt-in) também entram. Eles ficavam de fora e o
+# buraco é medido — é a mesma classe do §12.59/1 e do §12.60/2, na terceira
+# roupa: o fragmento do PortMaster pede 8 símbolos (`python3` + `bubblewrap`) e
+# nenhum deles passava por gate. Um erro de digitação em
+# `BR2_PACKAGE_PYTHON3_UNICODEDATA` seria descartado pelo `olddefconfig` em
+# silêncio, o build ficaria VERDE, e a imagem sairia com python3 sem
+# `unicodedata` — falhando só semanas depois, no aparelho, com
+# `ModuleNotFoundError` dentro da GUI do PortMaster.
+# Ver `tests/portmaster-runtime.test.mjs`, que exige a invariante:
+# todo `--fragment` dado ao `prepare-config` vai também para o `assert-config`.
+ASSERT_FRAGMENTS+=(${GODOT_FRAGMENT_ARGS[@]+"${GODOT_FRAGMENT_ARGS[@]}"})
+ASSERT_FRAGMENTS+=(${PORTMASTER_FRAGMENT_ARGS[@]+"${PORTMASTER_FRAGMENT_ARGS[@]}"})
 if [[ -f "$DEVICE_DEFCONFIG" ]]; then
   ASSERT_FRAGMENTS+=(--fragment "$BR2_DIR/configs/$DEFCONFIG")
 fi

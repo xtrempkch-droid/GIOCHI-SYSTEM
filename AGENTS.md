@@ -151,7 +151,7 @@ o que foi medido, e deixar a decisão com quem responde pelo código.
 
 | Verificação | Resultado |
 | --- | --- |
-| `node tests/run-all.mjs` | **667/667 + 1 skip**, 72 arquivos (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, panel-diag 17, gamepad-virtual 12, selftest-contract 21, issues-vizinhos 5, portmaster 7, …) |
+| `node tests/run-all.mjs` | **668/668 + 1 skip**, 72 arquivos (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, panel-diag 17, gamepad-virtual 12, selftest-contract 21, issues-vizinhos 5, portmaster 7, …) |
 | `node scripts/validate-devices.mjs` | OK — 7 devices, 1 habilitado |
 | `node scripts/list-devices.mjs --github-matrix` | matriz com `qemu-aarch64` |
 | matriz com `--device powkiddy-x55 --allow-draft` | devolve **só** o X55 |
@@ -566,7 +566,7 @@ absoluto** do host — §12.40).
 
 ## 10. Testes
 
-`node tests/run-all.mjs` → **667/667 + 1 skip**, em **72 arquivos**. A tabela abaixo é uma
+`node tests/run-all.mjs` → **668/668 + 1 skip**, em **72 arquivos**. A tabela abaixo é uma
 seleção dos que prendem contratos de projeto; a lista completa é `ls tests/` e
 `tests/runner-coverage.test.mjs` **falha** se algum arquivo existir sem estar
 importado no `run-all.mjs` — foi assim que dois testes desta revisão quase
@@ -7821,3 +7821,79 @@ que a causa é nomeável e o conserto é barato:
 antes do `update`, exige `Acquire::Retries`, e exige a **ordem**. Verificado por
 mutação — apagar as duas linhas do `rm` deixa 6 pass / 1 fail com a mensagem da
 consequência.
+
+## 40. O build verde do r35s escondia um gate que não cobria o PortMaster (26/11/2026)
+
+O run `45905065339` fechou **verde nos quatro aparelhos** e o `r35s` publicou
+artefato de 172,5 MB (era 154,3 MB antes do runtime do PortMaster). Tudo certo —
+e é exatamente aí que valia olhar o log em vez do resultado.
+
+```text
+  portmaster: python3 + bubblewrap (runtime) — o pacote fica em /user
+  assert-config: OK — 91 símbolo(s) de 3 fragmento(s) verificados.
+```
+
+**Três fragmentos.** O `build-device.sh` aplicava **quatro**: comum, aparelho,
+`config/portmaster.fragment` e — quando ligado — `config/godot.fragment`. O
+`ASSERT_FRAGMENTS` era montado com `common` + `$FRAGMENT` + `EXTRA` + defconfig,
+e os **condicionais ficavam de fora**.
+
+Consequência medida, olhando o fragmento: são **8 símbolos** (`python3` com
+`PYC_ONLY`, `SSL`, `ZLIB`, `UNICODEDATA`, `PYEXPAT`, `XZ`, mais `BUBBLEWRAP`), e
+**nenhum** passava por gate. Um `BR2_PACKAGE_PYTHON3_UNICODEDATAA` (com A a mais)
+seria descartado pelo `olddefconfig` em silêncio e o build ficaria verde com um
+python3 sem `unicodedata` — falhando semanas depois, no aparelho, com
+`ModuleNotFoundError` dentro da GUI.
+
+É a **terceira roupa da mesma classe**:
+
+| § | O gate existia e não cobria |
+| --- | --- |
+| 12.59/1 | o do `harfbuzz` — a primeira linha o desligava |
+| 12.60/2 | o do `busybox` — era o único Kconfig sem verificação |
+| **12.40** (este) | o `assert-config` — cobria parte dos fragmentos |
+
+### O que fechou
+
+```bash
+ASSERT_FRAGMENTS+=(${GODOT_FRAGMENT_ARGS[@]+"${GODOT_FRAGMENT_ARGS[@]}"})
+ASSERT_FRAGMENTS+=(${PORTMASTER_FRAGMENT_ARGS[@]+"${PORTMASTER_FRAGMENT_ARGS[@]}"})
+```
+
+Verificado por replay, sem compilar, contra os dois lados:
+
+```text
+.config do r35s (tem python3), fragmento correto
+  -> assert-config: OK — 8 símbolo(s) de 1 fragmento(s).      exit 0
+
+.config do r35s, fragmento com um "A" a mais no UNICODEDATA
+  -> DESAPARECEU (1): BR2_PACKAGE_PYTHON3_UNICODEDATAA
+     pedido em /tmp/pm-typo.fragment                          exit 1
+```
+
+E os 8 nomes foram conferidos **contra o Kconfig real** do 2025.02
+(`package/python3/Config.in`, `package/bubblewrap/Config.in`): todos existem, com
+a grafia que o fragmento usa. O conteúdo estava certo — o gate é que faltava.
+
+### A invariante, e não a lista
+
+`tests/portmaster-runtime.test.mjs` (21 casos) passou a exigir: **todo array
+`*_FRAGMENT_ARGS` de símbolo `BR2_*` que chegue ao `prepare-config` chega também
+ao `assert-config`**. Os de kernel e busybox são outro Kconfig — a invariante
+exige que eles tenham os seus próprios gates (`assert-kernel-config`,
+`assert-busybox-config`) rodando no build, para que a exclusão não vire desculpa
+para esquecer um terceiro.
+
+Duas lições de construção do teste, as duas medidas:
+
+1. **O bloco procurado começa em `ASSERT_FRAGMENTS=(`, não na chamada do
+   `node`.** Os `+=` ficam **antes** do `if ! node ... assert-config`; olhar a
+   chamada daria falso negativo em todos os casos. A primeira versão deste teste
+   acusou cinco arrays de uma vez e o erro era meu, não do código.
+2. **O escopo tem de separar os Kconfigs.** A primeira versão exigia que
+   `KERNEL_FRAGMENT_ARGS` e `BUSYBOX_FRAGMENT_ARGS` estivessem no
+   `assert-config` — onde eles nunca deveriam estar. Invariante ampla demais vira
+   ruído e alguém a desliga (§12.22).
+
+Verificado por mutação: apagando os dois `ASSERT_FRAGMENTS+=` dá **20 pass / 1
+fail** com os nomes e a consequência; com eles, **21/21**.

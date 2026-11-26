@@ -397,3 +397,55 @@ test("`.pugwash-reboot` é apagado antes e o reinício é honrado depois", async
   assert.match(t, /\[ -f "\$PUGWASH_REBOOT" \] \|\| break/,
     "sem esta linha o laço nunca termina — a GUI reabriria para sempre");
 });
+
+test("todo --fragment BR2 do prepare-config também é verificado pelo assert-config", async () => {
+  // Encontrado em 26/11/2026, no run 45905065339: o fragmento do PortMaster era
+  // aplicado (`portmaster: python3 + bubblewrap (runtime)` no log) mas o
+  // `assert-config` reportava "91 símbolo(s) de 3 fragmento(s)" — ele verifica
+  // comum + aparelho + defconfig, e os CONDICIONAIS (godot, portmaster) ficavam
+  // de fora. Nenhum dos 8 símbolos do portmaster.fragment passava por gate.
+  //
+  // É a mesma classe do §12.59/1 (o gate do harfbuzz que nunca rodou) e do
+  // §12.60/2 (o busybox como único Kconfig sem verificação), na terceira roupa:
+  // o gate existe, roda, e cobre PARTE dos arquivos.
+  //
+  // A invariante é sobre a CLASSE, não sobre estes dois nomes: qualquer array
+  // `*_FRAGMENT_ARGS` de símbolo `BR2_*` que chegue ao `prepare-config` tem de
+  // chegar ao `assert-config`. Os de kernel e busybox são outro Kconfig e têm
+  // os seus próprios gates (`assert-kernel-config`, `assert-busybox-config`) —
+  // esses são verificados aqui também, para que a exclusão não vire desculpa.
+  const t = await readFile(path.join(ROOT, "scripts/build-device.sh"), "utf8");
+
+  const blocoDe = (inicio, fim) => {
+    const i = t.indexOf(inicio);
+    assert.ok(i >= 0, `não achei "${inicio}"`);
+    return t.slice(i, t.indexOf(fim, i));
+  };
+  const prep = blocoDe('node "$ROOT/scripts/prepare-config.mjs"', "make -C");
+  // O bloco do assert começa na MONTAGEM de ASSERT_FRAGMENTS, não na chamada:
+  // os appends ficam antes do `if ! node ...`, e olhar só a chamada daria
+  // falso negativo.
+  const assertBloco = blocoDe("ASSERT_FRAGMENTS=(", "ERRO: símbolos pedidos");
+
+  const todos = new Set([...prep.matchAll(/\$\{([A-Z_]+_FRAGMENT_ARGS)\[/g)].map((m) => m[1]));
+  assert.ok(todos.size >= 3, `esperava >=3 arrays de fragmento, achei ${todos.size}`);
+
+  // Outro Kconfig, outro gate — mas tem de existir um gate.
+  const outroKconfig = ["KERNEL_FRAGMENT_ARGS", "BUSYBOX_FRAGMENT_ARGS"];
+  for (const nome of outroKconfig) {
+    if (!todos.has(nome)) continue;
+    const gate = nome === "KERNEL_FRAGMENT_ARGS" ? "assert-kernel-config.mjs" : "assert-busybox-config.mjs";
+    assert.ok(t.includes(gate), `${nome} existe mas ${gate} não roda no build`);
+  }
+
+  const br2 = [...todos].filter((n) => !outroKconfig.includes(n));
+  const faltando = br2.filter((nome) => !assertBloco.includes(nome));
+  assert.deepEqual(
+    faltando,
+    [],
+    "fragmento(s) BR2 aplicado(s) mas NÃO verificado(s) pelo assert-config: " +
+      faltando.join(", ") +
+      "\n  Um símbolo com typo ou pai unset neles é descartado em silêncio e o build" +
+      "\n  fica verde com a imagem faltando o recurso (§12.59/1, §12.60/2).",
+  );
+});
