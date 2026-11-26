@@ -20,26 +20,70 @@ sem o resto.
 Cada arquivo é o corpo **puro** — não tem cabeçalho, não tem `---`, não tem
 instrução. Selecionar tudo e colar é o passo inteiro.
 
-## Estado de cada um (conferido em 26/11/2026)
+## Estado de cada um (conferido em 26/11/2026, com `gh`)
 
-| Repo | Título | Arquivo | Situação |
+A coluna do **arquivo** é o que importa para colar: o teste
+`tests/issues-vizinhos.test.mjs` lê esta tabela e confere que o corpo existe,
+está inteiro e fala do assunto daquela equipe. O número da issue está ao lado
+porque é o que se usa para responder lá.
+
+| Repo | Título | Arquivo | Issue |
 | --- | --- | --- | --- |
-| `GIOCHI-APP` | PortMaster: listar os ports no launcher e oferecer como app de loja (sideload) | [`APP-ports-e-loja.md`](APP-ports-e-loja.md) | **aberta como `#2`** — o formulário duplicou e a `#5` foi fechada como duplicata |
-| `GIOCHI-OS` | Documentar e garantir o contrato de entrada: o controle virtual "Giochi Gamepad" na junção | [`OS-documentar-na-juncao.md`](OS-documentar-na-juncao.md) | **a issue FOI DELETADA** (a `#1` tinha o corpo errado e sumiu) — **reabrir** |
+| `GIOCHI-APP` | PortMaster: listar os ports no launcher e oferecer como app de loja (sideload) | [`APP-ports-e-loja.md`](APP-ports-e-loja.md) | **`#2` aberta** — canônica (a `#5` foi fechada como duplicata) |
+| `GIOCHI-OS` | Contrato de entrada: documentar o controle virtual "Giochi Gamepad" na junção | [`OS-documentar-na-juncao.md`](OS-documentar-na-juncao.md) | **`#5` aberta** — canônica (a `#2`/`#3`/`#4` são duplicatas fechadas) |
+| `GIOCHI-APP` | Controle virtual "Giochi Gamepad": preferir na enumeração, e o analógico tem faixa única | [`APP-enumeracao-e-analogico.md`](APP-enumeracao-e-analogico.md) | **`#6` aberta** — republicada; a `#1` original tinha sido deletada |
 
-Já resolvidas, e os arquivos podem sair desta pasta:
+Já resolvidas em repo vizinho:
 
-| Repo | Issue | O que era | Estado |
+| Repo | Issue | O que era | Prova |
 | --- | --- | --- | --- |
-| `GIOCHI-GAMES` | `#1` | o `neon-drift` tratava o A como freio | **fechada, corrigida de verdade**: `gamepad.rs` agora faz `Button::A => ACELERAR` / `Button::B => FREAR`, com o comentário citando a issue |
-| `GIOCHI-GAMES` | `#2` | o contrato de entrada, para a equipe dos jogos | **aberta**, e é o material que a equipe usa |
-| `GIOCHI-APP` | `#1` (antiga) | contrato de entrada: enumerar e analógico | **deletada** junto com o repo — o corpo errado foi embora |
+| `GIOCHI-GAMES` | `#1` | o `neon-drift` freava com o A | o `gamepad.rs` deles hoje faz `Button::A => ACELERAR` / `Button::B => FREAR`, com o comentário citando a issue |
 
-> **Correção de rumo, 26/11/2026.** A versão anterior desta tabela dizia que
-> `APP#1` e `OS#1` estavam "abertas com o corpo errado, precisa substituir". As
-> duas foram **deletadas** em algum momento entre 20 e 26/11, junto com a
-> `GAMES#3`/`#4`. O material do APP foi reaberto como `#2`; o do OS **não**, e é
-> o único pedido desta pasta que hoje não existe em lugar nenhum além daqui.
+## O caminho que funciona: `gh`, e não o formulário
+
+A ferramenta de issues do MCP **renderiza um formulário interativo em vez de
+executar**, e nesta interface ele não abre. Pior: ela reporta `awaiting_user_submission`
+**e a chamada é executada de qualquer forma** — foi assim que `APP#2`/`#5` e
+`OS#2`/`#3`/`#4` apareceram em dobro e em quádruplo (26/11/2026). É o mesmo
+defeito de 17/11, quando quatro submissões viraram quatro cópias no `GAMES`.
+
+**O caminho que funciona**, e que ficou instalado nesta máquina:
+
+```bash
+# 1. o CLI (não vem por padrão; ~/.local/bin)
+V=$(curl -sI https://github.com/cli/cli/releases/latest | grep -i '^location:' | sed 's/.*tag\/v//' | tr -d '\r\n')
+curl -sL -o /tmp/gh.tar.gz "https://github.com/cli/cli/releases/download/v${V}/gh_${V}_linux_amd64.tar.gz"
+tar xzf /tmp/gh.tar.gz -C /tmp && cp /tmp/gh_${V}_linux_amd64/bin/gh ~/.local/bin/
+
+# 2. login por device flow (o código aparece no terminal; o token fica local)
+gh auth login --hostname github.com --git-protocol ssh --skip-ssh-key --web
+#    → abrir https://github.com/login/device e digitar o código
+
+# 3. e então:
+gh issue create --repo xtrempkch-droid/GIOCHI-OS \
+   --title "..." --body-file docs/issues-para-outros-repos/OS-documentar-na-juncao.md
+gh issue close 6 --repo xtrempkch-droid/GIOCHI-SYSTEM --reason completed --comment "..."
+```
+
+**Rode o `gh auth login` em background.** Em primeiro plano ele morre no
+timeout do shell e o código expira antes de alguém digitá-lo — aconteceu na
+primeira tentativa. O token fica em `~/.config/gh/hosts.yml` (keyring) e **não
+passa pela conversa**, que é a razão de preferir device flow a colar um PAT.
+
+E confira **depois** de cada `create`: a ferramenta pode ter criado mesmo tendo
+dito que não. `gh issue list --repo <repo> --state all` responde em um segundo.
+
+## Por que os arquivos desta pasta continuam existindo
+
+Eles são o **corpo puro** de cada pedido. Mesmo com `gh` funcionando, ter o texto
+versionado vale por três razões:
+
+1. o corpo de uma issue não tem histórico — mudar de ideia é editar sem rastro,
+   e aqui cada mudança aparece no `git log`;
+2. um repo vizinho pode apagar a issue (aconteceu: `OS#1` sumiu entre 20 e 26/11),
+   e o texto continuaria só na memória de quem escreveu;
+3. `tests/issues-vizinhos.test.mjs` confere que o corpo está inteiro, sem HTML e
+   falando do assunto daquela equipe — antes de ser publicado, não depois.
 
 ## O que já foi feito (e pode sair daqui)
 

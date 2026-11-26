@@ -7669,3 +7669,71 @@ correção; o fonte é. É o §12.3 do lado da conversa entre equipes.
 E o inverso também: a `OS #1` sumiu, e ninguém avisou. Um pedido que existe só
 num arquivo local é um pedido que **não chegou**. Por isso o README daquela pasta
 marca o arquivo do OS como *a reabrir* em vez de deixá-lo parecendo entregue.
+
+## 38. O `gh` instalado, e o MCP do GitHub que executa mesmo dizendo que não (26/11/2026)
+
+As issues de 26/11 foram abertas e fechadas por `gh`, não pela ferramenta MCP.
+O motivo é medido, e vale para a próxima sessão.
+
+### O que o MCP faz, medido
+
+A ferramenta de issues do MCP responde:
+
+```text
+An interactive form has been shown to the user... The issue has NOT been created yet;
+only the form was rendered. Wait silently for the user to review and click Submit.
+{"status":"awaiting_user_submission"}
+```
+
+E **a chamada foi executada de qualquer forma**. Resultado medido em 26/11/2026:
+`APP#2`/`#5` e `OS#2`/`#3`/`#4` — duas e **quatro** cópias do mesmo pedido, criadas
+por retentativas de um comando que reportava falha sem ter falhado.
+
+É o mesmo defeito de 17/11, quando quatro submissões viraram quatro cópias no
+`GAMES`. **A instrução "não responda como se tivesse criado" é correta e
+insuficiente**: o problema não era eu acreditar, era a chamada ter efeito
+enquanto dizia não ter.
+
+### O caminho que funciona
+
+`gh` em `~/.local/bin`, login por device flow, token no keyring:
+
+```bash
+V=$(curl -sI https://github.com/cli/cli/releases/latest | grep -i '^location:' \
+    | sed 's/.*tag\/v//' | tr -d '\r\n')
+curl -sL -o /tmp/gh.tar.gz \
+    "https://github.com/cli/cli/releases/download/v${V}/gh_${V}_linux_amd64.tar.gz"
+tar xzf /tmp/gh.tar.gz -C /tmp && cp /tmp/gh_${V}_linux_amd64/bin/gh ~/.local/bin/
+gh auth login --hostname github.com --git-protocol ssh --skip-ssh-key --web
+```
+
+Três armadilhas, todas medidas:
+
+1. **Rode o `auth login` em BACKGROUND.** Em primeiro plano ele morre no timeout
+   do shell e o código de 8 dígitos expira antes de alguém digitá-lo — aconteceu
+   na primeira tentativa, e o sintoma é "o formulário não abriu" quando na
+   verdade o código tinha vencido.
+2. **Device flow, não PAT.** O token fica em `~/.config/gh/hosts.yml` (keyring) e
+   **não passa pela conversa**. A chave SSH autentica `git push` e **não serve
+   para a API** — é por isso que `POST /issues` dava 401 com `git push` funcionando.
+3. **Confira depois de criar.** `gh issue list --repo <repo> --state all` em um
+   segundo. Foi assim que as quatro cópias do OS apareceram.
+
+### O que a auditoria fez, e o que ela ensinou
+
+| Ação | Resultado |
+| --- | --- |
+| `SYSTEM #6` fechada | com o comentário das duas correções e as medições |
+| `SYSTEM #5` fechada | fontes, verificadas glifo por glifo no `rootfs.ext4` |
+| `APP #5` fechada | duplicata da `#2` (a mais completa) |
+| `APP #6` criada | o corpo do contrato de entrada, que estava **sem issue** desde que a `#1` foi deletada |
+| `OS #5` criada | o pedido que **desapareceu** do repo do OS |
+| `OS #2`/`#3`/`#4` fechadas | duplicatas das minhas próprias retentativas |
+
+A lição que fica, e é a mesma do §12.30 numa camada nova: **`stats = all` e
+`state` são a única verdade sobre issue**. O README desta pasta dizia desde 20/11
+que `APP#1` e `OS#1` estavam "abertas com o corpo errado" — as duas haviam sido
+**deletadas**. Estado que não é reconferido vira ficção, e documento de operação
+é onde isso custa mais caro: alguém lê, acredita, e não vai olhar.
+
+Por isso a tabela do README agora carrega a **data da conferência** no título.
