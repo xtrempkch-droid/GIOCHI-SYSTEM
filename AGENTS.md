@@ -7632,3 +7632,40 @@ A primeira versão do teste de `PYSDL2_DLL_PATH` procurava o literal
 reprovou o script correto. Trocado pelos usos reais (`if [ "$modo" = ... ]`,
 `rodar_com_reinicio ...`). É o §12.37 de novo: o teste respondeu a uma pergunta
 que não era a que se fez.
+
+## 37. Auditoria das issues (26/11/2026): duas corrigidas, uma deletada
+
+Varredura dos cinco repos vizinhos. O que apareceu:
+
+| Issue | Estado | O que era |
+| --- | --- | --- |
+| `SYSTEM #6` | **corrigida** (`5d5612d`) | a GUI do PortMaster não abria — `PYSDL2_DLL_PATH` e `.pugwash-reboot` (§36) |
+| `SYSTEM #5` | **resolvida** por `e3b72b8`/`559a7ff` | fontes CJK/devanágari/bengali — verificadas glifo por glifo no `rootfs.ext4` |
+| `APP #2` | **aberta, é a canônica** | ports no launcher + loja (§35) |
+| `APP #5` | **duplicata da #2** | o formulário abriu duas vezes, 11 min de diferença |
+| `OS #1` | **DELETADA** | o pedido do contrato de entrada **desapareceu do repo do OS** |
+| `GAMES #1` | **fechada e corrigida de verdade** | o `neon-drift` fazia `Button::A => FREAR`; hoje faz `ACELERAR`, com o comentário citando a issue |
+| `GAMES #2` | aberta | o contrato de entrada, para a equipe dos jogos |
+
+### O que a auditoria corrigiu de errado no nosso material
+
+O `docs/issues-para-outros-repos/README.md` dizia, desde 20/11, que `APP#1` e
+`OS#1` estavam "abertas com o corpo errado — precisa substituir". **As duas foram
+deletadas** em algum momento entre 20 e 26/11. O material do APP foi reaberto como
+`#2`; o do OS **não**.
+
+É o §12.30 aplicado a documento de operação: a tabela descrevia o estado de 20/11
+e nada a obrigava a ser reconferida. A tabela agora tem a data no título, e a
+regra que fica é a mesma do `build-info.txt`: **estado conferido carrega
+carimbo**, senão vira ficção em uma semana.
+
+### A lição que essa varredura repete
+
+A `GAMES #1` foi fechada como `completed` **sem comentário**, e a única forma de
+saber se era verdade foi ler o código deles — `Button::A => ACELERAR | ACEITAR`
+em `neon-drift/crates/ui-sdl/src/gamepad.rs`. Fechar issue não é prova de
+correção; o fonte é. É o §12.3 do lado da conversa entre equipes.
+
+E o inverso também: a `OS #1` sumiu, e ninguém avisou. Um pedido que existe só
+num arquivo local é um pedido que **não chegou**. Por isso o README daquela pasta
+marca o arquivo do OS como *a reabrir* em vez de deixá-lo parecendo entregue.
