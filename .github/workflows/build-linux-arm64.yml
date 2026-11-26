@@ -128,6 +128,16 @@ jobs:
       # O `build-device.sh` recusa device desabilitado sem isto. Mesmo valor do
       # `discover`: só entra rascunho que declarou defconfig.
       ALLOW_DRAFT: ${{ github.event.inputs.allow_draft == 'true' && '1' || '0' }}
+      # Runtime do PortMaster (python3 + bubblewrap, 22,9 MiB medidos). O
+      # `build-device.sh` o trata como opt-in porque o custo é real — mas a
+      # release sai daqui, e sem ele o pacote que a loja instala em /user não
+      # roda: o `pugwash` é `#!/usr/bin/env python3` e o `giochi-ports` recusa
+      # port sem o `bwrap`. Nos handhelds vai ligado.
+      #
+      # O alvo virtual fica de fora: uma VM sem GPU não roda port nenhum, e
+      # 23 MiB de python3 não pagam isso. O `Giochi os` publica o estado real
+      # em `release.json#input.portmaster`; com `0` aqui ele sai `runtime:false`.
+      GIOCHI_WITH_PORTMASTER: ${{ matrix.device == 'qemu-aarch64' && '0' || '1' }}
 
     steps:
       - name: Checkout

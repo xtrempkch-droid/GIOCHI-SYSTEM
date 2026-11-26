@@ -7476,6 +7476,31 @@ giochi-init` casa com o **próprio shell** que contém o padrão na linha de
 comando, e `kill` nele derruba a sessão SSH. É o §12.46 do lado do teste; o
 `giochi-selftest` já exclui `$$` e `$PPID`, e um script de teste também precisa.
 
+### O runtime vai ligado no CI, para os handhelds (26/11/2026)
+
+O opt-in do `build-device.sh` continua sendo o padrão do **script** — quem builda
+à mão decide. Mas a release publicada sai do `build-linux-arm64.yml`, e ele não
+ligava a flag: a imagem publicada saía **sem** python3 e sem `bwrap`, então o
+pacote que a loja instala em `/user` não rodava, e o sintoma no aparelho era a
+GUI do PortMaster não abrir. O `Giochi app` já documentava o runtime "na imagem"
+(`docs/portmaster.md`) — e não estava.
+
+Agora o job de build passa `GIOCHI_WITH_PORTMASTER` por aparelho:
+
+```yaml
+GIOCHI_WITH_PORTMASTER: ${{ matrix.device == 'qemu-aarch64' && '0' || '1' }}
+```
+
+- **handhelds: ligado.** É onde existe gamepad, `/user` e a loja.
+- **alvo virtual: desligado.** VM sem GPU não roda port nenhum; 23 MiB de
+  python3 não pagam isso. O `Giochi os` publica o estado real em
+  `release.json#input.portmaster` (`runtime: false`), em vez de prometer.
+
+Sem teste novo para isto: o que prende o contrato do runtime continua sendo
+`tests/portmaster-runtime.test.mjs`, e o valor por aparelho é decisão de CI. O
+que a junção faz com ele é verificado do lado de lá (`tests/pipeline.test.mjs`,
+`inspectPortmaster`).
+
 ## 34. Um port de verdade rodando — e os quatro defeitos que só ele mostrou (20/11/2026)
 
 A §33 provou a GUI. Esta prova o **port**: um jogo do registry do PortMaster
