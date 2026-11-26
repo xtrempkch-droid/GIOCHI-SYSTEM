@@ -151,7 +151,7 @@ o que foi medido, e deixar a decisão com quem responde pelo código.
 
 | Verificação | Resultado |
 | --- | --- |
-| `node tests/run-all.mjs` | **666/666 + 1 skip**, 72 arquivos (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, panel-diag 17, gamepad-virtual 12, selftest-contract 21, issues-vizinhos 5, portmaster 7, …) |
+| `node tests/run-all.mjs` | **667/667 + 1 skip**, 72 arquivos (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, panel-diag 17, gamepad-virtual 12, selftest-contract 21, issues-vizinhos 5, portmaster 7, …) |
 | `node scripts/validate-devices.mjs` | OK — 7 devices, 1 habilitado |
 | `node scripts/list-devices.mjs --github-matrix` | matriz com `qemu-aarch64` |
 | matriz com `--device powkiddy-x55 --allow-draft` | devolve **só** o X55 |
@@ -566,7 +566,7 @@ absoluto** do host — §12.40).
 
 ## 10. Testes
 
-`node tests/run-all.mjs` → **666/666 + 1 skip**, em **72 arquivos**. A tabela abaixo é uma
+`node tests/run-all.mjs` → **667/667 + 1 skip**, em **72 arquivos**. A tabela abaixo é uma
 seleção dos que prendem contratos de projeto; a lista completa é `ls tests/` e
 `tests/runner-coverage.test.mjs` **falha** se algum arquivo existir sem estar
 importado no `run-all.mjs` — foi assim que dois testes desta revisão quase
@@ -7762,3 +7762,62 @@ que `APP#1` e `OS#1` estavam "abertas com o corpo errado" — as duas haviam sid
 é onde isso custa mais caro: alguém lê, acredita, e não vai olhar.
 
 Por isso a tabela do README agora carrega a **data da conferência** no título.
+
+## 39. O 403 do `packages.microsoft.com` matou o build do R35S antes de compilar (26/11/2026)
+
+Run `45900747895`, commit `1b7094c` — o do `GIOCHI_WITH_PORTMASTER` ligado no CI.
+`Build r35s` **falhou em ~40 s**, `Validate` e `Build qemu-aarch64` verdes no
+mesmo commit e no mesmo instante:
+
+```text
+Get:1 file:/etc/apt/apt-mirrors.txt Mirrorlist [152 B]
+Err:6 https://packages.microsoft.com/ubuntu/24.04/prod noble InRelease
+  403  Forbidden [IP: 13.107.213.40 443]
+...
+E: Failed to fetch https://packages.microsoft.com/...  403  Forbidden
+E: The repository '...' is no longer signed.
+##[error]Process completed with exit code 100.
+```
+
+**Não é o nosso código, e não é o PortMaster.** O runner do `ubuntu-24.04` vem
+com o repo do *toolkit do Azure* em `sources.list.d`; este build não usa nada
+dele. Quando aquele host responde 403 (ou 502), o `apt-get update` sai com
+**100** e o `set -e` do passo mata o job — antes do `Resolve Buildroot version`,
+antes de baixar tarball, antes de qualquer linha nossa.
+
+A prova de que é infraestrutura alheia está na mesma matriz: `qemu-aarch64`
+executou **o mesmo passo** e passou. Se fosse config nossa, os dois caíam.
+
+### A correção, e por que ela é a certa
+
+```yaml
+sudo rm -f /etc/apt/sources.list.d/*microsoft* \
+           /etc/apt/sources.list.d/*azure* 2>/dev/null || true
+sudo apt-get update -o Acquire::Retries=3
+```
+
+Duas linhas, dois motivos independentes:
+
+| Linha | O que fecha |
+| --- | --- |
+| `rm` dos repos de terceiro | repositório que **não usamos** não pode reprovar o build |
+| `Acquire::Retries=3` | soluço de rede de 1 tentativa vira falha de job |
+
+**A ordem importa** e o teste verifica: remover depois do `update` não adianta
+nada — o `update` já falhou.
+
+### Registro para não repetir o §26
+
+O §26, item 1, já tinha registrado um vermelho transitório do `r35s` no `0bd9383`
+que virou verde sozinho no commit seguinte. **Aquela vez eu concluí "é
+transitório" sem corrigir nada** — e a mesma classe voltou. A diferença agora é
+que a causa é nomeável e o conserto é barato:
+
+> vermelho que não reproduz localmente e não aparece nos outros jobs da mesma
+> matriz não é diagnóstico de código — mas se a causa tem nome, ela vira linha
+> de YAML em vez de observação no documento.
+
+`tests/ci-cache-e-sd-image.test.mjs` ganhou o caso (7 no total): exige o `rm`
+antes do `update`, exige `Acquire::Retries`, e exige a **ordem**. Verificado por
+mutação — apagar as duas linhas do `rm` deixa 6 pass / 1 fail com a mensagem da
+consequência.

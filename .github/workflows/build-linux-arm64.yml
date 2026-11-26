@@ -174,7 +174,17 @@ jobs:
 
       - name: Install build dependencies
         run: |
-          sudo apt-get update
+          # O runner do ubuntu-24.04 vem com o repo `packages.microsoft.com`
+          # (do toolkit do Azure) já em sources.list.d. Ele NÃO é usado por este
+          # build, e quando responde 403/502 o `apt-get update` sai com status
+          # 100 e derruba o job — antes de compilar qualquer coisa. Medido em
+          # 26/11/2026 (run 45900747895): `E: Failed to fetch ... 403 Forbidden`
+          # e `##[error]Process completed with exit code 100`. O job do
+          # qemu-aarch64 rodou o mesmo passo no mesmo instante e passou: é
+          # dependência de infraestrutura alheia, não do nosso código.
+          sudo rm -f /etc/apt/sources.list.d/*microsoft* \
+                     /etc/apt/sources.list.d/*azure* 2>/dev/null || true
+          sudo apt-get update -o Acquire::Retries=3
           sudo apt-get install -y --no-install-recommends \
             autoconf automake bc bison build-essential bzip2 ca-certificates \
             cpio curl device-tree-compiler dosfstools e2fsprogs file flex \

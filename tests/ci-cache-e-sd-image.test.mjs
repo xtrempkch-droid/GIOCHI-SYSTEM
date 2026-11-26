@@ -138,3 +138,43 @@ test("o bloco `path: |` do cache só tem caminhos, nenhum comentário", async ()
     assert.match(caminho, /^[!./~]|^[A-Za-z]:/, `linha que não parece caminho: "${caminho}"`);
   }
 });
+
+test("o apt do CI não pode ser derrubado por repositório de terceiro", async () => {
+  // Medido em 26/11/2026 (run 45900747895): o runner do ubuntu-24.04 traz o
+  // repo `packages.microsoft.com` do toolkit do Azure em sources.list.d. Ele
+  // não é usado por este build, e quando responde 403 o `apt-get update` sai
+  // com status 100 e mata o job ANTES de compilar qualquer coisa — o
+  // qemu-aarch64 passou no mesmo instante, então é infraestrutura alheia.
+  //
+  // A classe é: dependência que não é nossa não pode reprovar o build.
+  const yml = await readFile(WORKFLOW, "utf8");
+  const linhas = yml.split("\n");
+  // Acha o passo de instalar dependências e olha só o `run: |` dele.
+  const inicio = linhas.findIndex((l) => /name:\s*Install build dependencies/.test(l));
+  assert.ok(inicio >= 0, "passo 'Install build dependencies' sumiu do workflow");
+
+  const corpo = [];
+  for (let i = inicio + 1; i < linhas.length; i++) {
+    const l = linhas[i];
+    if (/^\s*-\s+name:/.test(l)) break;
+    corpo.push(l);
+  }
+  const bloco = corpo.join("\n");
+
+  assert.match(
+    bloco,
+    /rm -f[^\n]*sources\.list\.d[^\n]*microsoft/,
+    "o passo remove os repos de terceiro (microsoft/azure) antes do apt-get update:\n" +
+      "sem isso um 403 deles derruba o job sem compilar nada",
+  );
+  assert.match(
+    bloco,
+    /apt-get update -o Acquire::Retries=3/,
+    "apt-get update com Acquire::Retries: rede instável do mirror vira falha de 1 tentativa",
+  );
+  // A ordem importa: remover depois do update não adianta.
+  assert.ok(
+    bloco.indexOf("sources.list.d") < bloco.indexOf("apt-get update -o"),
+    "a remoção dos repos tem de vir ANTES do apt-get update",
+  );
+});
