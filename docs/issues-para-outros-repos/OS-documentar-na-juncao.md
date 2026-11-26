@@ -90,4 +90,6 @@ O `GIOCHI-APP` já tem `scripts/verificar-mapa.mjs`, que valida um `buttons.map`
 
 - `AGENTS.md` §12.74 (o defeito medido) e §29 (o virtual) do GIOCHI-SYSTEM
 - `docs/contrato-de-entrada.md` do GIOCHI-SYSTEM — a referência completa
-- Issues abertas no `GIOCHI-GAMES` e no `GIOCHI-APP` sobre o mesmo contrato
+- O mesmo contrato, nos outros dois repos: `GIOCHI-GAMES#2` (aberta) e
+  `GIOCHI-APP#2` (aberta). A issue equivalente deste repo foi **deletada** em
+  algum momento entre 20 e 26/11/2026 — esta é a única cópia do pedido.
