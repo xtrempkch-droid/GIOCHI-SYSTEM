@@ -208,6 +208,163 @@ listar_particioes() {
     printf '%s %s\n' "$_mesmo" "$_outros"
 }
 
+# ── crescer a partição de dados até o fim do disco (primeiro boot) ──
+#
+# O problema que isto resolve: a `.img` tem 2 GiB (o GitHub recusa asset ≥ 2
+# GiB), então a p3 nasce com ~704 MiB **mesmo num cartão de 120 GB**. O
+# `--grow` do `flash-sd.sh` cobre quem grava com ele — mas quem grava com `dd`
+# puro, `balenaEtcher` ou o Raspberry Pi Imager fica com 704 MiB e 99% do
+# cartão sem uso.
+#
+# Aqui o aparelho resolve sozinho, no primeiro boot: lê o tamanho real do disco,
+# cresce a p3 até o fim e ajusta o filesystem.
+#
+# ## Como a partição é crescida, e por que não com `fdisk`/`sfdisk`
+#
+# Medido em 27/11/2026: `sfdisk` NÃO está no Buildroot 2025.02 (só LIBFDISK), e
+# o `fdisk` do busybox por script é frágil — numa bancada ele criou a partição 2
+# com **512 bytes** em vez de 1 GiB, sem erro nenhum. Um `fdisk` que erra em
+# silêncio é a última ferramenta que se quer mexendo no cartão que acabou de
+# bootar.
+#
+# A entrada de partição no MBR é uma estrutura FIXA de 16 bytes, e a posição é
+# conhecida: `0x1BE + 16*(n-1)`. Para a p3: `0x1DE`, com o LBA inicial em
+# `0x1DE+8` e o tamanho em setores em `0x1DE+12`, ambos little-endian. Escrever
+# 4 bytes com `dd` é determinístico e não depende de ferramenta nenhuma.
+#
+# O CHS (offsets 5-7) fica `0xFF 0xFF 0xFF`, que é o "use LBA" do padrão. Nem o
+# kernel nem o U-Boot leem CHS.
+#
+# ## Os três formatos não são iguais aqui
+#
+#   ext4        `resize2fs` cresce PRESERVANDO os dados. Pode rodar de novo
+#               sempre que o cartão mudar.
+#   exFAT/FAT   **não têm resize** — nem no Linux, nem no upstream (o
+#               `exfatprogs` não traz ferramenta de resize). Crescer exige
+#               REFORMATAR, então só é feito quando a partição está vazia.
+#
+# Grava o tamanho (4 bytes, little-endian) na entrada da partição no MBR.
+#
+# Octal, nunca hexa. Medido nas três shells, com o valor 8372224
+# (bytes 00 c0 7f 00 — NUL nas duas pontas, que é o caso que falha):
+#
+#   dash         comenta que 'printf "\\x00"' escreve o TEXTO \x00 (4 bytes de
+#                texto no setor de boot, em vez de 1 byte NUL)
+#   bash         ok
+#   busybox ash  ok
+#
+# O aparelho usa busybox ash, então a forma hexa "funcionaria" ali. Mas este
+# script declara `#!/bin/sh`, e /bin/sh é dash em Debian/Ubuntu: quem rodar o
+# S20userdata fora do aparelho para depurar escreveria 16 bytes de texto no
+# lugar de 4 bytes de tamanho — MBR inválido, cartão sem tabela, sem mensagem.
+# Octal é POSIX e funciona nas três. É o §12.20 na letra: só o que o alvo
+# garante, e o alvo não é só o busybox.
+# giochi-system:mbr:begin
+gravar_tamanho_mbr() {
+    _alvo="$1"; _off="$2"; _val="$3"
+    _b0=$((   _val        & 255 ))
+    _b1=$(( ( _val >>  8) & 255 ))
+    _b2=$(( ( _val >> 16) & 255 ))
+    _b3=$(( ( _val >> 24) & 255 ))
+    printf "\\$(printf '%03o' $_b0)\\$(printf '%03o' $_b1)\\$(printf '%03o' $_b2)\\$(printf '%03o' $_b3)" \
+        | dd of="$_alvo" bs=1 seek="$_off" conv=notrunc status=none 2>/dev/null
+}
+# giochi-system:mbr:end
+
+# É por isso que o crescimento de exFAT/FAT acontece **uma vez**: no primeiro
+# boot a p3 tem só o marcador e as quatro pastas (a imagem nasce assim). Depois
+# que o usuário põe dados, reformatar seria perda — então o script avisa e não
+# mexe.
+crescer_particao_dados() {
+    # giochi-system:grow:begin
+    _dev="$1"; _tipo="$2"
+    _cartao="$(basename "$_dev" | sed 's/p\?[0-9]*$//')"
+    _num="$(basename "$_dev" | sed 's/^.*[^0-9]\([0-9]*\)$/\1/')"
+    _disco="/dev/$_cartao"
+
+    # Tamanho do disco, em setores de 512 (o sysfs sempre reporta em 512).
+    _disco_setores="$(cat "/sys/class/block/$_cartao/size" 2>/dev/null)" || return 0
+    [ -n "$_disco_setores" ] || return 0
+
+    # A entrada da p3 no MBR: LBA inicial e tamanho, little-endian.
+    _entrada=$(( 0x1BE + 16 * (_num - 1) ))
+    _lba_ini="$(dd if="$_disco" bs=1 skip=$(( _entrada + 8 )) count=4 2>/dev/null \
+        | od -An -tu4 -N4 2>/dev/null | tr -d ' ')"
+    _lba_tam="$(dd if="$_disco" bs=1 skip=$(( _entrada + 12 )) count=4 2>/dev/null \
+        | od -An -tu4 -N4 2>/dev/null | tr -d ' ')"
+    case "$_lba_ini$_lba_tam" in ''|*[!0-9]*) return 0 ;; esac
+    [ "$_lba_ini" -gt 0 ] || return 0
+
+    # Margem de 1 MiB: o sfdisk do host alinha no MiB, e crescer até o último
+    # setor exato costuma deixar espaço que o próximo `mkfs` reclama.
+    _novo_tam=$(( _disco_setores - _lba_ini - 2048 ))
+    [ "$_novo_tam" -gt "$_lba_tam" ] || return 0
+
+    _atual_mib=$(( _lba_tam / 2 / 1024 ))
+    _novo_mib=$(( _novo_tam / 2 / 1024 ))
+    log "disco de ${_disco_setores} setores (~$(( _disco_setores / 2 / 1024 / 1024 )) GiB):"
+    log "  p3 tem ${_atual_mib} MiB de ${_novo_mib} MiB possíveis"
+
+    case "$_tipo" in
+        ext4)
+            # Caminho seguro: cresce a tabela e o filesystem, preservando dados.
+            gravar_tamanho_mbr "$_disco" $(( _entrada + 12 )) "$_novo_tam" || return 0
+            partprobe "$_disco" 2>/dev/null || true
+            sleep 1
+            if resize2fs "$_dev" >/dev/null 2>&1; then
+                log "  crescido para ${_novo_mib} MiB (resize2fs, dados preservados)"
+            else
+                log "  AVISO: resize2fs falhou — a p3 fica com ${_atual_mib} MiB"
+            fi
+            ;;
+        exfat|vfat)
+            # Não há resize: só reformatar. Seguro APENAS se estiver vazia — e
+            # estar vazia é o estado do primeiro boot (só o marcador e as
+            # quatro pastas). Se houver qualquer arquivo do usuário, não mexe.
+            # A partição está DESMONTADA aqui (é o requisito para crescer), então
+            # montar num ponto temporário é a única forma de olhar o conteúdo.
+            # No primeiro boot ela tem só as quatro pastas, o marcador e o
+            # LEIA-ME — a imagem nasce assim.
+            _tmpmnt=/run/giochi/p3-tmp
+            mkdir -p "$_tmpmnt" 2>/dev/null
+            _extra=""
+            if mount -t "$_tipo" -o "uid=0,gid=0,fmask=0000,dmask=0000" "$_dev" "$_tmpmnt" 2>/dev/null; then
+                _extra="$(ls -A "$_tmpmnt" 2>/dev/null | grep -vxE 'games|apps|musica|ports|giochi-user|LEIA-ME.txt' | head -1)"
+                umount "$_tmpmnt" 2>/dev/null
+            else
+                # Não conseguiu montar para inspecionar: não cresce. Na dúvida,
+                # preservar o dado é sempre a escolha certa.
+                _extra="(não consegui montar para conferir)"
+            fi
+            rmdir "$_tmpmnt" 2>/dev/null
+            if [ -n "$_extra" ]; then
+                log "  AVISO: a p3 é $_tipo e crescer exigiria reformatar"
+                log "         há dados do usuário ('$_extra') — não vou apagar"
+                log "         para usar o cartão inteiro: regrave com --grow, ou copie"
+                log "         o conteúdo, formate do zero e devolva"
+                return 0
+            fi
+            gravar_tamanho_mbr "$_disco" $(( _entrada + 12 )) "$_novo_tam" || return 0
+            partprobe "$_disco" 2>/dev/null || true
+            sleep 1
+            _mkfs=""
+            case "$_tipo" in
+                exfat) _mkfs="mkfs.exfat -L $LABEL_PREFERIDO" ;;
+                vfat)  _mkfs="mkfs.vfat -F 32 -n $LABEL_PREFERIDO" ;;
+            esac
+            if command -v ${_mkfs%% *} >/dev/null 2>&1 && $_mkfs "$_dev" >/dev/null 2>&1; then
+                log "  crescido para ${_novo_mib} MiB (reformatado — estava vazio)"
+            else
+                log "  AVISO: sem ${_mkfs%% *} na imagem — a p3 fica com ${_atual_mib} MiB"
+            fi
+            ;;
+        *)
+            log "  AVISO: não sei crescer $_tipo sem perder dados"
+            ;;
+    esac
+    # giochi-system:grow:end
+}
+
 # Acha e monta a partição de dados em $MNT. Imprime "<device> <tipo>" na saída.
 achar_e_montar_dados() {
     _partes="$(listar_particioes)"
@@ -310,6 +467,26 @@ else
         rm -rf /run/giochi/user-antes-da-montagem
         cp -a "$MNT/." /run/giochi/user-antes-da-montagem/ 2>/dev/null || true
         log "guardei o /user do rootfs em /run/giochi/user-antes-da-montagem"
+    fi
+
+    # ── crescer ANTES de montar ──
+    #
+    # A p3 do cartão do rootfs é determinística (LAYOUT): não precisa montar para
+    # saber que é ela. Crescer exige a partição desmontada, então esta é a única
+    # janela do boot em que dá para fazer.
+    #
+    # Só a p3 — o segundo cartão não é crescido. Ele já vem no tamanho que o
+    # usuário formatou, e mexer na partição de um cartão alheio é o tipo de coisa
+    # que apaga o save de outra pessoa.
+    if [ -n "$ROOT_CARD" ] && [ -n "$ROOT_PARTICAO" ]; then
+        case "$ROOT_PARTICAO" in
+            *p[0-9]*) _p3="/dev/$(echo "$ROOT_PARTICAO" | sed 's/p[0-9]*$//')p3" ;;
+            *)        _p3="/dev/$(echo "$ROOT_PARTICAO" | sed 's/[0-9]*$//')3" ;;
+        esac
+        if [ -e "$_p3" ]; then
+            _tipo_p3="$(tipo_de_fs "$_p3" 2>/dev/null || true)"
+            [ -n "$_tipo_p3" ] && crescer_particao_dados "$_p3" "$_tipo_p3"
+        fi
     fi
 
     RESULTADO="$(achar_e_montar_dados 2>/dev/null || true)"

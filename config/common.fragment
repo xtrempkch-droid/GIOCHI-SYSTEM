@@ -42,7 +42,19 @@ BR2_PACKAGE_CA_CERTIFICATES=y
 # BR2_PACKAGE_LIBCURL_CURL (o binário); a biblioteca é BR2_PACKAGE_LIBCURL.
 BR2_PACKAGE_LIBCURL=y
 BR2_PACKAGE_LIBCURL_CURL=y
+# dosfstools: os TRÊS applets são subopção, e o padrão é NENHUM.
+#
+# Medido em 27/11/2026: `BR2_PACKAGE_DOSFSTOOLS=y` sozinho não instala
+# `mkfs.vfat` — o `dosfstools.mk` só instala sob `ifeq
+# ($(BR2_PACKAGE_DOSFSTOOLS_MKFS_FAT),y)` (linha 44). É o §12.16 na letra:
+# "não existe" e "existe desligado" dão o mesmo sintoma, e o `command -v` falha
+# nos dois casos.
+#
+# Para que precisa: o crescimento da partição de dados no primeiro boot
+# reformata a p3 quando o formato não permite resize (exFAT/FAT não têm), e o
+# `mkfs.vfat` é o caminho de quem escolheu `--user-fs vfat`.
 BR2_PACKAGE_DOSFSTOOLS=y
+BR2_PACKAGE_DOSFSTOOLS_MKFS_FAT=y
 # evtest: base da ferramenta `giochi-buttons` e do diagnóstico de entrada. Sem
 # ele não há como provar que um botão chega ao kernel com o código certo — o
 # `giochi-selftest` conta capacidades, mas não vê eventos.
@@ -62,7 +74,19 @@ BR2_PACKAGE_EVTEST=y
 # defconfig sem wchar o símbolo seria descartado em silêncio e o `assert-config`
 # reprovaria o build — que é o comportamento certo.
 BR2_PACKAGE_PSPLASH=y
+# e2fsprogs: `resize2fs` é subopção e NÃO vem por padrão.
+#
+# Medido no target do R35S: `/sbin/mkfs.ext4` e `/sbin/e2fsck` existiam, e
+# `resize2fs` **não** — porque `BR2_PACKAGE_E2FSPROGS_RESIZE2FS` é `if` no
+# Config.in, sem `default y`. É o §12.16 outra vez.
+#
+# Para que precisa: crescer a partição de dados (ext4) no primeiro boot sem
+# perder o conteúdo. Sem ele, o `--user-fs ext4` só cresceria reformatando.
 BR2_PACKAGE_E2FSPROGS=y
+BR2_PACKAGE_E2FSPROGS_RESIZE2FS=y
+# exfatprogs: `mkfs.exfat` no aparelho, para reformatar a p3 no primeiro boot
+# quando ela é exFAT (não há resize para exFAT — nem aqui, nem no upstream).
+BR2_PACKAGE_EXFATPROGS=y
 # iproute2 é do sistema base, não do aparelho: o `giochi-usbnet` usa
 # `ip link`/`ip addr` e o applet `tc` do busybox está desligado no comum
 # (config/common.busybox.fragment) porque não compila contra o kernel 6.12.

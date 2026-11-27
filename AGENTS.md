@@ -8558,3 +8558,167 @@ Dois defeitos meus no caminho, os dois pegos por teste:
 
 `tests/userdata-particao.test.mjs` foi de 14 para **22 casos**. Mutação: tirar os
 degraus 2 e 3 dá 20 pass / 2 fail.
+
+## 47. O primeiro boot cresce a p3 até o fim do cartão (27/11/2026)
+
+O §46 fechou com o exFAT na p3. Faltava a metade que o dono do projeto pediu em
+seguida: *"quando for o primeiro boot, antes de iniciar o launcher, o sistema tem
+que detectar qual o disco ele está armazenado e seu tamanho, para que a partição
+do user seja redimensionada para o tamanho final do disco"*.
+
+O problema real, medido: a `.img` tem **2 GiB** (o GitHub recusa asset ≥ 2 GiB),
+então a p3 nasce com **704 MiB mesmo num cartão de 120 GB**. O `--grow` do
+`flash-sd.sh` cobre quem grava com ele — mas `dd` puro, balenaEtcher e Raspberry
+Pi Imager **não passam flag nenhuma**, e o usuário ficava com 99% do cartão
+inutilizável, sem sintoma além de "acabou o espaço".
+
+Agora o aparelho resolve sozinho. Medido num cartão de 120 GiB:
+
+```text
+disco de 251658240 setores (~120 GiB):
+  p3 tem 704 MiB de 121535 MiB possíveis
+  crescido para 121535 MiB (resize2fs, dados preservados)
+```
+
+`df -h /user` passa de `704M` para **`118G`**.
+
+### Três formatos, três caminhos — e só um preserva dados
+
+| p3 | Como cresce | Dados |
+| --- | --- | --- |
+| **ext4** | `resize2fs` | **preservados** |
+| **exFAT** (padrão) | não existe resize → **reformata** | só se estiver vazia |
+| **vfat** | idem | só se estiver vazia |
+
+exFAT e FAT **não têm ferramenta de resize** — nem no Linux, nem no upstream (o
+`exfatprogs` não traz nenhuma). Então crescer exige reformatar, e reformatar só é
+seguro enquanto a partição está vazia. O script monta, confere que só há as
+quatro pastas + o marcador + o `LEIA-ME.txt`, e **só então** formata. Com
+qualquer arquivo do usuário:
+
+```text
+AVISO: a p3 é exfat e crescer exigiria reformatar
+       há dados do usuário ('meu-jogo.sav') — não vou apagar
+       para usar o cartão inteiro: regrave com --grow, ou copie
+       o conteúdo, formate do zero e devolva
+```
+
+Na dúvida (não conseguiu montar para conferir), **não cresce**. É a mesma escolha
+do §44: preservar o dado é sempre o certo.
+
+### Por que `dd` e não `fdisk`/`sfdisk`
+
+`sfdisk` **não está no Buildroot 2025.02** — só `LIBFDISK`. E o `fdisk` do
+busybox por script é frágil de um jeito medido: numa bancada ele criou a partição
+com **512 bytes** em vez de 1 GiB, **sem erro nenhum**. Um `fdisk` que erra em
+silêncio é a última ferramenta que se quer mexendo no cartão que acabou de
+bootar.
+
+A entrada de partição no MBR é estrutura **fixa de 16 bytes** em
+`0x1BE + 16*(n-1)`; para a p3, LBA inicial em `0x1DE+8` e tamanho em `0x1DE+12`,
+little-endian. `dd` de 4 bytes é determinístico e não depende de ferramenta.
+
+### O defeito que o teste de bancada achou: `\x` não é POSIX
+
+A primeira versão gravava os bytes com `printf '\xNN'`. Funcionava no bash e no
+busybox ash — e o aparelho usa busybox ash, então *parecia* certo. Mas o script
+declara `#!/bin/sh`, e `/bin/sh` é **dash** em Debian/Ubuntu:
+
+```text
+dash          printf '\x00\x00\x00\x01'  ->  5c 78 30 30 5c 78 30 30 5c 78 30 30 5c 78 30 31
+                                              ^ literalmente o TEXTO "\x00\x00\x00\x01"
+bash          idem                       ->  00 00 00 01
+busybox ash   idem                       ->  00 00 00 01
+```
+
+No aparelho funcionaria. Mas quem rodasse o `S20userdata` **fora** dele para
+depurar (o caminho normal quando a tela não acende) escreveria 16 bytes de texto
+no lugar de 4 bytes de tamanho — **MBR inválido, cartão sem tabela, sem
+mensagem**. É o §12.20 na letra: `strtonum` do gawk, `\s` no grep, `timeout` 124 —
+a quarta vez que a ferramenta do desktop não é a do alvo.
+
+Correção: **octal** (`\NNN`), que é POSIX e funciona nas três. E o helper
+`gravar_tamanho_mbr()` virou função única — havia **duas cópias** do `printf` de
+140 caracteres, uma no ramo ext4 e outra no exFAT, que é o §12.49 esperando a
+primeira correção para divergir.
+
+`tests/crescer-particao.test.mjs` roda o helper **nas três shells** e compara os
+4 bytes. Verificado por mutação (M1): voltar ao hexa dá **4 fail**.
+
+### O que os testes tiveram que consertar em si mesmos
+
+Quatro defeitos da bancada, todos do tipo "o mock era mais generoso que o alvo" —
+a mesma família do §44 e do §46:
+
+| Defeito no teste | Como apareceu |
+| --- | --- |
+| `writeFileSync(img, buf)` truncava a imagem de 4 GiB para 512 B | `ENOENT` no teste seguinte, apontando para o arquivo errado |
+| `readFileSync` sem posição estoura o limite de 2 GiB do Buffer | `ERR_FS_FILE_TOO_LARGE`; passou a ler só o setor 0 |
+| `_tmpmnt=/run/giochi/p3-tmp` não é criável sem root | o `mount` do mock falhava e **todo teste de exFAT "passava"** reformatando — media a própria falha |
+| `command -v mkfs.exfat` achava o **do host** | o teste "sem mkfs" dava resultado diferente com e sem `exfatprogs` instalado |
+
+O terceiro é o mais instrutivo: o teste de "exFAT vazia cresce" passava pelo
+motivo errado, e o de "exFAT com dados **não** cresce" falhava. Quando inverti a
+ordem do diagnóstico, os dois se explicaram pelo mesmo `mkdir` que não rodava.
+
+### Mutação: nove de nove
+
+| Mutação no script real | Resultado |
+| --- | --- |
+| M1 hexa em vez de octal | 4 fail |
+| M2 sem guarda de idempotência | 1 fail |
+| M3 sem a margem de 1 MiB | 1 fail |
+| M4 reformata com dados do usuário | 2 fail |
+| M5 cresce sem conseguir montar | 1 fail |
+| M6 chave do MBR deslocada (`_num` em vez de `_num-1`) | 9 fail |
+| M7 sem `partprobe` | 1 fail |
+| M8 `resize2fs` no exFAT | 1 fail |
+| M9 delega ao `fdisk` do busybox | 6 fail |
+
+**M2 e M3 sobreviviam na primeira rodada**, e o motivo é o de sempre: a
+idempotência e a margem só estavam testadas na **reimplementação em JS** da
+conta, não no script executado. Foi preciso um teste que roda a função real duas
+vezes e outro que afirma o tamanho **exato** (não `>`), mais o caso do cartão de
+120 GiB — que é o do pedido, e antes não existia.
+
+### Os pacotes: três subopções, não três pacotes
+
+Medido no `target/` do R35S: `mkfs.ext4` e `e2fsck` existiam; **`resize2fs` e
+`mkfs.vfat` não**. `BR2_PACKAGE_DOSFSTOOLS=y` sozinho instala **zero** ferramentas
+de FAT, e `E2FSPROGS` não traz `resize2fs` por padrão. É o §12.16 pela quarta vez
+(`amixer`, `aplay`, `mkfs.vfat`, `resize2fs`). Ligados no `config/common.fragment`:
+
+```make
+BR2_PACKAGE_DOSFSTOOLS_MKFS_FAT=y
+BR2_PACKAGE_E2FSPROGS_RESIZE2FS=y
+BR2_PACKAGE_EXFATPROGS=y
+```
+
+Sem eles o script **não mente**: o MBR cresce, o filesystem não, e a mensagem diz
+o tamanho real que sobrou (`AVISO: sem mkfs.exfat — a p3 fica com 704 MiB`). Um
+"crescido" ali faria o usuário encher o cartão até o `no space left` no meio de
+um save.
+
+### Um bug de unidade, pego por leitura
+
+`setores / 2 / 1024` dá **MiB** — e a primeira versão rotulava `GiB`. Um cartão de
+120 GiB aparecia como "246 GB", e a p3 de 704 MiB como "704 GiB". Número absurdo
+que esconde a informação em vez de dar, exatamente como o `fill` a 13406 Mpix/s
+do §12.63 (9× o teto do hardware). As variáveis passaram a ser `_mib`.
+
+### O que NÃO foi provado
+
+- **O build com os três pacotes novos não rodou.** O `work/` local tem a config
+  anterior, e `resize2fs`/`mkfs.exfat` só entram na imagem depois de um build.
+  Enquanto isso, o teste de integração usa `resize2fs`/`mkfs.*` **falsos** — prova
+  que o script os chama, não que eles existam na imagem. Quem fecha isso é o CI.
+- **Nada foi medido no aparelho.** O R35S não respondia nesta sessão.
+- **O Explorer do Windows** atribuindo letra à p3 continua não medido (§46).
+
+### Regra que fica
+
+**Crescer partição é a operação mais destrutiva que o sistema faz sozinho.** Um
+erro não gera mensagem: gera cartão sem tabela, ou save apagado. Por isso o
+caminho é `dd` de 4 bytes numa posição calculada, não ferramenta de `fdisk`; e
+por isso o formato que preserva (ext4) tem caminho próprio, enquanto os que não
+têm resize só são tocados quando comprovadamente vazios.

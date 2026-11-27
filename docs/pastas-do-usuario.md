@@ -153,5 +153,74 @@ lá, e `cp -a` tentaria preservar o que não há.
 ocupa o cartão quase todo, mas o sistema (p2) tem tamanho fixo: log, PID e `/tmp`
 moram nele. Se a p3 for formatada como o cartão inteiro, não há folga para nada.
 
-E o inverso, que é o que dói mais: **sem `--grow`, a p3 fica com 704 MiB**. Dá
+E o inverso, que é o que doía mais: **sem `--grow`, a p3 fica com 704 MiB**. Dá
 para um punhado de jogos, não para uma biblioteca.
+
+## Isso foi resolvido: o primeiro boot cresce a p3 sozinho
+
+Quem grava a imagem com `dd` puro, balenaEtcher ou Raspberry Pi Imager não passa
+`--grow` — e ficava com 704 MiB num cartão de 120 GB. Agora **o aparelho resolve
+no primeiro boot**, antes de qualquer outra coisa.
+
+Medido num cartão de 120 GiB: a p3 sai de `704 MiB` para **`121535 MiB`
+(~118,7 GiB)**, e `df -h /user` mostra `118G`.
+
+### Como funciona
+
+O `S20userdata` roda **antes** de montar `/user` — é a única janela do boot em
+que a partição está desmontada, e crescer exige isso.
+
+1. lê o tamanho real do disco em `/sys/class/block/<cartao>/size` (setores de 512);
+2. lê o LBA inicial e o tamanho da p3 na entrada 3 do MBR (`0x1DE`);
+3. calcula `novo = total_do_disco - lba_inicial - 2048` (1 MiB de margem);
+4. se `novo <= atual`, não faz nada — **é o caso de todo boot depois do primeiro**;
+5. grava os 4 bytes do tamanho e ajusta o filesystem.
+
+### Por que não usa `fdisk`/`sfdisk`
+
+`sfdisk` **não está** no Buildroot 2025.02 (só `LIBFDISK`), e o `fdisk` do
+busybox por script é frágil: numa bancada ele criou uma partição de **512 bytes**
+em vez de 1 GiB, **sem erro nenhum**. Um `fdisk` que erra em silêncio é a última
+ferramenta que se quer mexendo no cartão que acabou de bootar.
+
+A entrada de partição no MBR é uma estrutura fixa de 16 bytes em `0x1BE + 16*(n-1)`.
+Escrever 4 bytes com `dd` é determinístico e não depende de ferramenta nenhuma.
+
+### Os três formatos não são iguais
+
+| Formato da p3 | Como cresce | Dados |
+| --- | --- | --- |
+| **ext4** | `resize2fs`, preservando | **nada se perde** |
+| **exFAT** (padrão) | não existe resize → **reformata** | só se estiver vazia |
+| **vfat** | idem | só se estiver vazia |
+
+exFAT e FAT **não têm ferramenta de resize** — nem no Linux, nem no upstream. Por
+isso o script monta a partição, confere que só há as quatro pastas, o marcador
+`giochi-user` e o `LEIA-ME.txt`, e só então reformata.
+
+Se houver **qualquer** arquivo do usuário — um save, uma música — o script **não
+mexe** e avisa:
+
+```text
+S20userdata:   AVISO: a p3 é exfat e crescer exigiria reformatar
+S20userdata:          há dados do usuário ('meu-jogo.sav') — não vou apagar
+S20userdata:          para usar o cartão inteiro: regrave com --grow, ou copie
+S20userdata:          o conteúdo, formate do zero e devolva
+```
+
+Na dúvida (não conseguiu montar para conferir), **não cresce**. Preservar o dado
+é sempre a escolha certa.
+
+### O que você precisa saber
+
+| Situação | O que acontece |
+| --- | --- |
+| gravou com `dd`/balenaEtcher em cartão de 128 GB | primeiro boot cresce a p3 sozinho |
+| gravou com `flash-sd.sh --grow` | já vem no tamanho; o boot não mexe em nada |
+| trocou para um cartão maior sem regravar | cresce no próximo boot |
+| p3 tem jogos e você quer o espaço | copie o conteúdo, formate do zero, devolva |
+| preferir preservar tudo | use `--user-fs ext4` ao gerar a imagem |
+
+**O crescimento só acontece na p3 do cartão do sistema.** O segundo cartão não é
+tocado: ele já vem no tamanho que você formatou, e mexer na partição de um cartão
+alheio é o tipo de coisa que apaga o save de outra pessoa.
