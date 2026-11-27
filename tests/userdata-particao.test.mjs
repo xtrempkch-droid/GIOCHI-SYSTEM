@@ -297,3 +297,27 @@ test("com DOIS cartões rotulados, prefere o do cartão do sistema", () => {
         b.limpar();
     }
 });
+
+test("a espera pela partição é curta: 10 s de boot por boot é defeito", () => {
+    // Medido em 26/11/2026: com 10 tentativas de 1 s, uma imagem SEM partição de
+    // dados gastava 10,0 s de boot para depois dizer "não há partição" — num
+    // aparelho que sobe em ~10 s, isso dobra o boot. O laço existe só para
+    // cobrir o devtmpfs criando /dev/disk/by-label por alguns instantes, e o
+    // S10bootlog já espera pelo mesmo /dev antes daqui.
+    //
+    // O teste é sobre o TEXTO porque o que se protege é o número de tentativas —
+    // e ele é fácil de "aumentar por segurança" numa próxima sessão.
+    const fonte = readFileSync(SCRIPT, "utf8");
+    const m = fonte.match(/while \[ "\$tentativa" -lt (\d+) \]/);
+    assert.ok(m, "o laço de espera mudou de forma — confira se ele ainda é limitado");
+    const limite = Number(m[1]);
+    assert.ok(
+        limite <= 5,
+        `o laço tenta ${limite} vezes: no pior caso são ~${limite} s de boot a mais ` +
+            `em TODA imagem sem partição de dados. Medido: 10 tentativas davam 10,0 s ` +
+            `para depois dizer "não há partição", num aparelho que sobe em ~10 s.`,
+    );
+    // E não pode dormir depois da última tentativa: dormir para desistir é só atraso.
+    assert.match(fonte, /\[ "\$tentativa" -lt 3 \] && sleep 1|lt \$limite.*sleep/,
+        "a última tentativa não pode dormir antes de desistir");
+});

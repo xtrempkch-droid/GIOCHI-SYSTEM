@@ -151,7 +151,7 @@ o que foi medido, e deixar a decisão com quem responde pelo código.
 
 | Verificação | Resultado |
 | --- | --- |
-| `node tests/run-all.mjs` | **689/689 + 1 skip**, 74 arquivos (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, panel-diag 17, gamepad-virtual 12, selftest-contract 21, issues-vizinhos 6, portmaster 7, …) |
+| `node tests/run-all.mjs` | **690/690 + 1 skip**, 74 arquivos (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, panel-diag 17, gamepad-virtual 12, selftest-contract 21, issues-vizinhos 6, portmaster 7, …) |
 | `node scripts/validate-devices.mjs` | OK — 7 devices, 1 habilitado |
 | `node scripts/list-devices.mjs --github-matrix` | matriz com `qemu-aarch64` |
 | matriz com `--device powkiddy-x55 --allow-draft` | devolve **só** o X55 |
@@ -566,7 +566,7 @@ absoluto** do host — §12.40).
 
 ## 10. Testes
 
-`node tests/run-all.mjs` → **689/689 + 1 skip**, em **74 arquivos**. A tabela abaixo é uma
+`node tests/run-all.mjs` → **690/690 + 1 skip**, em **74 arquivos**. A tabela abaixo é uma
 seleção dos que prendem contratos de projeto; a lista completa é `ls tests/` e
 `tests/runner-coverage.test.mjs` **falha** se algum arquivo existir sem estar
 importado no `run-all.mjs` — foi assim que dois testes desta revisão quase
@@ -8198,6 +8198,49 @@ escolha dependeria da ordem de probe, que varia entre boots.
 Um cartão **sem** o rótulo não é montado em `/user`: ele é mídia removível, e
 montá-lo ali confundiria "meu save" com "o cartão do fulano". Aparece em
 `/media/<LABEL>`, que o `pontos-de-montagem` já declara.
+
+### A espera pela partição custava 10 s de boot, e ninguém veria no teste
+
+O laço de `achar_por_label` tinha **10 tentativas de 1 s**. Medido rodando o
+script: uma imagem **sem** partição de dados (ou cartão sem a p3) gastava
+**10,0 s** de boot para depois imprimir "não há partição" — num aparelho que
+sobe em ~10 s. Isso **dobrava** o boot, e o sintoma não aponta para lugar
+nenhum: a tela só demora mais.
+
+O laço existe para cobrir o devtmpfs criando `/dev/disk/by-label` alguns
+instantes depois do mount do rootfs — e esse atraso é de milissegundos, porque o
+`S10bootlog` roda **antes** e já espera pelo mesmo `/dev`.
+
+Corrigido para **3 tentativas, e a última não dorme**: 2,0 s no pior caso. O que
+faz disso um §12 e não um ajuste é que **nenhum teste pegava**: os sete casos
+funcionavam (o caminho "sem partição" respondia certo), e o custo só apareceu
+quando eu medi `time sh S20userdata` em vez de conferir a saída. É a família do
+§12.63 — medir o número, não a resposta.
+
+`tests/userdata-particao.test.mjs` ganhou o oitavo caso: lê o limite do laço do
+texto e reprova acima de 5, com a consequência escrita. Verificado por mutação:
+com 10 tentativas, 7 pass / 1 fail.
+
+### O rootfs é 79% vazio, e isso agora custa espaço na imagem
+
+Medido no `rootfs.ext4` do R35S: **1024 MiB de tamanho, 207 MiB usados**
+(262144 blocos, 211613 livres). Com a p3 no layout, esses ~800 MiB vazios são
+800 MiB que a partição de dados **não** tem na `.img`.
+
+`BR2_TARGET_ROOTFS_EXT2_SIZE="1024M"` está nos quatro aparelhos. Reduzir para
+640M daria +384 MiB para a p3 na imagem — mas **não foi feito**, por três
+motivos, e o primeiro é o que decide:
+
+1. o ganho é marginal no uso real: quem quer espaço usa `--grow`, que levou a p3
+   a ~115 GiB num cartão de 116. Trocar 384 MiB na imagem por um risco de
+   configuração de build não paga;
+2. mexer em tamanho de rootfs é a família do §12.27 (build retomado não
+   reconfigura), e o build levaria 40 min para provar;
+3. o Buildroot 2025.02 **falha** quando o conteúdo excede o tamanho declarado —
+   então não é um risco silencioso, mas é um risco de rodada.
+
+Fica registrado como a alavanca óbvia se um dia a `.img` precisar ser menor, ou
+se a p3 precisar nascer maior.
 
 ### Duas armadilhas do caminho, as duas minhas
 

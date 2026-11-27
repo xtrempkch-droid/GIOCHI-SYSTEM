@@ -56,8 +56,25 @@ log() { echo "S20userdata: $*"; }
 # preferência, com um segundo cartão também rotulado GIOCHI_USER a escolha
 # dependeria da ordem de probe — e `mmcblk0` num boot pode ser o cartão do
 # sistema e no seguinte o de dados (§12.24: nome de device não é identidade).
+# Lista TODOS os candidatos e prefere o do cartão do sistema. Sem esta
+# preferência, com um segundo cartão também rotulado GIOCHI_USER a escolha
+# dependeria da ordem de probe — e `mmcblk0` num boot pode ser o cartão do
+# sistema e no seguinte o de dados (§12.24: nome de device não é identidade).
+#
+# ## Por que só 3 tentativas, e por que não dorme na última
+#
+# Medido em 26/11/2026: com 10 tentativas de 1 s, uma imagem SEM partição de
+# dados (ou cartão sem a p3) gastava **10,0 s** de boot para depois dizer "não
+# há partição" — 10 s em todo boot, num aparelho que sobe em ~10 s. O laço
+# existe para cobrir o devtmpfs criando `/dev/disk/by-label` alguns instantes
+# depois do mount do rootfs, e esse atraso é de milissegundos: o `S10bootlog`
+# roda ANTES e já espera pelo mesmo `/dev`. Três tentativas (2 s no pior caso)
+# dão margem sem penalizar o caso comum, e a última não dorme — dormir para
+# desistir em seguida é só atraso.
 achar_por_label() {
-    for tentativa in 1 2 3 4 5 6 7 8 9 10; do
+    tentativa=0
+    while [ "$tentativa" -lt 3 ]; do
+        tentativa=$((tentativa + 1))
         encontrados=""
         for alvo in /dev/disk/by-label/"$LABEL_PREFERIDO"*; do
             [ -e "$alvo" ] || continue
@@ -80,8 +97,7 @@ achar_por_label() {
                 return 0
             done
         fi
-        # A montagem do rootfs pode acontecer antes de o /dev estar completo.
-        sleep 1
+        [ "$tentativa" -lt 3 ] && sleep 1
     done
     return 1
 }
