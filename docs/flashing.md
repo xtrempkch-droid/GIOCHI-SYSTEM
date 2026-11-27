@@ -56,8 +56,13 @@ partições:
 ```text
   64 MiB    p1  FAT32  256 MiB  GIOCHI_BOOT   Image, DTB, extlinux.conf, boot.scr
  320 MiB    p2  ext4  1024 MiB  GIOCHI        sistema — tamanho FIXO, nunca cresce
-1344 MiB    p3  ext4  o resto  GIOCHI_USER   dados do usuário (= /user)
+1344 MiB    p3  exFAT o resto  GIOCHI_USER   dados do usuário (= /user)
 ```
+
+A p3 é **exFAT por padrão** para o usuário de Windows copiar arquivo pelo
+Explorer. `--user-fs vfat` dá FAT32 (lido por tudo, teto de 4 GiB por arquivo) e
+`--user-fs ext4` preserva permissão para quem só usa Linux. Detalhe em
+[`pastas-do-usuario.md`](pastas-do-usuario.md).
 
 A divisão que resolve o problema do arquivo de tamanho fixo: **o sistema é do
 tamanho da imagem, os dados são do tamanho do cartão**. A `p3` nasce com o que

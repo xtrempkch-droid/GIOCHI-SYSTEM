@@ -245,3 +245,24 @@ CONFIG_ATH9K_HTC=m
 # firmware rtl_bt: a pilha BlueZ não é instalada (ver defconfig), então não há
 # o que subir.
 
+
+# --- Sistemas de arquivo que o Windows lê -------------------------------------
+#
+# A partição de dados (/user, p3) passa a nascer em **exFAT** por padrão, para o
+# usuário que tem Windows poder copiar jogo e música pelo Explorer. Duas peças
+# são necessárias, e as duas estavam DESLIGADAS no kernel:
+#
+#   CONFIG_EXFAT_FS  — o driver (mainline desde o 5.7). Sem ele o `mount` da p3
+#                      falha com "unknown filesystem type 'exfat'", e /user
+#                      volta a ser diretório do rootfs — sem mensagem dizendo
+#                      por quê. É `=y` e não `=m` porque o mount acontece no
+#                      boot, e esta imagem não tem autoload de módulo (§12.43).
+#
+#   CONFIG_NLS_UTF8  — exFAT guarda nome em UTF-16 e o driver traduz pelo NLS.
+#                      Sem UTF-8, "Música.mp3" vira lixo ou não abre, e o
+#                      sintoma é "arquivo corrompido" num arquivo íntegro.
+#                      Medido no .config do 6.12: estava `is not set`.
+#
+# VFAT já vinha `=y` do defconfig arm64 (é a p1 de boot), e continua.
+CONFIG_EXFAT_FS=y
+CONFIG_NLS_UTF8=y

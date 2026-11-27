@@ -45,54 +45,71 @@ A p1 (`GIOCHI_BOOT`, 256 MiB, FAT) é montável em qualquer sistema — mas ela 
 O layout de `ports/` não é escolha nossa: é a convenção do PortMaster, e o
 `giochi-ports --rodar` aceita os dois (o instalado por ele e o feito à mão).
 
-## A partição de dados existe desde 26/11/2026
+## A partição de dados é exFAT — copiar pelo Windows funciona
 
-`/user` agora é a **terceira partição** do cartão (rótulo `GIOCHI_USER`), montada
-pelo `S20userdata` no boot. O layout:
+`/user` é a **terceira partição** do cartão (rótulo `GIOCHI_USER`), montada pelo
+`S20userdata` no boot. O layout:
 
 ```text
   64 MiB    p1  FAT32  256 MiB  GIOCHI_BOOT   Image, DTB, extlinux.conf
- 320 MiB    p2  ext4  1024 MiB  GIOCHI        sistema (NUNCA cresce)
-1344 MiB    p3  ext4  o resto  GIOCHI_USER   ← seus jogos, músicas, apps
+ 320 MiB    p2  ext4  1024 MiB  GIOCHI        sistema (NUNCA cresce, NUNCA muda de FS)
+1344 MiB    p3  exFAT  o resto  GIOCHI_USER   ← seus jogos, músicas, apps
 ```
 
-E a divisão é a que você pediu: **sistema do tamanho da imagem, dados do tamanho
-do cartão**. Regravar a imagem reescreve a p1 e a p2 — a **p3 não é tocada**,
-então seus arquivos sobrevivem.
+A p3 nasce em **exFAT** de propósito: quem tem Windows abre o cartão no Explorer
+e copia para `games`, `musica` ou `apps` como em qualquer pendrive. O sistema
+(p2) continua ext4, porque precisa de permissão, symlink e device node.
 
-| Gravação | p3 |
-| --- | --- |
-| `flash-sd.sh <img> /dev/sdX` | 704 MiB (o que cabe na imagem de 2 GiB) |
-| `flash-sd.sh <img> /dev/sdX --grow` | **o cartão quase todo** |
+| `--user-fs` | Lido por | Limite | Quando usar |
+| --- | --- | --- | --- |
+| **`exfat`** (padrão) | Windows, macOS, Linux (kernel ≥ 5.7) | nenhum prático | o caso normal |
+| `vfat` (FAT32) | **tudo** — TV, câmera, Windows antigo | **4 GiB por arquivo** | compatibilidade máxima |
+| `ext4` | só Linux | nenhum | quem nunca põe o cartão no Windows |
 
-Medido em 26/11/2026 num cartão de 116 GiB com `--grow`: a p3 foi de 704 MiB
-para ~115 GiB. O `--grow` cresce a **última** partição — que agora é a de dados,
-e não mais o rootfs.
+```bash
+bash scripts/build-in-container.sh --sd-image powkiddy-x55        # exFAT
+bash scripts/make-sd-image.sh powkiddy-x55 --user-fs vfat         # FAT32
+```
+
+### Medido em 27/11/2026, na p3 exFAT da imagem gerada
+
+```text
+mount -t exfat -o uid=0,gid=0,fmask=0000,dmask=0000,iocharset=utf8
+
+drwxrwxrwx  musica          rwxrwxrwx  ports/jogo.sh  → EXECUTOU
+rwxrwxrwx   musica/Música.mp3            → acento preservado
+```
+
+`fmask=0000` não é detalhe: **exFAT e FAT não guardam permissão**, é o mount que
+decide. Sem ele, `ports/*.sh` e o binário de um jogo não rodam — e o sintoma é
+"permission denied" num arquivo que está lá.
+
+E o custo dessa escolha, dito na frente: **em exFAT todo arquivo é 0777**. Num
+aparelho onde todo processo roda como root isso não abre nada que já não
+estivesse aberto; quem quiser permissão de verdade usa `--user-fs ext4`.
 
 ### O segundo cartão
 
-O aparelho tem dois controladores SD. Um cartão de dados no **segundo slot**
-também é montado em `/user` — desde que tenha o rótulo `GIOCHI_USER`:
+Um cartão de dados no **segundo slot** também é montado em `/user`, e o critério
+é o que o usuário vê: a pasta **`giochi-user`** na raiz do cartão. No Windows é
+"Novo > Pasta" e renomear — dois cliques.
 
 ```bash
-# formatar um segundo cartão como dados (no PC)
-sudo mkfs.ext4 -L GIOCHI_USER /dev/sdX1
+# no Windows: formatar como exFAT e criar a pasta giochi-user na raiz
 ```
 
-Se os dois cartões tiverem o rótulo, o `S20userdata` **prefere o do cartão do
-sistema** — nome de device não serve para decidir (`mmcblk0` num boot pode ser o
-cartão do sistema e no seguinte o de dados).
+Sem o marcador, o cartão **não** vai para `/user`: ele é mídia removível, e
+montá-lo ali confundiria "meu save" com "o cartão do fulano".
 
-Um cartão **sem** o rótulo não é montado em `/user`: ele aparece em
-`/media/<LABEL>`, que é a convenção de mídia removível — assim "meu save" nunca
-se confunde com "o cartão do fulano".
+### O primeiro boot com a partição vazia
 
-### O que acontece no primeiro boot com a partição vazia
+A p3 nasce vazia. Montar por cima do `/user` do rootfs esconderia o LEIA-ME e o
+que já estivesse lá — então o `S20userdata` guarda o conteúdo antes de montar e
+**migra** para a partição, mas só se ela estiver vazia. Se já tiver qualquer
+coisa (o save de um jogo), ele **não toca** e diz isso.
 
-A p3 nasce formatada e **vazia**. Montar por cima do `/user` do rootfs esconderia
-o LEIA-ME e o que já estivesse lá — então o `S20userdata` guarda o conteúdo antes
-de montar e **migra** para a partição, mas só se ela estiver vazia. Se já tiver
-qualquer coisa (o save de um jogo), ele **não toca** e diz isso.
+Detalhe de exFAT: a migração usa `cp -r` e não `cp -a`, porque dono e permissão
+não existem lá — `cp -a` tentaria preservar e o busybox pode abortar no meio.
 
 ## O aviso que continua valendo
 

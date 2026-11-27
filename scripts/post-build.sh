@@ -362,6 +362,12 @@ Não precisa da loja para nada do que está abaixo.
 
 /roms aponta para cá: é o nome que o PortMaster espera.
 
+COMO COPIAR ARQUIVO (sem a loja)
+  Pelo cabo USB:  scp -r MeuJogo/ root@10.55.0.2:/user/games/
+  Pelo cartao:    esta pasta e uma PARTICAO separada, e no Windows ela
+                  aparece como uma unidade de disco. Basta copiar.
+                  O sistema nao e afetado: regravar a imagem NAO apaga aqui.
+
 ATENÇÃO — isto NÃO é uma partição separada:
   estas pastas vivem dentro do sistema, que ocupa o cartão inteiro quando a
   imagem é gravada com --grow. Regravar a imagem APAGA o conteúdo daqui.

@@ -4,7 +4,7 @@
 # ============================================================
 # giochi-system:help:begin
 # Uso (precisa de root: usa loop device, mkfs e mount):
-#   sudo bash scripts/make-sd-image.sh powkiddy-x55 [--size-mib N]
+#   sudo bash scripts/make-sd-image.sh powkiddy-x55 [--size-mib N] [--user-fs exfat|vfat|ext4]
 #   bash scripts/build-in-container.sh --sd-image powkiddy-x55
 #
 # Entrada: out/<device>/ com Image, dtbs, rootfs.ext4, idbloader.img, u-boot.itb
@@ -14,12 +14,32 @@
 #
 #   setor 64    (32 KiB)  idbloader.img    ← TPL + SPL (DDR init + BL31 load)
 #   setor 16384 (8 MiB)   u-boot.itb       ← U-Boot próprio + ATF
-#   64 MiB                p1 FAT32 256 MiB  GIOCHI_BOOT: Image, dtb, extlinux.conf, boot.scr
-#   320 MiB               p2 ext4  resto    GIOCHI: rootfs
+#   64 MiB                p1 FAT32  256 MiB       GIOCHI_BOOT: Image, dtb, extlinux.conf, boot.scr
+#   320 MiB               p2 ext4   1024 MiB      GIOCHI: rootfs (FIXO)
+#   1344 MiB              p3 exFAT  o resto       GIOCHI_USER: /user — dados do usuário
 #
 # Por que os offsets: o BootROM do RK3566 lê o idbloader do setor 64 e o U-Boot
 # do setor 16384. Gravar só as partições — o que o build entrega hoje — gera um
 # cartão que o aparelho nem tenta ler.
+#
+# ## Por que a p3 nasce em exFAT (e não ext4)
+#
+# Pedido do dono do projeto: quem tem Windows precisa copiar jogo e música pelo
+# Explorer, sem SSH. O rootfs (p2) tem de continuar ext4 — ele precisa de
+# permissão, symlink e device node. Mas a p3 é só arquivo de usuário, e exFAT
+# resolve o caso:
+#
+#   exFAT  padrão. Windows nativo, sem limite de 4 GiB por arquivo, e aceita
+#          nome com acento (o kernel precisa de CONFIG_NLS_UTF8).
+#   vfat   FAT32. Lido por QUALQUER coisa (TV, câmera, Windows antigo), mas
+#          tem teto de 4 GiB por arquivo e 11 caracteres de rótulo.
+#   ext4   preserva permissão e symlink; é o melhor para /user/ports, e o pior
+#          para quem está no Windows.
+#
+# Nenhum dos três guarda permissão de forma utilizável no nosso caso (exFAT e
+# FAT não guardam nada; é o mount que decide), então o `S20userdata` monta com
+# `fmask=0000` — tudo 0777. Num aparelho onde todo processo roda como root isso
+# é o que faz `ports/*.sh` e binário de jogo serem executáveis.
 # giochi-system:help:end
 # ============================================================
 
@@ -36,6 +56,11 @@ BOOT_PART_START_MIB=64
 # tem limite de 2 GiB; quem a leva ao tamanho real é o `--grow` do `flash-sd.sh`
 # ou o primeiro boot (§ abaixo).
 DATA_PART_MIN_MIB=512
+# Formato da partição de dados. exFAT é o padrão porque o pedido é "usuário no
+# Windows copia pelo Explorer": é nativo lá, não tem teto de 4 GiB por arquivo
+# e aceita acento. `--user-fs vfat` para compatibilidade máxima, `ext4` para
+# quem nunca vai pôr o cartão num Windows.
+USER_FS=exfat
 
 usage() {
   awk '/^# giochi-system:help:begin$/ { dentro = 1; next }
@@ -48,6 +73,19 @@ while (($#)); do
     --size-mib)
       shift
       SIZE_MIB="${1:-}"
+      ;;
+    --user-fs)
+      shift
+      USER_FS="${1:-}"
+      case "$USER_FS" in
+        exfat|vfat|ext4) ;;
+        *)
+          # Falhar alto: um typo aqui geraria a p3 em ext4 e o usuário no Windows
+          # descobriria depois, com o cartão já gravado.
+          echo "ERRO: --user-fs aceita exfat, vfat ou ext4 (recebi '$USER_FS')." >&2
+          exit 2
+          ;;
+      esac
       ;;
     -h|--help)
       usage
@@ -89,6 +127,16 @@ for command in losetup mkfs.vfat mkfs.ext4 sfdisk mount umount mkimage dd trunca
     exit 2
   fi
 done
+
+# `mkfs.exfat` só é exigido quando o formato pedido é exFAT — cobrar sempre
+# quebraria quem usa `--user-fs vfat`, que é justamente o caminho "sem
+# exfatprogs instalado".
+if [[ "$USER_FS" == "exfat" ]] && ! command -v mkfs.exfat >/dev/null 2>&1; then
+  echo "ERRO: --user-fs exfat precisa do 'mkfs.exfat' (pacote exfatprogs)." >&2
+  echo "  Debian/Ubuntu: sudo apt install exfatprogs" >&2
+  echo "  Sem ele: use --user-fs vfat (FAT32, lido por tudo, teto de 4 GiB por arquivo)." >&2
+  exit 2
+fi
 
 OUT_DIR="${GIOCHI_SYSTEM_OUT_DIR:-$ROOT/out/$DEVICE_ID}"
 IMAGE="$OUT_DIR/giochi-system-$DEVICE_ID-sd.img"
@@ -296,8 +344,26 @@ fi
 # sem ele, 700 MiB de zeros viram 700 MiB de verdade no arquivo publicado.
 DATA_IMAGE="$WORK/data.ext4"
 truncate -s "${DATA_PART_MIB}M" "$DATA_IMAGE"
-mkfs.ext4 -q -L GIOCHI_USER -F "$DATA_IMAGE"
-echo "  p3:      GIOCHI_USER (${DATA_PART_MIB} MiB) — dados do usuário"
+case "$USER_FS" in
+  ext4)
+    mkfs.ext4 -q -L GIOCHI_USER -F "$DATA_IMAGE"
+    ;;
+  exfat)
+    # `mkfs.exfat` (exfatprogs) aceita arquivo comum, não só block device — é o
+    # que permite formatar no modo sem loop também. Rótulo de 11 caracteres:
+    # "GIOCHI_USER" tem exatamente 11, que é o teto do FAT e cabe no exFAT.
+    mkfs.exfat -L GIOCHI_USER "$DATA_IMAGE" >/dev/null 2>&1 || {
+      echo "ERRO: mkfs.exfat falhou. Instale 'exfatprogs' (host) ou use --user-fs vfat." >&2
+      exit 2
+    }
+    ;;
+  vfat)
+    # -F 32 explícito: a escolha automática daria FAT16 num volume pequeno, e o
+    # byte de tipo da MBR diz type=83 (Linux). FAT32 é o que qualquer sistema lê.
+    mkfs.vfat -F 32 -n GIOCHI_USER "$DATA_IMAGE" >/dev/null
+    ;;
+esac
+echo "  p3:      GIOCHI_USER (${DATA_PART_MIB} MiB, $USER_FS) — dados do usuário"
 
 # PARTUUID do MBR segue o formato <id-do-disco>-<numero>. O id é fixado no
 # sfdisk, então o valor é conhecido ANTES de formatar — não depende de blkid
@@ -463,7 +529,7 @@ if (( DATA_OFFSET % (4 * 1024 * 1024) != 0 )); then
 fi
 dd if="$DATA_IMAGE" of="$IMAGE" bs=4M seek="$DATA_SEEK" conv=notrunc,sparse status=none
 sync
-echo "  p3:      ext4 GIOCHI_USER gravada no offset $(( DATA_OFFSET / 1024 / 1024 )) MiB"
+echo "  p3:      $USER_FS GIOCHI_USER gravada no offset $(( DATA_OFFSET / 1024 / 1024 )) MiB"
 
 sync
 if ((LOOP_MODE)); then

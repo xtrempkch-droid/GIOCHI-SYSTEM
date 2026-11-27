@@ -160,6 +160,7 @@ REQUIRED_COMMANDS=(
   "swig:swig"
   "dtc:device-tree-compiler"
   "mkfs.vfat:dosfstools"
+  "mkfs.exfat:exfatprogs"
   "mcopy:mtools"
   "parted:parted"
 )

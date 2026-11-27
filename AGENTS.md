@@ -151,7 +151,7 @@ o que foi medido, e deixar a decisão com quem responde pelo código.
 
 | Verificação | Resultado |
 | --- | --- |
-| `node tests/run-all.mjs` | **696/696 + 1 skip**, 75 arquivos (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, panel-diag 17, gamepad-virtual 12, selftest-contract 21, issues-vizinhos 6, portmaster 7, …) |
+| `node tests/run-all.mjs` | **702/702 + 1 skip**, 75 arquivos (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, panel-diag 17, gamepad-virtual 12, selftest-contract 21, issues-vizinhos 6, portmaster 7, …) |
 | `node scripts/validate-devices.mjs` | OK — 7 devices, 1 habilitado |
 | `node scripts/list-devices.mjs --github-matrix` | matriz com `qemu-aarch64` |
 | matriz com `--device powkiddy-x55 --allow-draft` | devolve **só** o X55 |
@@ -566,7 +566,7 @@ absoluto** do host — §12.40).
 
 ## 10. Testes
 
-`node tests/run-all.mjs` → **696/696 + 1 skip**, em **75 arquivos**. A tabela abaixo é uma
+`node tests/run-all.mjs` → **702/702 + 1 skip**, em **75 arquivos**. A tabela abaixo é uma
 seleção dos que prendem contratos de projeto; a lista completa é `ls tests/` e
 `tests/runner-coverage.test.mjs` **falha** se algum arquivo existir sem estar
 importado no `run-all.mjs` — foi assim que dois testes desta revisão quase
@@ -8339,3 +8339,132 @@ a correção de uma linha para um rebuild.
 `tests/bootpart-fixa.test.mjs` (6 casos) prende as duas metades: o `/boot` monta
 e escolhe certo, e o `UEVENT_HELPER` continua desligado — se alguém o ligar, o
 teste avisa que a issue do app precisa ser atualizada.
+
+## 46. exFAT na partição de dados — e dois bugs que estavam escondidos atrás dela (27/11/2026)
+
+Pedido do dono do projeto: *"adicione suporte ao exFAT e vfat, assim caso o
+cliente/usuário estiver no Windows terá como usar o sdcard com mais facilidade"*.
+
+A p3 (`/user`) passou a nascer em **exFAT** por padrão. O que a implementação
+descobriu no caminho vale mais que a feature: **dois defeitos empilhados** que se
+escondiam um atrás do outro, os dois invisíveis no teste.
+
+### O que ficou
+
+```text
+  64 MiB    p1  FAT32  256 MiB  GIOCHI_BOOT   boot
+ 320 MiB    p2  ext4  1024 MiB  GIOCHI        sistema (FIXO, e tem de ser ext4)
+1344 MiB    p3  exFAT o resto  GIOCHI_USER   /user — o usuário do Windows copia aqui
+```
+
+| `--user-fs` | Lido por | Teto | Uso |
+| --- | --- | --- | --- |
+| **`exfat`** (padrão) | Windows, macOS, Linux ≥ 5.7 | nenhum | o caso normal |
+| `vfat` | tudo (TV, câmera) | **4 GiB/arquivo** | compatibilidade máxima |
+| `ext4` | só Linux | nenhum | preserva permissão |
+
+Medido na p3 exFAT da imagem gerada (27/11/2026), com as opções reais:
+
+```text
+mount -t exfat -o uid=0,gid=0,fmask=0000,dmask=0000,iocharset=utf8
+drwxrwxrwx  musica        rwxrwxrwx  ports/jogo.sh → EXECUTOU
+                           musica/Música.mp3       → acento preservado
+```
+
+**`fmask=0000` não é detalhe:** exFAT e FAT não guardam permissão, quem decide é
+o mount. Sem ele `ports/*.sh` e o binário de um jogo não rodam, e o sintoma é
+"permission denied" num arquivo que está lá. O custo, dito na frente: em exFAT
+**todo arquivo é 0777** — num aparelho onde tudo roda como root, isso não abre
+nada que já não estivesse aberto; quem quiser permissão de verdade usa
+`--user-fs ext4`.
+
+Duas peças de kernel, e as duas estavam **desligadas**:
+
+| Símbolo | Estado medido | Efeito sem ele |
+| --- | --- | --- |
+| `CONFIG_EXFAT_FS` | `# is not set` | `unknown filesystem type 'exfat'`, `/user` volta ao rootfs, sem mensagem |
+| `CONFIG_NLS_UTF8` | `# is not set` | "Música.mp3" vira lixo — e o sintoma é "arquivo corrompido" |
+
+Ambos `=y` (não `=m`: o mount é no boot e não há autoload, §12.43) e nos três
+`kernel-required.txt`, porque o fragmento é delta (§12.9).
+
+`exfatprogs` entrou no `docker/builder.Dockerfile`, no workflow e no
+`check-host.sh` — é `mkfs.exfat` que roda na **construção**, não no aparelho.
+O `make-sd-image.sh` só exige o binário quando `--user-fs exfat` é pedido, para
+quem usa `vfat` não ser bloqueado por falta de um pacote que não vai usar.
+
+### Bug 1 — `/dev/disk/by-label` NÃO EXISTE nesta imagem
+
+O `S20userdata` do §44 procurava a partição por
+`/dev/disk/by-label/GIOCHI_USER*`. Medido no `.config` do Buildroot:
+
+```text
+BR2_ROOTFS_DEVICE_CREATION_DYNAMIC_DEVTMPFS=y
+# BR2_ROOTFS_DEVICE_CREATION_DYNAMIC_MDEV is not set
+# BR2_ROOTFS_DEVICE_CREATION_DYNAMIC_EUDEV is not set
+```
+
+Quem cria `/dev/disk/by-label` é o **udev** (ou o mdev, que aqui não roda).
+devtmpfs cria os nodes dos devices, não os symlinks por rótulo. Ou seja: **o
+script nunca encontrava a partição**, `/user` ficava sempre no rootfs, e nada
+dizia isso — a partição do §44 era inerte.
+
+**Por que o teste passava:** a bancada do teste *criava* o symlink by-label. O
+mock era mais generoso que o aparelho — a mesma classe do `mount` falso que lia
+`ext4` como argumento de `-t` (§44) e do `ls A* B*` (§12.34). A ferramenta
+respondeu, e a resposta não foi lida com desconfiança.
+
+Correção — três critérios, **nenhum** dependente de symlink:
+
+1. **LAYOUT**: p3 do mesmo cartão do rootfs. É construção nossa, e determinístico.
+2. **MARCADOR**: pasta `giochi-user` na raiz do volume — é o que o usuário cria
+   no Windows em dois cliques para um segundo cartão.
+3. **RÓTULO**, só se by-label existir (imagem com eudev). Barato, e não atrapalha.
+
+A enumeração usa **`/sys/class/block/*/partition`** — esse arquivo só existe PARA
+PARTIÇÕES, então não há adivinhação de nome (`sda1` × `mmcblk0p1` × `vda1`).
+
+### Bug 2 — `mountinfo` lido com o formato de `/proc/mounts`
+
+O `dispositivo_do_root` fazia:
+
+```sh
+awk '$2 == "/" { print $1; exit }' /proc/self/mountinfo
+```
+
+No `mountinfo` os campos são `id parent-id maj:min root mountpoint ...` — o ponto
+de montagem é o **`$5`** e o device é o **`$3`**. Com `$2` a comparação nunca
+casava, a função devolvia vazio, e o critério de LAYOUT do bug 1 também nunca
+dispararia. Dois defeitos que se escondiam: o by-label inexistente mascarava o
+parse errado, e o parse errado mascararia o by-label.
+
+**Lição que fica, e é a terceira vez nesta semana:** teste cujo mock é mais
+generoso que o alvo não testa nada — ele confirma a intenção do autor. A bancada
+nova **não cria by-label nenhum**, e um dos casos falha se o script voltar a
+depender dele.
+
+### Também melhorado no caminho
+
+- **O rootfs não é candidato.** Antes o laço montava a p2 em `/user` para testar
+  o marcador — montar o sistema em cima de `/user` mostraria a raiz inteira ali.
+  Agora `particao_do_root()` devolve o nome e o laço pula.
+- **Migração usa `cp -r` em exFAT/FAT**, não `cp -a`: dono e permissão não
+  existem lá, e o busybox `cp` pode abortar no meio deixando cópia parcial.
+- **A mensagem diz o tipo e por qual critério achou**: `mmcblk1p3 (exfat, achada
+  por layout) montada em /user`. Sem isso, "por que meu cartão não foi montado"
+  volta a ser adivinhação.
+
+`tests/userdata-particao.test.mjs` foi de 6 para **14 casos**, rodando o script
+de verdade com `mount` falso e devices com o magic real. Verificado por mutação:
+
+| Mutação | Resultado |
+| --- | --- |
+| exFAT sem `fmask=0000` | 13 pass / 1 fail |
+| exFAT sem `iocharset=utf8` | 13 pass / 1 fail |
+| `fmask` também em ext4 | 13 pass / 1 fail |
+| voltar a enumerar por by-label | 7 pass / **7 fail** |
+
+A terceira mutação também revelou um vício **no teste**: procurar `fmask` no log
+inteiro dava falso positivo, porque a tentativa na p1 (vfat, com fmask) fica
+registrada. Passou a olhar **a linha do device de dados** — mesma correção
+aplicada ao teste de ext4.

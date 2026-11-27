@@ -83,3 +83,9 @@ CONFIG_COMMON_CLK_ROCKCHIP=y
 # Medido em 15/11/2026: `# CONFIG_UHID is not set` no defconfig arm64.
 CONFIG_HID=y
 CONFIG_UHID=y
+# exFAT é o formato padrão da partição de dados (/user, p3) desde 26/11/2026.
+# O fragmento pede, mas ele é DELTA: se o símbolo sumir, a p3 não monta e o
+# usuário perde a pasta — sem erro no boot. O gate tem de cobrar do resultado.
+CONFIG_EXFAT_FS
+CONFIG_NLS_UTF8
+CONFIG_VFAT_FS

@@ -12,7 +12,7 @@ ENV LANG=C.UTF-8
 # Dependências do Buildroot (Buildroot manual §2.2) + as deste repositório.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         autoconf automake bc bison build-essential bzip2 ca-certificates \
-        ccache cpio curl device-tree-compiler dosfstools e2fsprogs fdisk file flex \
+        ccache cpio curl device-tree-compiler dosfstools e2fsprogs exfatprogs fdisk file flex \
         gawk gettext gperf git help2man libelf-dev libncurses-dev libssl-dev \
         libtool libudev-dev libpython3-dev mtools parted patch perl \
         pkg-config python3 python3-dev python3-pip python3-setuptools \
