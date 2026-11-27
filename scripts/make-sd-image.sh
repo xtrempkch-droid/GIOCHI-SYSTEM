@@ -5,6 +5,13 @@
 # giochi-system:help:begin
 # Uso (precisa de root: usa loop device, mkfs e mount):
 #   sudo bash scripts/make-sd-image.sh powkiddy-x55 [--size-mib N] [--user-fs exfat|vfat|ext4]
+#
+# `--user-fs` escolhe o formato da partição de DADOS (p3, /user) e SÓ dela.
+# A do SISTEMA (p2) é sempre ext4, e a imagem recusa rootfs que não seja ext4:
+# FAT não guarda permissão, symlink nem device node, e o kernel não acha o
+# /sbin/init. Ver docs/pastas-do-usuario.md.
+#
+# Pelo container (sem root no host):
 #   bash scripts/build-in-container.sh --sd-image powkiddy-x55
 #
 # Entrada: out/<device>/ com Image, dtbs, rootfs.ext4, idbloader.img, u-boot.itb
@@ -22,24 +29,15 @@
 # do setor 16384. Gravar só as partições — o que o build entrega hoje — gera um
 # cartão que o aparelho nem tenta ler.
 #
-# ## Por que a p3 nasce em exFAT (e não ext4)
+# ## --user-fs: o formato da p3
 #
-# Pedido do dono do projeto: quem tem Windows precisa copiar jogo e música pelo
-# Explorer, sem SSH. O rootfs (p2) tem de continuar ext4 — ele precisa de
-# permissão, symlink e device node. Mas a p3 é só arquivo de usuário, e exFAT
-# resolve o caso:
+#   exFAT  padrão. Windows nativo, sem teto de 4 GiB, aceita acento
+#          (o kernel precisa de CONFIG_NLS_UTF8).
+#   vfat   FAT32. Lido por qualquer coisa, mas teto de 4 GiB por arquivo.
+#   ext4   preserva permissão; melhor para /user/ports, pior no Windows.
 #
-#   exFAT  padrão. Windows nativo, sem limite de 4 GiB por arquivo, e aceita
-#          nome com acento (o kernel precisa de CONFIG_NLS_UTF8).
-#   vfat   FAT32. Lido por QUALQUER coisa (TV, câmera, Windows antigo), mas
-#          tem teto de 4 GiB por arquivo e 11 caracteres de rótulo.
-#   ext4   preserva permissão e symlink; é o melhor para /user/ports, e o pior
-#          para quem está no Windows.
-#
-# Nenhum dos três guarda permissão de forma utilizável no nosso caso (exFAT e
-# FAT não guardam nada; é o mount que decide), então o `S20userdata` monta com
-# `fmask=0000` — tudo 0777. Num aparelho onde todo processo roda como root isso
-# é o que faz `ports/*.sh` e binário de jogo serem executáveis.
+# exFAT e FAT não guardam permissão: o mount aplica fmask=0000 (tudo 0777), e é
+# o que faz `ports/*.sh` ser executável. Detalhe em docs/pastas-do-usuario.md.
 # giochi-system:help:end
 # ============================================================
 
@@ -149,6 +147,31 @@ for required in Image rootfs.ext4; do
     exit 2
   fi
 done
+
+# ── A partição do SISTEMA é ext4, e isso NÃO é negociável ─────────────────────
+#
+# `--user-fs` escolhe o formato da p3 (dados). A p2 é outra história, e a
+# diferença decide se o aparelho boota:
+#
+#   ext4  guarda permissão, dono, symlink e device node — o Linux PRECISA disso
+#         para `/bin`, `/etc`, `/dev` e os scripts de init.
+#   FAT   não guarda NADA disso. Um rootfs em FAT não tem bit de execução, os
+#         symlinks viram cópias, `/dev/null` não existe: o kernel chega ao
+#         `init` e não encontra. Não é "boota com ressalvas" — não boota.
+#
+# Por isso `--user-fs vfat` muda a p3 e **só** a p3. E por isso esta checagem
+# existe: se alguém apontar `rootfs.ext4` para um sistema de arquivos FAT (ou
+# substituir o arquivo), o erro tem de aparecer AQUI, na construção, e não num
+# cartão gravado que não acende — onde a mensagem é tela preta.
+ROOTFS_MAGIC="$(dd if="$OUT_DIR/rootfs.ext4" bs=1 skip=1080 count=2 status=none 2>/dev/null | od -An -tx1 2>/dev/null | tr -d ' \n')"
+if [[ "$ROOTFS_MAGIC" != "53ef" ]]; then
+  echo "ERRO: $OUT_DIR/rootfs.ext4 NÃO é ext4 (magic 0x${ROOTFS_MAGIC:-vazio}, esperado 0x53ef)." >&2
+  echo "  A partição do sistema precisa de ext4: FAT não guarda permissão," >&2
+  echo "  symlink nem device node, e o kernel não encontra o /sbin/init." >&2
+  echo "  O formato da partição de DADOS é outra coisa — esse sim aceita" >&2
+  echo "  exFAT/FAT32, via --user-fs. Ver docs/pastas-do-usuario.md." >&2
+  exit 2
+fi
 
 # Firmware em dois formatos aceitos, porque o Buildroot nem sempre publica os
 # dois: `u-boot-rockchip.bin` é o combinado (idbloader no offset 0 e u-boot.itb

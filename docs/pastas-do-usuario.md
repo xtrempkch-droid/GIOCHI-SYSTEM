@@ -45,96 +45,107 @@ A p1 (`GIOCHI_BOOT`, 256 MiB, FAT) é montável em qualquer sistema — mas ela 
 O layout de `ports/` não é escolha nossa: é a convenção do PortMaster, e o
 `giochi-ports --rodar` aceita os dois (o instalado por ele e o feito à mão).
 
-## A partição de dados é exFAT — copiar pelo Windows funciona
+## Os DOIS cartões: sistema é ext4, dados aceitam FAT
 
-`/user` é a **terceira partição** do cartão (rótulo `GIOCHI_USER`), montada pelo
-`S20userdata` no boot. O layout:
+Esta é a distinção que mais importa, e confundir as duas **quebra o aparelho**:
+
+| | Cartão do SISTEMA (o que boota) | Cartão de DADOS (o seu sdcard2) |
+| --- | --- | --- |
+| Partições | p1 boot (FAT32), **p2 sistema (ext4)**, p3 dados | uma ou mais |
+| Formato do sistema | **ext4, obrigatório** | não tem sistema |
+| Formato dos dados | p3: exFAT (padrão), vfat ou ext4 | **qualquer: FAT32, exFAT, ext4** |
+| Por quê | ext4 guarda permissão, symlink e device node | é só arquivo de usuário |
+
+**A p2 nunca pode ser FAT.** FAT não guarda bit de execução, symlink nem device
+node: o kernel carrega, procura o `/sbin/init` e não encontra. O sintoma é tela
+preta sem mensagem — e não há como recuperar sem regravar. O `make-sd-image.sh`
+**recusa** um rootfs que não seja ext4 (verifica o magic `0x53ef`) justamente
+para isso não acontecer por acidente.
+
+## O cartão do sistema
 
 ```text
   64 MiB    p1  FAT32  256 MiB  GIOCHI_BOOT   Image, DTB, extlinux.conf
- 320 MiB    p2  ext4  1024 MiB  GIOCHI        sistema (NUNCA cresce, NUNCA muda de FS)
-1344 MiB    p3  exFAT  o resto  GIOCHI_USER   ← seus jogos, músicas, apps
+ 320 MiB    p2  ext4  1024 MiB  GIOCHI        sistema (FIXO, ext4 sempre)
+1344 MiB    p3  exFAT  o resto  GIOCHI_USER   /user
 ```
 
-A p3 nasce em **exFAT** de propósito: quem tem Windows abre o cartão no Explorer
-e copia para `games`, `musica` ou `apps` como em qualquer pendrive. O sistema
-(p2) continua ext4, porque precisa de permissão, symlink e device node.
+A p3 nasce em **exFAT** porque facilita a vida de quem tem Windows — assim a
+mesma partição de dados do cartão do sistema já abre no Explorer. Mas isso é
+**conveniência**, não obrigação: `--user-fs ext4` deixa tudo em ext4 e funciona
+igual (só não abre no Windows).
 
 | `--user-fs` | Lido por | Limite | Quando usar |
 | --- | --- | --- | --- |
-| **`exfat`** (padrão) | Windows, macOS, Linux (kernel ≥ 5.7) | nenhum prático | o caso normal |
-| `vfat` (FAT32) | **tudo** — TV, câmera, Windows antigo | **4 GiB por arquivo** | compatibilidade máxima |
+| **`exfat`** (padrão) | Windows, macOS, Linux ≥ 5.7 | nenhum | o caso normal |
+| `vfat` (FAT32) | **tudo** | **4 GiB por arquivo** | compatibilidade máxima |
 | `ext4` | só Linux | nenhum | quem nunca põe o cartão no Windows |
 
+## O segundo cartão (o sdcard2)
+
+O aparelho tem dois controladores SD. Um cartão no **segundo slot** é montado em
+`/user` quando tem a pasta **`giochi-user`** na raiz — e o formato dele pode ser
+**qualquer um dos três**:
+
 ```bash
-bash scripts/build-in-container.sh --sd-image powkiddy-x55        # exFAT
-bash scripts/make-sd-image.sh powkiddy-x55 --user-fs vfat         # FAT32
+# no Windows: formatar o cartão como exFAT ou FAT32,
+# depois criar uma pasta chamada  giochi-user  na raiz. Dois cliques.
 ```
 
-### Medido em 27/11/2026, na p3 exFAT da imagem gerada
+```bash
+# no Linux:
+sudo mkfs.vfat -F 32 -n SDCARD2 /dev/sdX1     # ou mkfs.exfat
+sudo mount /dev/sdX1 /mnt && sudo mkdir /mnt/giochi-user && sudo umount /mnt
+```
+
+**FAT32 é o que tem a maior compatibilidade** — é o que TV, câmera e Windows
+antigo leem. O teto é 4 GiB por arquivo, o que não atrapalha jogo nem música, e
+atrapalha imagem de disco. **exFAT** não tem esse teto e o Windows lê nativo.
+
+A ordem de preferência é: a p3 do cartão do sistema primeiro; o segundo cartão
+como alternativa. Com os dois presentes, a p3 ganha — mesma imagem, mesmo
+conteúdo, e é o que o build gerou. Sem essa ordem a escolha dependeria da
+enumeração do kernel, que varia entre boots.
+
+### Medido em 27/11/2026, com as opções reais do `S20userdata`
 
 ```text
-mount -t exfat -o uid=0,gid=0,fmask=0000,dmask=0000,iocharset=utf8
-
-drwxrwxrwx  musica          rwxrwxrwx  ports/jogo.sh  → EXECUTOU
-rwxrwxrwx   musica/Música.mp3            → acento preservado
+exFAT: mount -t exfat -o uid=0,gid=0,fmask=0000,dmask=0000,iocharset=utf8
+       drwxrwxrwx  musica     rwxrwxrwx  ports/jogo.sh → EXECUTOU
+                              musica/Música.mp3        → acento preservado
 ```
 
-`fmask=0000` não é detalhe: **exFAT e FAT não guardam permissão**, é o mount que
-decide. Sem ele, `ports/*.sh` e o binário de um jogo não rodam — e o sintoma é
-"permission denied" num arquivo que está lá.
+`fmask=0000` não é detalhe: **FAT e exFAT não guardam permissão** — é o mount que
+decide. Sem ele, `ports/*.sh` e o binário de um jogo não rodam, e o sintoma é
+"permission denied" num arquivo que está lá. O custo, dito na frente: nesses dois
+formatos **todo arquivo é 0777**. Num aparelho onde tudo roda como root isso não
+abre nada que já não estivesse aberto.
 
-E o custo dessa escolha, dito na frente: **em exFAT todo arquivo é 0777**. Num
-aparelho onde todo processo roda como root isso não abre nada que já não
-estivesse aberto; quem quiser permissão de verdade usa `--user-fs ext4`.
+### Duas armadilhas de kernel, as duas medidas
 
-### Um aviso sobre Windows: nem toda versão mostra todas as partições
+**1. `iocharset=utf8` sem `CONFIG_NLS_UTF8` derruba o mount INTEIRO.** A
+mensagem é `mount: wrong fs type, bad option, bad superblock … missing codepage`
+— acusa superbloco para um problema de módulo. O que se perde é o `/user`
+completo, não só o acento do nome do arquivo.
 
-**Não medido aqui** (não há Windows nesta máquina) — mas é a primeira coisa a
-conferir se a pasta não aparecer no Explorer: **o Windows nem sempre atribui
-letra a todas as partições de uma mídia removível**. Ele mostra a primeira; o
-resto pode ficar invisível sem nenhuma mensagem.
+Por isso o `S20userdata` monta em **degraus**: completo → sem charset → sem
+permissão. Cada queda avisa no console o que foi perdido. É a diferença entre
+"`Música.mp3` aparece como `M?sica.mp3`" e "não há `/user`".
 
-A p1 (`GIOCHI_BOOT`, FAT32, 256 MiB) é a primeira e sempre aparece. Se a p3 não
-aparecer, confira em **Gerenciamento de Disco** (`diskmgmt.msc`) — se ela estiver
-lá com o rótulo `GIOCHI_USER`, o cartão está certo e o problema é só de letra de
-unidade; "Alterar letra da unidade" resolve.
-
-Se nenhuma versão do Windows mostrar, os dois caminhos que funcionam sempre:
-
-```bash
-# pelo cabo, sem tirar o cartão (o mesmo cabo que carrega)
-scp -r MeuJogo/   root@10.55.0.2:/user/games/
-scp   musica.mp3  root@10.55.0.2:/user/musica/
-```
-
-```bash
-# ou pelo Linux, montando a p3
-sudo mount /dev/sdX3 /mnt
-```
-
-### O segundo cartão
-
-Um cartão de dados no **segundo slot** também é montado em `/user`, e o critério
-é o que o usuário vê: a pasta **`giochi-user`** na raiz do cartão. No Windows é
-"Novo > Pasta" e renomear — dois cliques.
-
-```bash
-# no Windows: formatar como exFAT e criar a pasta giochi-user na raiz
-```
-
-Sem o marcador, o cartão **não** vai para `/user`: ele é mídia removível, e
-montá-lo ali confundiria "meu save" com "o cartão do fulano".
+**2. O mesmo vale para `codepage=437`.** O kernel desta árvore tem
+`CONFIG_NLS_CODEPAGE_437=y` e `CONFIG_NLS_ISO8859_1=y`; o `NLS_UTF8` passou a
+ser pedido em 27/11/2026 (estava `is not set`). Numa imagem antiga, sem ele, os
+degraus 2 e 3 é que salvam.
 
 ### O primeiro boot com a partição vazia
 
-A p3 nasce vazia. Montar por cima do `/user` do rootfs esconderia o LEIA-ME e o
-que já estivesse lá — então o `S20userdata` guarda o conteúdo antes de montar e
-**migra** para a partição, mas só se ela estiver vazia. Se já tiver qualquer
-coisa (o save de um jogo), ele **não toca** e diz isso.
+A partição nasce vazia. Montar por cima do `/user` do rootfs esconderia o
+LEIA-ME e o que já estivesse lá — então o script guarda o conteúdo antes de
+montar e **migra**, mas só se a partição estiver vazia. Se já tiver qualquer
+coisa (o save de um jogo), **não toca** e diz isso.
 
-Detalhe de exFAT: a migração usa `cp -r` e não `cp -a`, porque dono e permissão
-não existem lá — `cp -a` tentaria preservar e o busybox pode abortar no meio.
+Em exFAT/FAT a migração usa `cp -r` e não `cp -a`: dono e permissão não existem
+lá, e `cp -a` tentaria preservar o que não há.
 
 ## O aviso que continua valendo
 

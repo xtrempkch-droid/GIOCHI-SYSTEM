@@ -86,6 +86,9 @@ log() { echo "S20userdata: $*"; }
 
 LABEL_PREFERIDO=GIOCHI_USER
 MARCADOR=giochi-user
+# Nota de mount degradado. Arquivo e não variável: a função que monta roda em
+# subshell, e atribuição lá dentro não volta para cá.
+NOTA_ARQ=/tmp/.giochi-userdata-nota
 
 # Tipo de filesystem pelo magic do início do device. Sem blkid: o do busybox
 # existe mas é incompleto, e o do util-linux não está nesta imagem.
@@ -122,17 +125,59 @@ opcoes_de_mount() {
     esac
 }
 
+# Tenta montar $1 em $2, descobrindo o tipo. Imprime "<tipo> [nota]".
+#
+# ## Por que as opções vão em DEGRAUS, e não de uma vez
+#
+# Medido em 27/11/2026 num container: `mount -t vfat -o iocharset=utf8` num
+# kernel SEM `CONFIG_NLS_UTF8` **não degrada — derruba o mount inteiro**:
+#
+#     mount: wrong fs type, bad option, bad superblock ... missing codepage
+#
+# A mensagem acusa "bad superblock" para um problema de módulo do kernel, e o
+# que se perde é o `/user` INTEIRO (não só o acento do nome do arquivo). O mesmo
+# vale para `codepage=437` sem `CONFIG_NLS_CODEPAGE_437`.
+#
+# No kernel desta árvore o 437 é `=y` e o UTF-8 passou a ser pedido no fragmento
+# — mas uma imagem antiga, ou um aparelho que perca o símbolo, perderia a
+# partição por causa de uma opção cosmética. Então: tenta com tudo, cai para o
+# mínimo, e só então desiste. Cada degrau avisa o que perdeu.
+montar_com_degraus() {
+    _dev="$1"; _mnt="$2"; _tipo="$3"
+
+    if [ "$_tipo" = "ext4" ] || [ -z "$_tipo" ]; then
+        mount -t "${_tipo:-auto}" "$_dev" "$_mnt" 2>/dev/null || return 1
+        return 0
+    fi
+
+    # A nota vai para ARQUIVO, e não variável: `montar_por_tipo` roda dentro de
+    # `$(...)`, que é subshell — variável atribuída lá dentro não chega ao pai.
+    # Medido: com variável, a nota sumia e o aviso nunca aparecia.
+    : >"$NOTA_ARQ" 2>/dev/null || true
+    # Degrau 1: completo (uid/gid + permissão + charset).
+    if mount -t "$_tipo" -o "$(opcoes_de_mount "$_tipo")" "$_dev" "$_mnt" 2>/dev/null; then
+        return 0
+    fi
+    # Degrau 2: sem charset — nome acentuado pode sair estranho, mas a partição
+    # monta. É a diferença entre "Música.mp3 vira M?sica.mp3" e "não há /user".
+    if mount -t "$_tipo" -o "uid=0,gid=0,fmask=0000,dmask=0000" "$_dev" "$_mnt" 2>/dev/null; then
+        echo "sem charset: o kernel não tem CONFIG_NLS_UTF8, nome com acento pode aparecer errado" >"$NOTA_ARQ" 2>/dev/null
+        return 0
+    fi
+    # Degrau 3: sem permissão — arquivo não é executável, mas o dado está lá.
+    if mount -t "$_tipo" "$_dev" "$_mnt" 2>/dev/null; then
+        echo "sem uid/gid/permissão: nada em /user é executável até o próximo boot com as opções certas" >"$NOTA_ARQ" 2>/dev/null
+        return 0
+    fi
+    return 1
+}
+
 # Tenta montar $1 em $2, descobrindo o tipo. Imprime o tipo em caso de sucesso.
 montar_por_tipo() {
     _dev="$1"; _mnt="$2"
     _tipo="$(tipo_de_fs "$_dev" 2>/dev/null || true)"
     if [ -n "$_tipo" ]; then
-        # Caminho normal: um único mount, com as opções certas.
-        if [ -n "$(opcoes_de_mount "$_tipo")" ]; then
-            mount -t "$_tipo" -o "$(opcoes_de_mount "$_tipo")" "$_dev" "$_mnt" 2>/dev/null || return 1
-        else
-            mount -t "$_tipo" "$_dev" "$_mnt" 2>/dev/null || return 1
-        fi
+        montar_com_degraus "$_dev" "$_mnt" "$_tipo" || return 1
         echo "$_tipo"
         return 0
     fi
@@ -140,7 +185,7 @@ montar_por_tipo() {
     # opções de exFAT/FAT — se for ext4 elas dariam EINVAL, então tenta sem.
     mount "$_dev" "$_mnt" 2>/dev/null && { echo auto; return 0; }
     for _t in exfat vfat; do
-        mount -t "$_t" -o "$(opcoes_de_mount "$_t")" "$_dev" "$_mnt" 2>/dev/null && { echo "$_t"; return 0; }
+        montar_com_degraus "$_dev" "$_mnt" "$_t" && { echo "$_t"; return 0; }
     done
     return 1
 }
@@ -277,6 +322,10 @@ else
     DATA_TIPO="$(echo "$RESULTADO" | awk '{print $2}')"
     DATA_COMO="$(echo "$RESULTADO" | awk '{print $3}')"
     log "$DATA_DEV ($DATA_TIPO, achada por $DATA_COMO) montada em $MNT"
+    # Se o mount só passou num degrau degradado, isso tem de aparecer: sem a
+    # nota, "os jogos não executam" ou "os acentos estão errados" parecem bug de
+    # outro lugar.
+    [ -s "$NOTA_ARQ" ] && log "  ATENÇÃO: $(cat "$NOTA_ARQ")"
     case "$DATA_TIPO" in
         exfat|vfat)
             # O aviso que evita a pergunta "por que meu save sumiu": exFAT e FAT

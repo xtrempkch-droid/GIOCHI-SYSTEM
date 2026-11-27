@@ -151,7 +151,7 @@ o que foi medido, e deixar a decisão com quem responde pelo código.
 
 | Verificação | Resultado |
 | --- | --- |
-| `node tests/run-all.mjs` | **702/702 + 1 skip**, 75 arquivos (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, panel-diag 17, gamepad-virtual 12, selftest-contract 21, issues-vizinhos 6, portmaster 7, …) |
+| `node tests/run-all.mjs` | **710/710 + 1 skip**, 75 arquivos (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, panel-diag 17, gamepad-virtual 12, selftest-contract 21, issues-vizinhos 6, portmaster 7, …) |
 | `node scripts/validate-devices.mjs` | OK — 7 devices, 1 habilitado |
 | `node scripts/list-devices.mjs --github-matrix` | matriz com `qemu-aarch64` |
 | matriz com `--device powkiddy-x55 --allow-draft` | devolve **só** o X55 |
@@ -566,7 +566,7 @@ absoluto** do host — §12.40).
 
 ## 10. Testes
 
-`node tests/run-all.mjs` → **702/702 + 1 skip**, em **75 arquivos**. A tabela abaixo é uma
+`node tests/run-all.mjs` → **710/710 + 1 skip**, em **75 arquivos**. A tabela abaixo é uma
 seleção dos que prendem contratos de projeto; a lista completa é `ls tests/` e
 `tests/runner-coverage.test.mjs` **falha** se algum arquivo existir sem estar
 importado no `run-all.mjs` — foi assim que dois testes desta revisão quase
@@ -8468,3 +8468,93 @@ A terceira mutação também revelou um vício **no teste**: procurar `fmask` no
 inteiro dava falso positivo, porque a tentativa na p1 (vfat, com fmask) fica
 registrada. Passou a olhar **a linha do device de dados** — mesma correção
 aplicada ao teste de ext4.
+
+## 47. A distinção que pode quebrar o sistema: p2 é ext4, p3 e sdcard2 aceitam FAT (27/11/2026)
+
+Correção do dono do projeto, e ela é importante: *"o suporte ao exFAT é para o
+sdcard que o usuário usa (o sdcard2) poder ser FAT. O cartão do sistema não
+precisa ser obrigatoriamente FAT, apesar de facilitar a vida do usuário do
+Windows. Que isso fique claro pois essa confusão pode quebrar o sistema."*
+
+Estava ambíguo no §46, e a ambiguidade tem custo real:
+
+| | Cartão do SISTEMA | Cartão de DADOS (sdcard2) |
+| --- | --- | --- |
+| p1 boot | FAT32 (obrigatório — U-Boot lê) | — |
+| p2 sistema | **ext4, obrigatório** | não existe |
+| p3 dados | exFAT (padrão), vfat ou ext4 | **qualquer um dos três** |
+
+**Por que a p2 não pode ser FAT:** FAT não guarda bit de execução, symlink nem
+device node. O kernel carrega, procura `/sbin/init` e não encontra — tela preta
+sem mensagem, sem recuperação sem regravar. Não é "boota com ressalvas".
+
+### A guarda que faltava
+
+Nada impedia alguém de apontar `rootfs.ext4` para um sistema de arquivos FAT.
+Agora o `make-sd-image.sh` lê o magic do rootfs e **recusa** o que não for ext4:
+
+```text
+ERRO: .../rootfs.ext4 NÃO é ext4 (magic 0x0000, esperado 0x53ef).
+  A partição do sistema precisa de ext4: FAT não guarda permissão,
+  symlink nem device node, e o kernel não encontra o /sbin/init.
+  O formato da partição de DADOS é outra coisa — esse sim aceita
+  exFAT/FAT32, via --user-fs. Ver docs/pastas-do-usuario.md.
+```
+
+Testado com um rootfs falso em FAT32 dentro do container: recusa com exit 2.
+
+E `tests/userdata-particao.test.mjs` prende a invariante estática: **a linha que
+formata a p2 não pode mencionar `USER_FS`**. Verificado por mutação — trocar
+`mkfs.ext4` por `mkfs.${USER_FS}` na p2 dá 19 pass / 1 fail.
+
+### O segundo cartão em FAT, testado nos três formatos
+
+O caso que o pedido original descrevia (sdcard2) não tinha teste positivo.
+Agora tem, e são quatro:
+
+- segundo cartão **FAT32** com marcador → monta, com `fmask=0000`;
+- segundo cartão **exFAT** com marcador → monta;
+- a **p3 ganha** do segundo cartão quando os dois existem (ordem determinística,
+  sem depender da enumeração do kernel);
+- o **rootfs (p2) nunca** é candidato — antes ele era montado em `/user` para
+  testar o marcador, o que mostraria a raiz do sistema ali.
+
+### O defeito que o teste do FAT32 desenterrou
+
+Ao montar um sdcard2 em FAT32 num container, o mount **falhou inteiro**:
+
+```text
+mount: wrong fs type, bad option, bad superblock on /dev/loop15,
+       missing codepage or helper program, or other error.
+```
+
+A mensagem acusa **superbloco** para um problema de **módulo do kernel**:
+`iocharset=utf8` sem `CONFIG_NLS_UTF8`. E o que se perde é o `/user` **inteiro**,
+não só o acento do nome do arquivo.
+
+É a classe do §12.1 na letra: uma opção cosmética derrubando a funcionalidade
+principal. Correção — o mount vai em **degraus**, e cada queda avisa:
+
+| Degrau | Opções | O que se perde |
+| --- | --- | --- |
+| 1 | uid/gid + fmask/dmask + charset | nada |
+| 2 | uid/gid + fmask/dmask | acento no nome (o kernel não tem `NLS_UTF8`) |
+| 3 | nenhuma | permissão: nada em `/user` é executável |
+
+No kernel desta árvore o 437 já era `=y` e o `NLS_UTF8` passou a ser pedido no
+fragmento — mas uma imagem antiga, ou um aparelho que perca o símbolo, perderia
+a partição por causa do charset. O degrau 2 é a diferença entre "`Música.mp3`
+vira `M?sica.mp3`" e "não há `/user`".
+
+Dois defeitos meus no caminho, os dois pegos por teste:
+
+1. **A nota de degradação ia numa variável** — mas a função que monta roda dentro
+   de `$(...)`, que é subshell, e atribuição lá dentro não volta para o pai. A
+   nota sumia e o aviso nunca aparecia. Trocado por arquivo (`/tmp/.giochi-…`).
+2. **`echo` duplicado:** `montar_com_degraus` imprimia o tipo e `montar_por_tipo`
+   imprimia de novo. O `$(...)` capturava `"vfat\nvfat"`, e o `printf` com três
+   campos saía desalinhado — o log mostrava `vfat (vfat marcador, achada por )`.
+   Terceira vez na semana que um `echo` em função capturada quebra o formato.
+
+`tests/userdata-particao.test.mjs` foi de 14 para **22 casos**. Mutação: tirar os
+degraus 2 e 3 dá 20 pass / 2 fail.

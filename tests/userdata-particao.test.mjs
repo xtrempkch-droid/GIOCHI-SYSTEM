@@ -61,7 +61,11 @@ function semComentarios(texto) {
  *  (vfat, com fmask) antes da p3, e essa linha fica registrada. Foi assim que
  *  a mutação "exFAT sem fmask" passou sem ser pega. */
 function linhaDoDados(log, nome) {
-    return log.split("\n").find((l) => l.includes(nome) && /^mount /.test(l)) || "";
+    // A ÚLTIMA, não a primeira: com o fallback em degraus o script tenta o
+    // device mais de uma vez, e a que montou é a última. A primeira pode ser a
+    // tentativa que o kernel recusou (charset indisponível).
+    const linhas = log.split("\n").filter((l) => l.includes(nome) && /^mount /.test(l));
+    return linhas.length ? linhas[linhas.length - 1] : "";
 }
 
 /** Escreve o magic do filesystem no arquivo que imita o device. */
@@ -86,6 +90,9 @@ function bancada(o = {}) {
         jaMontado = false,
         segundoCartao = false,
         segundoComMarcador = false,
+        segundoTipo = null,
+        semP3 = false,
+        recusarCharset = false,
     } = o;
 
     const raiz = mkdtempSync(path.join(tmpdir(), "giochi-ud-"));
@@ -120,11 +127,15 @@ function bancada(o = {}) {
         povoar(dir, conteudo);
     };
     criarParticao("mmcblk1p1", "vfat", null);   // boot
-    criarParticao("mmcblk1p2", "ext4", null);   // rootfs
-    criarParticao("mmcblk1p3", tipo, conteudoDados); // dados
+    criarParticao("mmcblk1p2", "ext4", null);   // rootfs — SEMPRE ext4
+    if (!semP3) criarParticao("mmcblk1p3", tipo, conteudoDados); // dados
     criarParticao("mmcblk0p1", "vfat", null);   // eMMC interna, não é a nossa
     if (segundoCartao) {
-        criarParticao("mmcblk2p1", tipo, segundoComMarcador ? { "giochi-user/.keep": "" } : null);
+        criarParticao(
+            "mmcblk2p1",
+            segundoTipo || tipo,
+            segundoComMarcador ? { "giochi-user/.keep": "" } : null,
+        );
     }
 
     // /sys/dev/block/<maj:min> -> rootfs em mmcblk1p2
@@ -138,6 +149,7 @@ function bancada(o = {}) {
         path.join(d.bin, "mount"),
         `#!/bin/sh
 echo "mount $*" >> "${registro}"
+${recusarCharset ? '# simula kernel SEM CONFIG_NLS_UTF8: mount com charset falha inteiro\ncase "$*" in *iocharset*) exit 32 ;; esac' : ""}
 src=""; dst=""; pular=0; leropts=0
 for a in "$@"; do
   if [ "$pular" = 1 ]; then pular=0; continue; fi
@@ -401,4 +413,158 @@ test("nenhum script depende de /dev/disk/by-label existir", () => {
         assert.ok(iDescoberta !== -1 && iDescoberta < iLabel,
             `${path.basename(rel)}: by-label antes da descoberta por sysfs/conteúdo`);
     }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// O SEGUNDO CARTÃO em FAT/exFAT — o pedido de 27/11/2026
+//
+// O pedido original era: "o cartão que o usuário usa (aquele sdcard2) tem de
+// poder ser FAT". Não é sobre o cartão do sistema — esse continua ext4, porque
+// FAT não guarda permissão, symlink nem device node.
+//
+// O risco de confundir os dois é o sistema não bootar. Por isso estes casos
+// existem separados dos da p3: um segundo cartão em FAT32 tem de funcionar, e a
+// p2 do sistema tem de ser impossível de virar FAT.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test("segundo cartão em FAT32, com marcador, é montado em /user", () => {
+    // É o caso do sdcard2: o usuário formatou como FAT32 no Windows, criou a
+    // pasta `giochi-user` e enfiou no slot 2. Tem de montar, com fmask=0000,
+    // senão `ports/*.sh` e o binário de um jogo não rodam.
+    const b = bancada({
+        tipo: "ext4",
+        semP3: true,                       // cartão do sistema SEM partição de dados
+        segundoCartao: true,
+        segundoComMarcador: true,
+        segundoTipo: "vfat",
+    });
+    try {
+        const saida = b.rodar();
+        assert.match(saida, /mmcblk2p1/, `não montou o segundo cartão: ${saida}`);
+        assert.match(saida, /vfat/, "não detectou FAT32");
+        assert.match(saida, /marcador/, "não identificou pelo marcador giochi-user");
+
+        const linha = linhaDoDados(b.chamadas(), "mmcblk2p1");
+        assert.match(linha, /-t vfat/, "não montou como vfat");
+        assert.match(linha, /fmask=0000/, "FAT32 sem fmask=0000: nada é executável");
+        assert.match(linha, /iocharset=utf8/, "sem utf8, nome com acento quebra");
+        assert.match(saida, /não guarda permissão/, "tem de avisar que FAT não guarda permissão");
+    } finally {
+        b.limpar();
+    }
+});
+
+test("segundo cartão em exFAT também monta — é o caso mais provável no Windows", () => {
+    const b = bancada({
+        tipo: "ext4",
+        semP3: true,
+        segundoCartao: true,
+        segundoComMarcador: true,
+        segundoTipo: "exfat",
+    });
+    try {
+        const saida = b.rodar();
+        assert.match(saida, /mmcblk2p1/, `não montou: ${saida}`);
+        assert.match(linhaDoDados(b.chamadas(), "mmcblk2p1"), /-t exfat/);
+    } finally {
+        b.limpar();
+    }
+});
+
+test("a p3 do cartão do sistema ganha do segundo cartão (ordem determinística)", () => {
+    // Com os DOIS presentes, a p3 é a de casa: mesma imagem, mesmo conteúdo,
+    // e é o que o build gerou. O segundo cartão é fallback — sem essa ordem, a
+    // escolha dependeria da enumeração, que varia entre boots.
+    const b = bancada({
+        tipo: "ext4",
+        segundoCartao: true,
+        segundoComMarcador: true,
+        segundoTipo: "vfat",
+    });
+    try {
+        b.rodar();
+        const log = b.chamadas();
+        assert.match(linhaDoDados(log, "mmcblk1p3"), /-t ext4/, "não usou a p3");
+        assert.doesNotMatch(log, /mmcblk2p1.*\n.*mmcblk2p1/, "montou o segundo cartão também");
+    } finally {
+        b.limpar();
+    }
+});
+
+test("o rootfs (p2) NUNCA é candidato a /user", () => {
+    // Montar o sistema em cima de /user mostraria a raiz inteira ali — e o
+    // teste de marcador acharia `games`/`musica` do próprio sistema. Este caso
+    // garante que a p2 é pulada antes de qualquer tentativa.
+    const b = bancada({ tipo: "ext4" });
+    try {
+        b.rodar();
+        const log = b.chamadas();
+        assert.doesNotMatch(log, /^mount .*mmcblk1p2 /m,
+            "montou o rootfs em /user — montar a partição do sistema em /user mostra a raiz inteira");
+    } finally {
+        b.limpar();
+    }
+});
+
+test("o make-sd-image RECUSA um rootfs que não seja ext4 (guarda da p2)", () => {
+    // A confusão que pode quebrar o sistema: achar que "--user-fs vfat" é para
+    // tudo. Se alguém apontar o rootfs para FAT, o kernel chega ao init e não
+    // encontra /sbin/init — tela preta, sem mensagem. O erro tem de aparecer na
+    // CONSTRUÇÃO.
+    const sd = readFileSync(path.join(ROOT, "scripts/make-sd-image.sh"), "utf8");
+    assert.match(sd, /ROOTFS_MAGIC/, "falta a leitura do magic do rootfs");
+    assert.match(sd, /53ef/, "falta a comparação com o magic de ext4");
+    assert.match(sd, /NÃO é ext4/, "falta a mensagem de recusa");
+    // E a mensagem tem de apontar a diferença para o leitor confuso.
+    assert.match(sd, /partição de DADOS é outra coisa|DADOS é outra coisa/,
+        "a mensagem tem de distinguir p2 (sistema) de p3 (dados)");
+});
+
+test("--user-fs afeta SÓ a p3: o código da p2 não menciona USER_FS", () => {
+    // Prova estática: se `USER_FS` aparecesse na criação da p2, um
+    // `--user-fs vfat` transformaria o sistema em FAT.
+    const sd = readFileSync(path.join(ROOT, "scripts/make-sd-image.sh"), "utf8");
+    const linhas = sd.split("\n");
+    const iP2 = linhas.findIndex((l) => /mkfs\.ext4 -q -L GIOCHI /.test(l));
+    assert.ok(iP2 >= 0, "não achei a linha que formata a p2 (mkfs.ext4 -L GIOCHI)");
+    assert.doesNotMatch(linhas[iP2], /USER_FS/,
+        "a formatação da p2 (sistema) usa USER_FS — um --user-fs vfat tornaria o SISTEMA em FAT");
+
+    // E o rootfs vem do Buildroot: a p2 nunca é reformatada a partir do zero.
+    assert.match(sd, /rootfs\.ext4/, "a p2 tem de vir do rootfs.ext4 do Buildroot");
+});
+
+test("sem NLS_UTF8 no kernel, o mount CAI para o degrau seguinte em vez de morrer", () => {
+    // Medido em 27/11/2026 num kernel sem `CONFIG_NLS_UTF8`:
+    //     mount: wrong fs type, bad option, bad superblock ... missing codepage
+    // A mensagem acusa superbloco para um problema de MÓDULO, e o que se perde é
+    // o `/user` inteiro — não só o acento do nome do arquivo.
+    //
+    // Com o fallback em degraus, o mount tenta sem charset e a partição monta.
+    // O aviso tem de aparecer: sem ele, "o acento está errado" parece bug de
+    // outro lugar.
+    const b = bancada({ tipo: "vfat", recusarCharset: true });
+    try {
+        const saida = b.rodar();
+        assert.match(saida, /montada em/, `não montou nem no degrau degradado: ${saida}`);
+        assert.match(saida, /ATENÇÃO/, "não avisou que o mount degradou");
+        assert.match(saida, /NLS_UTF8/, "o aviso tem de nomear a causa (símbolo do kernel)");
+        // E o mount que passou NÃO tem charset.
+        const linha = linhaDoDados(b.chamadas(), "mmcblk1p3");
+        assert.match(linha, /-t vfat/, "não montou como vfat");
+        assert.doesNotMatch(linha, /iocharset/, "o degrau aceito não deveria ter charset");
+        assert.match(linha, /fmask=0000/, "o degrau 2 preserva a permissão");
+    } finally {
+        b.limpar();
+    }
+});
+
+test("o fallback tem 3 degraus, e o último ainda monta o dado", () => {
+    // Se o mount falhar até com `fmask`, ainda vale montar sem opção: o dado
+    // está lá, só não é executável. É melhor que /user não existir.
+    const fonte = readFileSync(SCRIPT, "utf8");
+    const degraus = (fonte.match(/Degrau \d:/g) || []).length;
+    assert.equal(degraus, 3, `esperava 3 degraus, achei ${degraus}`);
+    assert.match(fonte, /sem uid\/gid\/permissão/,
+        "o degrau 3 tem de avisar que nada é executável");
 });
