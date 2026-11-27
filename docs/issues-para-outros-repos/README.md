@@ -33,6 +33,7 @@ porque é o que se usa para responder lá.
 | `GIOCHI-OS` | Contrato de entrada: documentar o controle virtual "Giochi Gamepad" na junção | [`OS-documentar-na-juncao.md`](OS-documentar-na-juncao.md) | **`#5` aberta** — canônica (a `#2`/`#3`/`#4` são duplicatas fechadas) |
 | `GIOCHI-APP` | Controle virtual "Giochi Gamepad": preferir na enumeração, e o analógico tem faixa única | [`APP-enumeracao-e-analogico.md`](APP-enumeracao-e-analogico.md) | **`#6` aberta** — republicada; a `#1` original tinha sido deletada |
 | `GIOCHI-APP` | Regras de engenharia do Giochi para o app: launcher, loja e o DRM | [`REGRAS-APP.md`](REGRAS-APP.md) | **`#7` aberta** — 26/11/2026, conferida |
+| `GIOCHI-APP` | Partição de dados: `/user` agora é partição, e o app para de montar | [`APP-particao-de-dados.md`](APP-particao-de-dados.md) | **`#8` aberta** — 26/11/2026, conferida |
 | `GIOCHI-OS` | Regras de engenharia do Giochi para o os: a junção e a verificação da imagem | [`REGRAS-OS.md`](REGRAS-OS.md) | **`#6` aberta** — 26/11/2026, conferida |
 | `GIOCHI-ENGINE` | Regras de engenharia do Giochi para a engine: GPU, áudio e memória | [`REGRAS-ENGINE.md`](REGRAS-ENGINE.md) | **`#8` (ENGINE) e `#18` (ENGINE-3D) abertas** — mesmo corpo |
 | `GIOCHI-GAMES` | Regras de engenharia do Giochi para os jogos: entrada, fps e licença | [`REGRAS-GAMES.md`](REGRAS-GAMES.md) | **`#6` aberta** — 26/11/2026, conferida |

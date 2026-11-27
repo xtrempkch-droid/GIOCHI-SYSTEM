@@ -132,6 +132,9 @@ test("cada corpo carrega a instrução que aquela equipe precisa seguir", () => 
         // dois de lugar é o defeito de 17/11, e aqui é pior — a issue existe
         // justamente para alinhar, e alinhar com o texto errado desalinha.
         "REGRAS-APP.md": /launcher|KMSDRM|DRM/i,
+        // A partição de dados: o corpo tem de falar de /user e da p3, e não
+        // virar um texto genérico de "boas notícias".
+        "APP-particao-de-dados.md": /parti[çc][ãa]o|\/user|GIOCHI_USER/i,
         "REGRAS-OS.md": /jun[çc][ãa]o|imagem/i,
         "REGRAS-ENGINE.md": /GL_RENDERER|GLES|engine/i,
         "REGRAS-GAMES.md": /buttons\.map|SDL_GameController|jogo/i,
