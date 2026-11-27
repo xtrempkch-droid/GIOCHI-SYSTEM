@@ -151,7 +151,7 @@ o que foi medido, e deixar a decisão com quem responde pelo código.
 
 | Verificação | Resultado |
 | --- | --- |
-| `node tests/run-all.mjs` | **679/679 + 1 skip**, 72 arquivos (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, panel-diag 17, gamepad-virtual 12, selftest-contract 21, issues-vizinhos 5, portmaster 7, …) |
+| `node tests/run-all.mjs` | **679/679 + 1 skip**, 72 arquivos (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, panel-diag 17, gamepad-virtual 12, selftest-contract 21, issues-vizinhos 6, portmaster 7, …) |
 | `node scripts/validate-devices.mjs` | OK — 7 devices, 1 habilitado |
 | `node scripts/list-devices.mjs --github-matrix` | matriz com `qemu-aarch64` |
 | matriz com `--device powkiddy-x55 --allow-draft` | devolve **só** o X55 |
@@ -7985,3 +7985,84 @@ registrado como pendência com o sintoma.
 
 Verificado por mutação: um `BR2_PACKAGE_PPSSPP=y` num fragmento dá 4 pass / 1
 fail nomeando a regra; apagar a declaração de "não medido" do doc também.
+
+## 42. As regras vão para as outras equipes (26/11/2026)
+
+Pedido do dono do projeto: as regras definidas no começo ficaram **só** neste
+repositório. As equipes do `app`, do `os`, da `engine` e dos `jogos` produzem
+artefatos que vão para o **mesmo aparelho** — o erro de qualquer uma aparece como
+"o sistema está quebrado", e nenhuma delas recebeu as regras.
+
+### O documento base, e o que ele NÃO é
+
+[`docs/regras-para-outras-equipes.md`](docs/regras-para-outras-equipes.md) — doze
+regras, e **cada uma com o caso medido que a criou**. Não é adaptação do §12: é a
+extração do que sobrevive ao Buildroot.
+
+| # | Regra | O caso que a criou |
+| --- | --- | --- |
+| R1 | Medir antes de afirmar | a issue de BT com 5 evidências, **4 falsas** |
+| R2 | Verde não é correto | o gate do harfbuzz que nunca rodou |
+| R3 | Pergunte pela consequência | `softpipe` responde a mesma `GL_VERSION` |
+| R4 | Teste errado pior que teste nenhum | `ls A* B*` não-zero com um glob só |
+| R5 | "Não existe" × "existe desligado" | `amixer` como subopção sem default |
+| R6 | Uma fonte da verdade | o jogo somando SDL + evdev |
+| R7 | Repo alheio é somente leitura | todas estas issues são relatório, não patch |
+| R8 | Licença antes de recurso | `gptokeyb2`, `7zzs`, PPSSPP |
+| R9 | Não confie no relatório | 3 de 8 itens já resolvidos na "imagem velha" |
+| R10 | Registre o que não foi medido | o "não medido" na primeira linha da avaliação do PPSSPP |
+| R11 | Meça no aparelho | libudev, `timeout` 143, `strtonum` |
+| R12 | Estado que sobra mente | o marcador de DRM órfão após `kill -9` |
+
+O que ele **não** faz: prometer que as equipes vão seguir. Uma regra sem
+adoção versionada morre na sessão seguinte — por isso o pedido em cada issue é
+**criar `docs/regras.md` no repo deles citando o commit** que adotou.
+
+### O recorte por equipe, e o APP primeiro
+
+| Repo | Arquivo | Issue |
+| --- | --- | --- |
+| `GIOCHI-APP` | `REGRAS-APP.md` (6,3 KB — **o maior**) | **#7** |
+| `GIOCHI-OS` | `REGRAS-OS.md` | **#6** |
+| `GIOCHI-ENGINE` | `REGRAS-ENGINE.md` | **#8** |
+| `GIOCHI-ENGINE-3D` | idem (mesmo corpo) | **#18** |
+| `GIOCHI-GAMES` | `REGRAS-GAMES.md` | **#6** |
+
+O APP é o mais detalhado porque é a **primeira coisa que o usuário vê** e a
+última que segura o aparelho quando algo dá errado. Ele leva o que só nós
+sabíamos: o contrato do DRM (`app.encerrar()`), os três `event*` que o launcher
+abria no R35S (jack de fone e teclado de volume lidos como navegação), a tabela
+do mapa duplo do SDL, o `MAX_ARG_STRLEN` de 128 KB e o orçamento de RAM/draws.
+
+`REGRAS-ENGINE` vai para os **dois** repos da engine de propósito: abrir duas
+cópias do mesmo pedido é o defeito R6 que o próprio documento condena.
+
+### Os testes, e o que eles pegaram em mim
+
+`tests/regras-equipes.test.mjs` (6 casos) — invariantes de classe, não lista:
+
+- toda issue `REGRAS-*.md` aponta para o documento base (sem o link, a equipe
+  recebe pedidos sem o porquê, e o porquê é o que muda comportamento);
+- todo recorte pede adoção **versionada**, com o commit;
+- o do APP é o **mais detalhado** dos quatro;
+- o documento base tem exatamente R1..R12, e **cada uma tem exemplo medido**.
+
+O último pegou três regras minhas: **R3, R5 e R9 tinham os casos reais mas não os
+marcavam como medidos**. A tentação era afrouxar o teste; o certo era corrigir o
+**texto** — afrouxar seria o oposto de R2. É a mesma lição do §12.37: eu tinha a
+saída na frente e não a li com desconfiança.
+
+E `tests/issues-vizinhos.test.mjs` ganhou os quatro arquivos no mapa `esperado`:
+trocar dois corpos de lugar agora reprova nomeando o defeito de 17/11. O regex da
+tabela passou a aceitar `GIOCHI-ENGINE-3D` (tinha `[A-Z]+`, que não aceita hífen).
+
+Verificado por mutação: `REGRAS-APP.md` com o corpo do GAMES dá **5 pass / 1
+fail** com a mensagem certa; restaurado, 6/6.
+
+### Como isso foi entregue
+
+Por `gh`, uma issue por repo, conferidas depois (§38 — a ferramenta MCP executa
+mesmo dizendo que não criou; `gh issue list` em 1 s resolve a dúvida). Medido:
+**1 cópia em cada**, corpo íntegro (5,2 a 6,5 KB), **zero HTML**, link para o
+`main` já publicado antes de abrir (o `raw` respondeu 200 antes do primeiro
+`create`).
