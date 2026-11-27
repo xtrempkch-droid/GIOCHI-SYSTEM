@@ -29,7 +29,7 @@ function arquivosDaTabela() {
     const linhas = README.split("\n");
     const saida = [];
     for (const linha of linhas) {
-        const m = linha.match(/^\|\s*`(GIOCHI-[A-Z]+)`\s*\|\s*([^|]+?)\s*\|\s*\[`([^`]+)`\]/);
+        const m = linha.match(/^\|\s*`(GIOCHI-[A-Z0-9-]+)`\s*\|\s*([^|]+?)\s*\|\s*\[`([^`]+)`\]/);
         if (m) saida.push({ repo: m[1], titulo: m[2], arquivo: m[3] });
     }
     return saida;
@@ -128,6 +128,13 @@ test("cada corpo carrega a instrução que aquela equipe precisa seguir", () => 
         "APP-enumeracao-e-analogico.md": /EvdevInput|vigi|enumer/i,
         "OS-documentar-na-juncao.md": /jun[çc][ãa]o|imagem/i,
         "APP-ports-e-loja.md": /portmaster|giochi-ports|\/user\/ports/i,
+        // As regras: cada recorte tem de falar do que AQUELA equipe faz. Trocar
+        // dois de lugar é o defeito de 17/11, e aqui é pior — a issue existe
+        // justamente para alinhar, e alinhar com o texto errado desalinha.
+        "REGRAS-APP.md": /launcher|KMSDRM|DRM/i,
+        "REGRAS-OS.md": /jun[çc][ãa]o|imagem/i,
+        "REGRAS-ENGINE.md": /GL_RENDERER|GLES|engine/i,
+        "REGRAS-GAMES.md": /buttons\.map|SDL_GameController|jogo/i,
     };
     for (const e of arquivosDaTabela()) {
         const re = esperado[e.arquivo];

@@ -32,6 +32,23 @@ porque é o que se usa para responder lá.
 | `GIOCHI-APP` | PortMaster: listar os ports no launcher e oferecer como app de loja (sideload) | [`APP-ports-e-loja.md`](APP-ports-e-loja.md) | **`#2` aberta** — canônica (a `#5` foi fechada como duplicata) |
 | `GIOCHI-OS` | Contrato de entrada: documentar o controle virtual "Giochi Gamepad" na junção | [`OS-documentar-na-juncao.md`](OS-documentar-na-juncao.md) | **`#5` aberta** — canônica (a `#2`/`#3`/`#4` são duplicatas fechadas) |
 | `GIOCHI-APP` | Controle virtual "Giochi Gamepad": preferir na enumeração, e o analógico tem faixa única | [`APP-enumeracao-e-analogico.md`](APP-enumeracao-e-analogico.md) | **`#6` aberta** — republicada; a `#1` original tinha sido deletada |
+| `GIOCHI-APP` | Regras de engenharia do Giochi para o app: launcher, loja e o DRM | [`REGRAS-APP.md`](REGRAS-APP.md) | a abrir |
+| `GIOCHI-OS` | Regras de engenharia do Giochi para o os: a junção e a verificação da imagem | [`REGRAS-OS.md`](REGRAS-OS.md) | a abrir |
+| `GIOCHI-ENGINE` | Regras de engenharia do Giochi para a engine: GPU, áudio e memória | [`REGRAS-ENGINE.md`](REGRAS-ENGINE.md) | a abrir |
+| `GIOCHI-GAMES` | Regras de engenharia do Giochi para os jogos: entrada, fps e licença | [`REGRAS-GAMES.md`](REGRAS-GAMES.md) | a abrir |
+
+
+### As regras de engenharia (26/11/2026)
+
+As doze regras que este projeto acumulou estavam só no `AGENTS.md` do sistema.
+O documento base — com a medição que criou cada uma — é
+[`../regras-para-outras-equipes.md`](../regras-para-outras-equipes.md), e os
+quatro arquivos `REGRAS-*.md` são o **recorte por equipe**: cada um cita só o
+que aquela equipe faz, mais um pedido concreto no fim.
+
+`REGRAS-ENGINE.md` vale para os **dois** repos da engine (`GIOCHI-ENGINE` e
+`GIOCHI-ENGINE-3D`) — é a mesma equipe e o mesmo alvo, e abrir duas cópias
+criaria o problema que o documento condena (duas fontes da verdade).
 
 Já resolvidas em repo vizinho:
 
