@@ -16,11 +16,12 @@
 #               e o verificador em /opt/giochi/apps/bin). Fica no rootfs, e o
 #               disco do rootfs NUNCA e o disco de jogos.
 #
-# /user         dados do usuario, incluindo jogos instalados pela loja. Particao
-#               separada, proposta com piso de 4 GiB + o resto do cartao. AINDA
-#               NAO IMPLEMENTADA — declarada aqui para que a lista nao precise
-#               mudar quando ela entrar. Caminho que nao existe e inofensivo
-#               numa lista de exclusao; caminho que falta e jogo invisivel.
+# /user         dados do usuario, incluindo jogos instalados pela loja. IMPLEMENTADA
+#               em 26/11/2026: e a p3 do cartao (rotulo GIOCHI_USER), montada
+#               pelo S20userdata. Numa imagem antiga, ou sem a p3, continua sendo
+#               um diretorio no rootfs — a lista nao muda nos dois casos.
+#               Caminho que nao existe e inofensivo numa lista de exclusao;
+#               caminho que falta e jogo invisivel.
 #
 # /media        convencao acordada para o cartao de dados: `/media/<LABEL>`, pelo
 #               rotulo do filesystem. O numero do dispositivo NAO serve: o R35S

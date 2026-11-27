@@ -47,28 +47,50 @@ fixos. Verificado no aparelho pelo console serial:
 Um cartão só com `Image` e `rootfs.ext4` — o que o build entrega hoje — não
 boota: falta o firmware nos setores fixos e a partição de boot.
 
-### Partição de dados da loja (proposta, não implementada)
+### Partição de dados do usuário (IMPLEMENTADA em 26/11/2026)
 
 A loja não pode morar no rootfs — rootfs assinado é read-only por desenho, e
-conteúdo comprado não pode depender de reimagem. O time do app propôs:
+conteúdo comprado não pode depender de reimagem. O layout passou a ter **três**
+partições:
 
-| | |
+```text
+  64 MiB    p1  FAT32  256 MiB  GIOCHI_BOOT   Image, DTB, extlinux.conf, boot.scr
+ 320 MiB    p2  ext4  1024 MiB  GIOCHI        sistema — tamanho FIXO, nunca cresce
+1344 MiB    p3  ext4  o resto  GIOCHI_USER   dados do usuário (= /user)
+```
+
+A divisão que resolve o problema do arquivo de tamanho fixo: **o sistema é do
+tamanho da imagem, os dados são do tamanho do cartão**. A `p3` nasce com o que
+sobra da `.img` (704 MiB numa imagem de 2 GiB) e o `--grow` a leva ao resto do
+cartão — medido em 26/11/2026: 704 MiB → ~115 GiB num cartão de 116.
+
+| Antes (até 25/11/2026) | Agora |
 | --- | --- |
-| piso | **4 GiB** |
-| teto | **todo o espaço restante do cartão** |
+| p2 ext4 "resto" e `--grow` crescia o **rootfs** | p2 fixa; `--grow` cresce a **p3 de dados** |
+| `/user` era diretório no rootfs | `/user` é a p3, montada pelo `S20userdata` |
+| regravar apagava tudo, inclusive os jogos | regravar reescreve p1+p2; **a p3 sobrevive** |
 
-O número é do dono do projeto, não nosso — por isso ainda não está em script.
-Duas consequências decidem a implementação, e nenhuma é trivial:
+Duas consequências que continuam valendo, e uma que mudou:
 
-1. **A `.img` tem tamanho fixo** (2 GiB, com as duas partições acima). "O resto
-   do cartão" não cabe num arquivo de tamanho fixo: a partição de dados só chega
-   ao tamanho final se **crescer no primeiro boot** no aparelho, ou se o
-   `flash-sd.sh` particionar o cartão depois de gravar a imagem.
-   → **o segundo caminho existe desde 06/11/2026: `--grow`** (ver abaixo).
-2. **Gravar apaga os dados do usuário.** `dd` e `flash-sd.sh` não preservam
-   nada, e a partição de dados é a primeira a morrer. Aceitável em
-   desenvolvimento, inaceitável para usuário final — é mais um motivo para o
-   aviso antes de qualquer gravação.
+1. ~~"A `.img` tem tamanho fixo"~~ — resolvido pela p3 + `--grow`: o arquivo
+   publicado continua com 2 GiB, e quem dá o tamanho final é a gravação.
+2. **Gravar com `dd` puro/`flash-dd.sh` APAGA a p3.** `flash-sd.sh` sem `--grow`
+   também reescreve a p3 com a imagem (que a traz vazia). Para preservar os
+   dados entre versões, o caminho é `--grow` (que só cresce, não reescreve) ou
+   backup antes.
+3. **Encher a p3 até o limite deixa o sistema sem espaço** para log, PID e
+   `/tmp`: são partições separadas, mas o descritor de espaço do `df` confunde.
+
+A montagem é feita pelo `/etc/init.d/S20userdata`, que também migra o conteúdo
+do `/user` do rootfs no primeiro boot — se a p3 estiver vazia. Detalhe em
+[`pastas-do-usuario.md`](pastas-do-usuario.md).
+
+### O segundo cartão
+
+O aparelho tem dois controladores SD. Um cartão de dados no segundo slot também
+é montado em `/user`, desde que tenha o rótulo `GIOCHI_USER`. Com os dois
+rotulados, a preferência é o do cartão do sistema — nome de device não serve
+para decidir.
 
 ### O método tradicional: `dd` e nada mais
 

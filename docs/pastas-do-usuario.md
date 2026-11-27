@@ -23,11 +23,15 @@ scp   musica.mp3 root@10.55.0.2:/user/musica/
 senha padrão de desenvolvimento: `giochi-dev` (a de release vem de
 `GIOCHI_SYSTEM_ROOT_PASSWORD`, e não está nos artefatos).
 
-**Pelo cartão:** a partição do sistema é `ext4`, e o Windows **não a monta**. Na
-prática, para copiar arquivo à mão o caminho é SSH (no Linux, `sudo mount
-/dev/sdX2 /mnt` também funciona). A partição FAT (`GIOCHI_BOOT`, 256 MiB) existe
-e é montável em qualquer sistema — mas ela é do **boot** (`Image`, DTB,
-`extlinux.conf`): não ponha jogos lá, e não a encha.
+**Pelo cartão, tirando ele do aparelho:** a partição de dados é a **p3**
+(`GIOCHI_USER`), e é `ext4` — o Windows não a monta, e no Linux é:
+
+```bash
+sudo mount /dev/sdX3 /mnt      # p3 = dados; p2 é o sistema, não mexa
+```
+
+A p1 (`GIOCHI_BOOT`, 256 MiB, FAT) é montável em qualquer sistema — mas ela é do
+**boot** (`Image`, DTB, `extlinux.conf`): não ponha jogos lá, e não a encha.
 
 ## O que cada uma espera dentro
 
@@ -41,42 +45,60 @@ e é montável em qualquer sistema — mas ela é do **boot** (`Image`, DTB,
 O layout de `ports/` não é escolha nossa: é a convenção do PortMaster, e o
 `giochi-ports --rodar` aceita os dois (o instalado por ele e o feito à mão).
 
-## O aviso que importa
+## A partição de dados existe desde 26/11/2026
 
-**`/user` NÃO é uma partição separada.** É um diretório dentro do rootfs do
-sistema, e **regravar a imagem apaga o conteúdo**.
+`/user` agora é a **terceira partição** do cartão (rótulo `GIOCHI_USER`), montada
+pelo `S20userdata` no boot. O layout:
 
-A partição de dados (piso de 4 GiB + o resto do cartão) está **projetada e não
-implementada** — ver `AGENTS.md` §3. Enquanto ela não existe:
+```text
+  64 MiB    p1  FAT32  256 MiB  GIOCHI_BOOT   Image, DTB, extlinux.conf
+ 320 MiB    p2  ext4  1024 MiB  GIOCHI        sistema (NUNCA cresce)
+1344 MiB    p3  ext4  o resto  GIOCHI_USER   ← seus jogos, músicas, apps
+```
 
-| Situação | Espaço disponível | Consequência |
-| --- | --- | --- |
-| imagem gravada **com** `--grow` | o cartão quase todo (o p2 cresce) | cabe uma biblioteca grande |
-| imagem gravada **sem** `--grow` | ~1,7 GiB de rootfs no total | cabe pouco, e o sistema divide o espaço |
+E a divisão é a que você pediu: **sistema do tamanho da imagem, dados do tamanho
+do cartão**. Regravar a imagem reescreve a p1 e a p2 — a **p3 não é tocada**,
+então seus arquivos sobrevivem.
 
-Medido em 07/11/2026: um cartão de 116,1 GiB gravado com `--grow` ficou com o
-`p2` em **115,8 GiB**. Sem `--grow`, o rootfs é o da imagem (1,0 GiB de dados).
+| Gravação | p3 |
+| --- | --- |
+| `flash-sd.sh <img> /dev/sdX` | 704 MiB (o que cabe na imagem de 2 GiB) |
+| `flash-sd.sh <img> /dev/sdX --grow` | **o cartão quase todo** |
 
-Ou seja: **`--grow` é obrigatório** para quem quer usar o aparelho sem a loja.
-Sem ele, "pôr os arquivos à mão" esbarra no tamanho.
+Medido em 26/11/2026 num cartão de 116 GiB com `--grow`: a p3 foi de 704 MiB
+para ~115 GiB. O `--grow` cresce a **última** partição — que agora é a de dados,
+e não mais o rootfs.
 
-E o corolário que não é óbvio: `--grow` também significa que **tudo** divide o
-mesmo filesystem. Encher `/user` de ROMs até o limite deixa o sistema sem espaço
-para log, PID e o próprio `/tmp` — e o sintoma não é "disco cheio", é o aparelho
-travando de formas estranhas.
+### O segundo cartão
 
-## Por que as pastas existem vazias na imagem
+O aparelho tem dois controladores SD. Um cartão de dados no **segundo slot**
+também é montado em `/user` — desde que tenha o rótulo `GIOCHI_USER`:
 
-Elas **não existiam** até 26/11/2026 — nem o build as criava, nem o launcher,
-nem o app de música (medido: não há um `create_dir_all` para elas em nenhum dos
-dois). O resultado era o defeito que aparece como culpa do usuário: copiar para
-`/user/musica/x.mp3` falha porque o diretório não existe, e o app responde *"a
-pasta /user/musica não existe"*.
+```bash
+# formatar um segundo cartão como dados (no PC)
+sudo mkfs.ext4 -L GIOCHI_USER /dev/sdX1
+```
 
-Agora o `scripts/post-build.sh` cria as quatro e escreve
-**`/user/LEIA-ME.txt`** — que é a mesma informação deste documento, **no
-aparelho**, para quem está com o cabo na mão e não vai ler o repositório.
+Se os dois cartões tiverem o rótulo, o `S20userdata` **prefere o do cartão do
+sistema** — nome de device não serve para decidir (`mmcblk0` num boot pode ser o
+cartão do sistema e no seguinte o de dados).
 
-`tests/pastas-do-usuario.test.mjs` roda o `post-build.sh` de verdade num alvo
-sintético e exige as quatro pastas, o symlink e o aviso no LEIA-ME. Verificado
-por mutação: sem o bloco, 1 pass / 2 fail.
+Um cartão **sem** o rótulo não é montado em `/user`: ele aparece em
+`/media/<LABEL>`, que é a convenção de mídia removível — assim "meu save" nunca
+se confunde com "o cartão do fulano".
+
+### O que acontece no primeiro boot com a partição vazia
+
+A p3 nasce formatada e **vazia**. Montar por cima do `/user` do rootfs esconderia
+o LEIA-ME e o que já estivesse lá — então o `S20userdata` guarda o conteúdo antes
+de montar e **migra** para a partição, mas só se ela estiver vazia. Se já tiver
+qualquer coisa (o save de um jogo), ele **não toca** e diz isso.
+
+## O aviso que continua valendo
+
+**Encher `/user` até o limite deixa o sistema sem espaço.** Com `--grow`, a p3
+ocupa o cartão quase todo, mas o sistema (p2) tem tamanho fixo: log, PID e `/tmp`
+moram nele. Se a p3 for formatada como o cartão inteiro, não há folga para nada.
+
+E o inverso, que é o que dói mais: **sem `--grow`, a p3 fica com 704 MiB**. Dá
+para um punhado de jogos, não para uma biblioteca.

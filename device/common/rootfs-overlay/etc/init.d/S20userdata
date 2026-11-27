@@ -1,0 +1,189 @@
+#!/bin/sh
+# giochi-system:help:begin
+# S20userdata — monta /user na partição de dados, e migra no primeiro boot.
+#
+# O problema que isto resolve: numa imagem recém-gravada, /user é um diretório
+# DENTRO do rootfs. Montar a partição de dados por cima esconde esse diretório —
+# e com ele o LEIA-ME, os jogos que o usuário já tinha posto e a pasta que o
+# launcher espera existir. Se nada for feito, o efeito de trocar de imagem é
+# "sumiu tudo", sem mensagem.
+#
+# O que este script faz, em ordem:
+#
+#   1. procura a partição de dados (rótulo GIOCHI_USER), com prioridade para a
+#      do MESMO cartão do rootfs;
+#   2. se o /user montado estiver vazio e o /user de baixo tiver conteúdo, move
+#      o conteúdo (migração do primeiro boot);
+#   3. garante as quatro pastas do contrato (games, apps, musica, ports);
+#   4. não faz nada — e DIZ isso — quando não há partição de dados.
+#
+# Por que o passo 2 existe: a partição nasce formatada e VAZIA no make-sd-image.
+# Sem a migração, quem tiver arquivos no /user do rootfs perde o acesso a eles
+# no momento em que a partição é montada pela primeira vez. Mover é mais seguro
+# que copiar: com cópia o espaço fica ocupado duas vezes (e o aparelho tem 1 GB).
+#
+# ## O segundo cartão
+#
+# Este aparelho tem dois controladores SD (medido no DTB: mmc@ff370000 e
+# mmc@ff380000 no RK3326; equivalentes no RK3566). Um cartão de dados no
+# SEGUNDO slot também serve: o critério é o rótulo, nunca o nome do device —
+# `mmcblk0` num boot pode ser o cartão do sistema e no boot seguinte o de dados.
+#
+# Ordem de preferência, e cada uma tem motivo:
+#   a) a p3 do cartão do rootfs   — sempre presente, cabe na imagem
+#   b) o segundo cartão com GIOCHI_USER — o que o usuário põe para ter espaço
+#   c) nada                        — /user fica no rootfs, como antes
+#
+# Um cartão de dados que NÃO tenha o rótulo não é montado em /user: ele é mídia
+# removível, e montá-lo ali confundiria "meu save" com "o cartão do fulano".
+# Ele aparece em /media/<LABEL>, que o app já conhece pelo pontos-de-montagem.
+# giochi-system:help:end
+
+set -u
+
+LABEL_PREFERIDO=GIOCHI_USER
+MNT=/user
+
+log() { echo "S20userdata: $*"; }
+
+# ── achar a partição de dados ──
+#
+# Lê o rótulo de cada partição por /dev/disk/by-label, sem `blkid` (que não está
+# na imagem) e sem `mount LABEL=` (que exige CONFIG_FEATURE_MOUNT_LABEL no
+# busybox — §12.28). O symlink em by-label é criado pelo mdev/devtmpfs e o
+# caminho existe nos dois casos.
+# Lista TODOS os candidatos e prefere o do cartão do sistema. Sem esta
+# preferência, com um segundo cartão também rotulado GIOCHI_USER a escolha
+# dependeria da ordem de probe — e `mmcblk0` num boot pode ser o cartão do
+# sistema e no seguinte o de dados (§12.24: nome de device não é identidade).
+achar_por_label() {
+    for tentativa in 1 2 3 4 5 6 7 8 9 10; do
+        encontrados=""
+        for alvo in /dev/disk/by-label/"$LABEL_PREFERIDO"*; do
+            [ -e "$alvo" ] || continue
+            real="$(readlink -f "$alvo" 2>/dev/null)" || continue
+            [ -n "$real" ] || continue
+            encontrados="$encontrados $real"
+        done
+        if [ -n "$encontrados" ]; then
+            # 1ª passada: o que está no MESMO cartão do rootfs.
+            for real in $encontrados; do
+                cartao="$(basename "$real" | sed 's/p\?[0-9]*$//')"
+                if [ -n "$ROOT_CARD" ] && [ "$cartao" = "$ROOT_CARD" ]; then
+                    echo "$real"
+                    return 0
+                fi
+            done
+            # 2ª passada: qualquer um (o segundo cartão).
+            for real in $encontrados; do
+                echo "$real"
+                return 0
+            done
+        fi
+        # A montagem do rootfs pode acontecer antes de o /dev estar completo.
+        sleep 1
+    done
+    return 1
+}
+
+# Descobre o cartão que sustenta o / para preferir a p3 DELE. Por major:minor,
+# que é o que o kernel usa e não depende de nome de node (§12.44: `/dev/root`
+# não existe como arquivo, e `readlink -f` de caminho inexistente devolve o
+# próprio caminho — a comparação ingênua passava sempre).
+dispositivo_do_root() {
+    linha="$(awk '$2 == "/" { print $1; exit }' /proc/self/mountinfo 2>/dev/null)"
+    [ -n "$linha" ] || return 1
+    MAJMIN="${linha%% *}"
+    [ -n "$MAJMIN" ] || return 1
+    dev="$(readlink -f "/sys/dev/block/$MAJMIN" 2>/dev/null)"
+    [ -n "$dev" ] || return 1
+    # .../mmcblk0/mmcblk0p2 -> mmcblk0 (o cartão, não a partição)
+    base="$(basename "$dev")"
+    case "$base" in
+        *p[0-9]*) echo "$base" | sed 's/p[0-9]*$//' ;;
+        *) echo "$base" | sed 's/[0-9]*$//' ;;
+    esac
+}
+
+ROOT_CARD="$(dispositivo_do_root 2>/dev/null || true)"
+
+DATA_DEV=""
+if CANDIDATO="$(achar_por_label)"; then
+    DATA_DEV="$CANDIDATO"
+    # O cartão dono da partição: `mmcblk0p3` -> `mmcblk0`, `sda3` -> `sda`.
+    CARTAO_DADOS="$(basename "$DATA_DEV" | sed 's/p\?[0-9]*$//')"
+    if [ -n "$ROOT_CARD" ] && [ "$CARTAO_DADOS" = "$ROOT_CARD" ]; then
+        log "dados: $DATA_DEV (mesmo cartão do sistema)"
+    elif [ -n "$ROOT_CARD" ]; then
+        log "dados: $DATA_DEV (segundo cartão — o do / é $ROOT_CARD)"
+    else
+        log "dados: $DATA_DEV"
+    fi
+fi
+
+if [ -z "$DATA_DEV" ]; then
+    log "sem partição de dados ($LABEL_PREFERIDO): /user continua no rootfs"
+    log "  ponha um segundo cartão com o rótulo $LABEL_PREFERIDO para separá-lo"
+    exit 0
+fi
+
+# ── montar ──
+#
+# Se já está montado (init anterior, ou o app montou), não mexe: desmontar o que
+# não se montou é o defeito do §12.28, e aqui derrubaria o usuário no meio.
+if mountpoint -q "$MNT" 2>/dev/null || grep -q " $MNT " /proc/mounts 2>/dev/null; then
+    log "$MNT já está montado — não mexo"
+else
+    mkdir -p "$MNT"
+    # Guarda o que está embaixo ANTES de montar por cima. Sem isso, a migração
+    # do primeiro boot não teria de onde ler.
+    if [ -d "$MNT" ] && [ -n "$(ls -A "$MNT" 2>/dev/null)" ]; then
+        mkdir -p /run/giochi
+        rm -rf /run/giochi/user-antes-da-montagem
+        cp -a "$MNT/." /run/giochi/user-antes-da-montagem/ 2>/dev/null || true
+        log "guardei o /user do rootfs em /run/giochi/user-antes-da-montagem"
+    fi
+
+    if ! mount -t ext4 "$DATA_DEV" "$MNT" 2>/dev/null; then
+        log "FALHOU montar $DATA_DEV em $MNT — /user fica no rootfs"
+        # Tentar de novo às cegas é pior: o /user do rootfs já está consistente.
+        exit 0
+    fi
+    log "$DATA_DEV montado em $MNT"
+fi
+
+# ── migrar no primeiro boot ──
+#
+# Critério: a partição está VAZIA e há conteúdo guardado de baixo. Se a
+# partição já tem qualquer coisa, não toco — pode ser o save de um jogo, e
+# sobrescrever seria perda de dado sem volta.
+GUARDADO=/run/giochi/user-antes-da-montagem
+if [ -d "$GUARDADO" ]; then
+    if [ -z "$(ls -A "$MNT" 2>/dev/null)" ]; then
+        log "primeiro boot: migrando o /user do rootfs para a partição de dados"
+        cp -a "$GUARDADO/." "$MNT/" 2>/dev/null || log "  aviso: cópia parcial"
+        # Só apaga depois de copiar; se a cópia falhou no meio, o original fica.
+        if [ -n "$(ls -A "$MNT" 2>/dev/null)" ]; then
+            rm -rf "$GUARDADO"
+            log "  migração concluída"
+        fi
+    else
+        log "partição de dados já tem conteúdo — não mexo (nada foi apagado)"
+    fi
+fi
+
+# ── as quatro pastas do contrato, em qualquer cartão ──
+#
+# Idempotente: `mkdir -p` não faz nada se já existem. É o que garante que
+# `/user/games` exista também num segundo cartão recém-formatado.
+for pasta in games apps musica ports; do
+    mkdir -p "$MNT/$pasta" 2>/dev/null || true
+done
+
+# /roms -> /user é criado pelo post-build DENTRO do rootfs; se a partição de
+# dados foi montada por cima, o link continua válido porque aponta para o
+# caminho, não para o inode. Conferir e recriar é barato e cobre imagem antiga.
+[ -e /roms ] || ln -sfn /user /roms 2>/dev/null || true
+
+log "pronto: $(df -h "$MNT" 2>/dev/null | awk 'NR==2 {print $2" total, "$4" livre"}')"
+exit 0

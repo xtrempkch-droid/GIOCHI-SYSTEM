@@ -295,6 +295,12 @@ udevadm settle 2>/dev/null || true
 # Só a ÚLTIMA partição (a que termina mais longe no disco), e só se for ext4:
 # crescer uma partição do meio exigiria mover as seguintes, que é a operação que
 # apaga dados.
+#
+# Com o layout de 26/11/2026 a última é a **p3, de dados do usuário** (rótulo
+# GIOCHI_USER) — que é justamente a que deve crescer. O rootfs (p2) fica do
+# tamanho exato da imagem e NUNCA cresce: sistema do tamanho da imagem, dados do
+# tamanho do cartão. Se a última for a p2 (imagem antiga, sem p3), o
+# comportamento de antes continua valendo.
 
 # Duas armadilhas medidas em 06/11/2026, as duas com o `sfdisk` deste host:
 #
@@ -355,7 +361,9 @@ cresce_ultima_particao() {
 
   local antes_gib
   antes_gib="$(blockdev --getsize64 "$part" 2>/dev/null | awk '{printf "%.1f", $1/1024/1024/1024}')"
-  echo "  crescendo $part (${antes_gib} GiB → o resto do cartão)..."
+  local rotulo
+  rotulo="$(blkid -o value -s LABEL "$part" 2>/dev/null || true)"
+  echo "  crescendo $part${rotulo:+ ($rotulo)} (${antes_gib} GiB → o resto do cartão)..."
 
   # `,+` = do início atual até o fim do disco, com o alinhamento do próprio
   # sfdisk. `--no-reread` porque a releitura é feita logo abaixo, com o

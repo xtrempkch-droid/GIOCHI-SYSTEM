@@ -151,7 +151,7 @@ o que foi medido, e deixar a decisão com quem responde pelo código.
 
 | Verificação | Resultado |
 | --- | --- |
-| `node tests/run-all.mjs` | **682/682 + 1 skip**, 73 arquivos (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, panel-diag 17, gamepad-virtual 12, selftest-contract 21, issues-vizinhos 6, portmaster 7, …) |
+| `node tests/run-all.mjs` | **689/689 + 1 skip**, 74 arquivos (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, panel-diag 17, gamepad-virtual 12, selftest-contract 21, issues-vizinhos 6, portmaster 7, …) |
 | `node scripts/validate-devices.mjs` | OK — 7 devices, 1 habilitado |
 | `node scripts/list-devices.mjs --github-matrix` | matriz com `qemu-aarch64` |
 | matriz com `--device powkiddy-x55 --allow-draft` | devolve **só** o X55 |
@@ -566,7 +566,7 @@ absoluto** do host — §12.40).
 
 ## 10. Testes
 
-`node tests/run-all.mjs` → **682/682 + 1 skip**, em **73 arquivos**. A tabela abaixo é uma
+`node tests/run-all.mjs` → **689/689 + 1 skip**, em **74 arquivos**. A tabela abaixo é uma
 seleção dos que prendem contratos de projeto; a lista completa é `ls tests/` e
 `tests/runner-coverage.test.mjs` **falha** se algum arquivo existir sem estar
 importado no `run-all.mjs` — foi assim que dois testes desta revisão quase
@@ -8124,3 +8124,89 @@ pass / 2 fail.
 O terceiro caso confere as pastas contra o **código do app** quando ele está na
 máquina, e **declara que não pode provar** quando não está (R10) — melhor que um
 `PASS` que não verificou nada.
+
+## 44. A partição de dados existe: `/user` sobrevive à regravação (26/11/2026)
+
+O §43 terminou com "`/user` não é partição separada, e regravar apaga". O dono do
+projeto perguntou o óbvio: *"não pode ser criada uma partição para o sistema e o
+user em partição separada, tipo home separado do sistema para preservar o
+usuário?"* — e o §3 registrava isso como pendência desde 06/11.
+
+**Podia, e agora existe.** O layout passou de duas para três partições:
+
+```text
+  64 MiB    p1  FAT32  256 MiB  GIOCHI_BOOT   Image, DTB, extlinux.conf
+ 320 MiB    p2  ext4  1024 MiB  GIOCHI        sistema — tamanho FIXO
+1344 MiB    p3  ext4  o resto  GIOCHI_USER   dados do usuário (= /user)
+```
+
+Verificado na `.img` gerada de verdade (`sfdisk -d`, e `file` no offset da p3
+devolvendo `ext4 … volume name "GIOCHI_USER"`):
+
+```text
+p1 : start=  131072 size= 524288 type=c, bootable     (64 MiB, 256 MiB)
+p2 : start=  655360 size=2097152 type=83              (320 MiB, 1024 MiB)
+p3 : start= 2752512 size=1441792 type=83              (1344 MiB, 704 MiB)
+```
+
+### O que faz isso resolver, e não só mudar de lugar
+
+A `.img` tem tamanho fixo (2 GiB, e o GitHub recusa asset ≥ 2 GiB). "O resto do
+cartão" não cabe num arquivo desse tamanho — a saída é **a partição de dados
+nascer com o que sobra da imagem e crescer na gravação**. E daí a decisão que
+faz o desenho fechar:
+
+| Antes | Agora |
+| --- | --- |
+| `--grow` crescia o **rootfs** (p2) | `--grow` cresce a **p3 de dados** |
+| regravar apagava tudo, jogos inclusive | regravar reescreve p1+p2; **a p3 sobrevive** |
+
+O `flash-sd.sh` já crescia "a última partição, pelo maior `start`" — a lógica
+estava certa para outra pergunta e passou a servir sem mudança. A mensagem é que
+faltava dizer qual: agora imprime o rótulo (`crescendo /dev/sdd3 (GIOCHI_USER)
+(0,7 GiB → o resto do cartão)`).
+
+**A p2 tem de ter tamanho FIXO** (`size=$(( ROOTFS_MIB * 2048 ))`, não "o
+resto"): com a p2 elástica não há espaço para a p3. `tests/userdata-particao.test.mjs`
+prende essa linha.
+
+### `S20userdata`: montar é a parte fácil, migrar é a que protege dado
+
+Montar a partição por cima do `/user` do rootfs **esconde** o que estava lá — o
+LEIA-ME, os jogos já copiados. E como a p3 nasce vazia, o primeiro boot é
+exatamente o momento em que esse conteúdo desapareceria. O script:
+
+1. procura a partição pelo **rótulo**, com preferência pelo cartão do sistema;
+2. guarda o `/user` de baixo em `/run/giochi/user-antes-da-montagem`;
+3. monta;
+4. migra o guardado **só se a partição estiver vazia**;
+5. garante as quatro pastas do contrato (vale também num segundo cartão novo).
+
+O passo 4 invertido seria perda de dado sem volta: sobrescrever o save de um
+jogo é pior que não migrar. `tests/userdata-particao.test.mjs` tem os dois casos,
+e a mutação confirma — migrar sempre dá 5 pass / 1 fail; não guardar antes de
+montar dá 4 pass / 2 fail.
+
+### O segundo cartão, que o dono do projeto pediu para não esquecer
+
+O aparelho tem dois controladores SD, e um cartão de dados no segundo slot também
+serve. O critério é o **rótulo**, nunca o nome do device (§12.24: `mmcblk0` num
+boot pode ser o cartão do sistema e no seguinte o de dados). Com os dois
+rotulados `GIOCHI_USER`, prefere o do cartão do sistema — sem essa regra a
+escolha dependeria da ordem de probe, que varia entre boots.
+
+Um cartão **sem** o rótulo não é montado em `/user`: ele é mídia removível, e
+montá-lo ali confundiria "meu save" com "o cartão do fulano". Aparece em
+`/media/<LABEL>`, que o `pontos-de-montagem` já declara.
+
+### Duas armadilhas do caminho, as duas minhas
+
+1. **`conv=sparse` é obrigatório ao gravar a p3 na `.img`.** Ext4 recém-formatado
+   é quase todo zero; sem ele, 704 MiB de zeros viram 704 MiB densos no disco do
+   CI e no `.gz` do release (que também não comprime o que já é zero). Medido:
+   `.img` de 2,0 GiB aparentes, **1,3 GiB em disco**.
+2. **O `mount` falso do teste lia `ext4` como origem.** `mount -t ext4 <src>
+   <dst>`: o parser tratava o argumento de `-t` como caminho, "montava" um
+   inexistente, apagava o destino e não copiava nada. O teste falhava pelo motivo
+   errado — e passou a passar quando corrigi o mock, não o script. É o §12.37 de
+   novo: a ferramenta respondeu, e a resposta não foi lida com desconfiança.

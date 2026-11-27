@@ -30,6 +30,12 @@ DEVICE_ID=""
 SIZE_MIB=2048
 BOOT_PART_MIB=256
 BOOT_PART_START_MIB=64
+# A partição de dados do usuário (`/user`) — a que sobrevive à regravação da
+# imagem. Número do dono do projeto: piso de 4 GiB **no cartão**, não na imagem.
+# Na imagem ela nasce pequena (o resto do que sobra) porque o arquivo publicado
+# tem limite de 2 GiB; quem a leva ao tamanho real é o `--grow` do `flash-sd.sh`
+# ou o primeiro boot (§ abaixo).
+DATA_PART_MIN_MIB=512
 
 usage() {
   awk '/^# giochi-system:help:begin$/ { dentro = 1; next }
@@ -161,10 +167,20 @@ fi
 # gravar e descobrir no aparelho.
 ROOTFS_BYTES="$(stat -c %s "$OUT_DIR/rootfs.ext4")"
 ROOTFS_MIB=$(( (ROOTFS_BYTES + 1024 * 1024 - 1) / 1024 / 1024 ))
-NEEDED_MIB=$(( BOOT_PART_START_MIB + BOOT_PART_MIB + ROOTFS_MIB + 32 ))
+NEEDED_MIB=$(( BOOT_PART_START_MIB + BOOT_PART_MIB + ROOTFS_MIB + DATA_PART_MIN_MIB + 32 ))
 if (( SIZE_MIB < NEEDED_MIB )); then
   echo "  imagem:  $SIZE_MIB MiB é pouco; usando $NEEDED_MIB MiB"
   SIZE_MIB="$NEEDED_MIB"
+fi
+
+# A p3 recebe TODO o resto da imagem: assim ela já nasce útil, e o `--grow`
+# depois a leva ao tamanho do cartão. O rootfs (p2) fica do tamanho exato dele e
+# NUNCA cresce — crescer o rootfs era o comportamento antigo, e é o oposto do
+# que se quer: sistema do tamanho da imagem, dados do tamanho do cartão.
+DATA_PART_MIB=$(( SIZE_MIB - BOOT_PART_START_MIB - BOOT_PART_MIB - ROOTFS_MIB ))
+if (( DATA_PART_MIB < DATA_PART_MIN_MIB )); then
+  echo "ERRO: sobraram $DATA_PART_MIB MiB para a partição de dados (mínimo $DATA_PART_MIN_MIB)." >&2
+  exit 2
 fi
 
 echo "Giochi System — imagem de cartão"
@@ -204,7 +220,8 @@ label-id: $DISK_ID
 unit: sectors
 
 start=$(( BOOT_PART_START_MIB * 2048 )), size=$(( BOOT_PART_MIB * 2048 )), type=c, bootable
-start=$(( (BOOT_PART_START_MIB + BOOT_PART_MIB) * 2048 )), type=83
+start=$(( (BOOT_PART_START_MIB + BOOT_PART_MIB) * 2048 )), size=$(( ROOTFS_MIB * 2048 )), type=83
+start=$(( (BOOT_PART_START_MIB + BOOT_PART_MIB + ROOTFS_MIB) * 2048 )), type=83
 EOF
 
 # Loop devices COM OFFSET, um por partição, em vez de `losetup -P`.
@@ -216,6 +233,9 @@ EOF
 BOOT_OFFSET=$(( BOOT_PART_START_MIB * 1024 * 1024 ))
 BOOT_SIZE=$(( BOOT_PART_MIB * 1024 * 1024 ))
 ROOT_OFFSET=$(( BOOT_OFFSET + BOOT_SIZE ))
+ROOT_SIZE=$(( ROOTFS_MIB * 1024 * 1024 ))
+DATA_OFFSET=$(( ROOT_OFFSET + ROOT_SIZE ))
+DATA_SIZE=$(( DATA_PART_MIB * 1024 * 1024 ))
 
 # Loop device é o caminho normal, mas não é o único. Docker instalado por snap
 # confina `losetup` mesmo com `--privileged`: o container vê /dev/loop-control e
@@ -239,7 +259,7 @@ if ! BOOT_LOOP="$(losetup -f --show --offset "$BOOT_OFFSET" --sizelimit "$BOOT_S
 fi
 
 if ((LOOP_MODE)); then
-  if ! ROOT_LOOP="$(losetup -f --show --offset "$ROOT_OFFSET" "$IMAGE" 2>/dev/null)"; then
+  if ! ROOT_LOOP="$(losetup -f --show --offset "$ROOT_OFFSET" --sizelimit "$ROOT_SIZE" "$IMAGE" 2>/dev/null)"; then
     losetup -d "$BOOT_LOOP" 2>/dev/null
     BOOT_LOOP=""
     LOOP_MODE=0
@@ -263,11 +283,29 @@ else
   mkfs.vfat -F 32 -n GIOCHI_BOOT "$BOOT_IMAGE" >/dev/null
 fi
 
+# ── a partição de dados do usuário (p3) ──
+#
+# Nasce formatada e VAZIA, com o rótulo GIOCHI_USER. Vazia de propósito: a
+# montagem em `/user` esconde o que estiver no rootfs naquele caminho, então a
+# imagem é gravada com o `/user` do rootfs já migrado pelo `S20userdata` no
+# primeiro boot (§ device/common/rootfs-overlay/etc/init.d/S20userdata).
+#
+# Formatada num ARQUIVO e copiada com `conv=sparse`, e não com um terceiro loop
+# device: o modo sem loop existe justamente para container confinado, e `mkfs`
+# em arquivo comum funciona nos dois. `conv=sparse` mantém a `.img` esparsa —
+# sem ele, 700 MiB de zeros viram 700 MiB de verdade no arquivo publicado.
+DATA_IMAGE="$WORK/data.ext4"
+truncate -s "${DATA_PART_MIB}M" "$DATA_IMAGE"
+mkfs.ext4 -q -L GIOCHI_USER -F "$DATA_IMAGE"
+echo "  p3:      GIOCHI_USER (${DATA_PART_MIB} MiB) — dados do usuário"
+
 # PARTUUID do MBR segue o formato <id-do-disco>-<numero>. O id é fixado no
 # sfdisk, então o valor é conhecido ANTES de formatar — não depende de blkid
 # nem de udev, e não muda entre builds.
 PARTUUID_P2="$(printf '%08x-02' "$DISK_ID")"
+PARTUUID_P3="$(printf '%08x-03' "$DISK_ID")"
 echo "  p2:      PARTUUID=$PARTUUID_P2"
+echo "  p3:      PARTUUID=$PARTUUID_P3 (monta em /user)"
 
 # A linha de comando vem do `kernelCmdline` do device.json — NÃO de um literal
 # aqui. Com um aparelho só isso era inofensivo; a partir do segundo, um literal
@@ -414,6 +452,18 @@ else
      conv=notrunc status=none
   sync
 fi
+
+# A p3 vai para o offset dela. `conv=sparse` porque o conteúdo é quase todo
+# zero (ext4 recém-formatado): sem ele a `.img` de 2 GiB viraria 2 GiB densos no
+# disco do CI, e o `.gz` do release não comprimiria o que já é zero.
+DATA_SEEK=$(( DATA_OFFSET / (4 * 1024 * 1024) ))
+if (( DATA_OFFSET % (4 * 1024 * 1024) != 0 )); then
+  echo "ERRO: offset da p3 ($DATA_OFFSET) não é múltiplo de 4 MiB." >&2
+  exit 2
+fi
+dd if="$DATA_IMAGE" of="$IMAGE" bs=4M seek="$DATA_SEEK" conv=notrunc,sparse status=none
+sync
+echo "  p3:      ext4 GIOCHI_USER gravada no offset $(( DATA_OFFSET / 1024 / 1024 )) MiB"
 
 sync
 if ((LOOP_MODE)); then
