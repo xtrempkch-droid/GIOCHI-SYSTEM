@@ -655,3 +655,76 @@ test("nenhum printf do script usa a extensao hexa (so octal)", () => {
         "linha(s) com hexa: " + JSON.stringify(culpadas.map(([n, l]) => n + ": " + l.trim())) +
         ". A extensao hexa nao e POSIX e o dash grava o texto literal.");
 });
+
+test("o crescimento roda ANTES do launcher (requisito do pedido)", () => {
+    // O pedido foi explícito: "quando for o primeiro boot, **antes de iniciar o
+    // launcher**, o sistema tem que detectar o disco e redimensionar".
+    //
+    // A ordem não é preferência: se o launcher subir primeiro, ele abre
+    // `/user` com 704 MiB e pode gravar cache/índice lá. Aí a partição muda de
+    // tamanho embaixo de um processo que já leu o superbloco.
+    const S = readFileSync(SCRIPT, "utf8");
+    assert.match(S, /crescer_particao_dados/,
+        "o script de userdata não cresce a partição");
+
+    // O `S20userdata` é chamado pelo rcS, em ordem alfabética. O `giochi-init`
+    // é linha de `respawn` no inittab, que o inittab coloca DEPOIS do rcS.
+    const postBuild = readFileSync(path.join(ROOT, "scripts/post-build.sh"), "utf8");
+    assert.match(postBuild, /ENTRADA='::respawn:\/usr\/bin\/giochi-init'/,
+        "a linha do giochi-init sumiu do post-build");
+
+    // A prova da ordem não é um comentário (comentário sai na primeira
+    // refatoração): é o `sed` que INSERE a linha depois do rcS. Se alguém trocar
+    // por `>>` incondicional ou por `/i` (antes), a ordem se perde e o launcher
+    // sobe com 704 MiB. Medido: o comentário "logo depois do rcS" fica DEPOIS
+    // da atribuição de ENTRADA, então procurar 400 chars acima dele (minha
+    // primeira versão) nunca achava.
+    // Comparação por PARTES, sem montar a string com barras escapadas.
+    //
+    // A linha tem `\\/` (barra escapada para o sed) e montar isso numa string
+    // JS a partir de um heredoc erra por uma camada de escape a cada tentativa —
+    // errou três vezes nesta sessão, e sempre apontando para o teste em vez do
+    // código. Verificando os pedaços, o que importa fica explícito: a inserção
+    // é `sed ... /a`, isto é, DEPOIS da linha que casa com o rcS.
+    const temSed = /sed -i\s+"/.test(postBuild);
+    assert.ok(temSed, "o post-build não usa mais `sed -i` para inserir no inittab");
+
+    const linhaSed = postBuild.split("\n").find((l) => l.includes("sed -i") && l.includes("rcS"));
+    assert.ok(linhaSed, "não achei a linha do sed que insere no inittab");
+
+    // A linha real é:  sed -i "/^::sysinit:\/etc\/init.d\/rcS\$/a $ENTRADA" ...
+    // Note o `\$`: procurar `rcS$` literal NÃO casa, porque no arquivo há uma
+    // barra entre o `rcS` e o `$` (escape do sed). Verificar a ORDEM dos dois
+    // pedaços evita depender de quantas barras existem.
+    const iAncora = linhaSed.indexOf("::sysinit:");
+    const iDepois = linhaSed.indexOf("/a $ENTRADA");
+    assert.ok(iAncora >= 0,
+        "o sed não ancora no `::sysinit:` do rcS: " + linhaSed.trim());
+    assert.ok(linhaSed.includes("rcS"),
+        "o sed não ancora na linha do rcS: " + linhaSed.trim());
+    assert.ok(iDepois > iAncora,
+        "não achei `/a $ENTRADA` DEPOIS do endereço do rcS: " + linhaSed.trim() +
+        ". Com `/i` (antes) ou `>>` no fim do arquivo, o giochi-init subiria " +
+        "antes do rcS — e é o rcS que chama o S20userdata, que cresce a p3. " +
+        "O launcher abriria /user com 704 MiB.");
+    assert.ok(!linhaSed.includes("/i $ENTRADA"),
+        "a inserção virou `/i` (antes da linha) — inverteria a ordem");
+
+    assert.match(S, /^#!\/bin\/sh/m, "S20userdata não é um init script");
+});
+
+test("o S20userdata roda antes de tudo que usa /user", () => {
+    // S20 vem antes de S3x/S4x/S5x: quando o USB de rede sobe (S30usbnet) ou o
+    // controle virtual (S52gamepad), /user já está montado e no tamanho final.
+    // Um SSH que chega durante o boot tem de ver o tamanho certo.
+    const dir = path.join(ROOT, "device/common/rootfs-overlay/etc/init.d");
+    const nomes = readFileSync(path.join(ROOT, "scripts/post-build.sh"), "utf8");
+    const lista = execFileSync("ls", [dir], { encoding: "utf8" }).split("\n").filter(Boolean).sort();
+    const iUserdata = lista.findIndex((n) => n === "S20userdata");
+    assert.ok(iUserdata >= 0, "S20userdata não está no overlay comum");
+    for (const depois of ["S30usbnet", "S52gamepad"]) {
+        const i = lista.indexOf(depois);
+        if (i < 0) continue;
+        assert.ok(i > iUserdata, depois + " roda antes de S20userdata — /user estaria no rootfs");
+    }
+});
