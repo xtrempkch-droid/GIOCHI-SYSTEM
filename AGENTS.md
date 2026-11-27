@@ -151,7 +151,7 @@ o que foi medido, e deixar a decisão com quem responde pelo código.
 
 | Verificação | Resultado |
 | --- | --- |
-| `node tests/run-all.mjs` | **679/679 + 1 skip**, 72 arquivos (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, panel-diag 17, gamepad-virtual 12, selftest-contract 21, issues-vizinhos 6, portmaster 7, …) |
+| `node tests/run-all.mjs` | **682/682 + 1 skip**, 73 arquivos (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, panel-diag 17, gamepad-virtual 12, selftest-contract 21, issues-vizinhos 6, portmaster 7, …) |
 | `node scripts/validate-devices.mjs` | OK — 7 devices, 1 habilitado |
 | `node scripts/list-devices.mjs --github-matrix` | matriz com `qemu-aarch64` |
 | matriz com `--device powkiddy-x55 --allow-draft` | devolve **só** o X55 |
@@ -566,7 +566,7 @@ absoluto** do host — §12.40).
 
 ## 10. Testes
 
-`node tests/run-all.mjs` → **679/679 + 1 skip**, em **72 arquivos**. A tabela abaixo é uma
+`node tests/run-all.mjs` → **682/682 + 1 skip**, em **73 arquivos**. A tabela abaixo é uma
 seleção dos que prendem contratos de projeto; a lista completa é `ls tests/` e
 `tests/runner-coverage.test.mjs` **falha** se algum arquivo existir sem estar
 importado no `run-all.mjs` — foi assim que dois testes desta revisão quase
@@ -8066,3 +8066,61 @@ mesmo dizendo que não criou; `gh issue list` em 1 s resolve a dúvida). Medido:
 **1 cópia em cada**, corpo íntegro (5,2 a 6,5 KB), **zero HTML**, link para o
 `main` já publicado antes de abrir (o `raw` respondeu 200 antes do primeiro
 `create`).
+
+## 43. As pastas que o usuário usa à mão — e que não existiam (26/11/2026)
+
+Pergunta do dono do projeto: *"quais as pastas principais para o usuário (jogos,
+música e aplicativos) caso ele queira pôr os arquivos sem a loja"*.
+
+A resposta certa saiu do **código do `Giochi app`** (§2-A: leitura), não de
+suposição. São quatro caminhos, e não há outros:
+
+| Pasta | Quem lê | Onde está escrito |
+| --- | --- | --- |
+| `/user/games` | o launcher | `main.rs`: "jogos de `/opt/giochi/games` e `/user/games`" |
+| `/user/apps` | o launcher | idem, "apps de `/opt/giochi/apps` e `/user/apps`" |
+| `/user/ports` | o `giochi-ports` | `PORTS_DIR=/user/ports` |
+| `/user/musica` | o app de música | `biblioteca.rs`: `NO_APARELHO = "/user/musica"` |
+
+Mais `/roms` → `/user`, que é o nome que o PortMaster espera (7 de 25 ports citam
+`/roms` literal).
+
+**E nenhuma delas existia.** Conferido nos três lugares: o `post-build.sh` só
+criava `/user`; o launcher não tem `create_dir_all` para elas; o app de música
+também não. O resultado é o pior tipo de defeito — o que parece culpa do usuário:
+copiar para `/user/musica/x.mp3` falha porque o diretório não existe, e o app
+responde *"a pasta /user/musica não existe"* como se fosse informação útil.
+
+O `post-build.sh` agora cria as quatro **vazias** (4 inodes) e escreve
+`/user/LEIA-ME.txt` com o mesmo conteúdo de `docs/pastas-do-usuario.md` — no
+aparelho, porque quem copia arquivo à mão está com o cabo na mão e não vai ler o
+repositório. É a §12.30 aplicada à documentação: a resposta tem de estar onde a
+pergunta aparece.
+
+### A consequência que precisa ser dita, e não é óbvia
+
+`/user` **não é partição separada** — a partição de dados (§3, pendente) não
+existe. Consequências medidas:
+
+| Situação | Espaço | Problema |
+| --- | --- | --- |
+| gravado **com** `--grow` | o cartão quase todo (medido: `p2` de 1,7 → **115,8 GiB** num cartão de 116) | tudo divide o **mesmo** filesystem |
+| gravado **sem** `--grow` | ~1,0 GiB de rootfs | "pôr os arquivos à mão" esbarra no tamanho |
+
+Duas armadilhas de produto que saem daí:
+
+1. **`--grow` é obrigatório** para quem quer usar o aparelho sem a loja;
+2. com `--grow`, encher `/user` até o limite deixa o sistema **sem espaço para
+   log, PID e `/tmp`** — e o sintoma não é "disco cheio", é o aparelho travando
+   de formas estranhas.
+
+As duas estão no LEIA-ME e no doc, e o teste exige que o aviso esteja lá.
+
+`tests/pastas-do-usuario.test.mjs` (3 casos) roda o `post-build.sh` **de
+verdade** num `TARGET_DIR` sintético — não lê o texto — porque o modo de falha
+aqui é o comando não rodar (§12.59/1). Verificado por mutação: sem o bloco, 1
+pass / 2 fail.
+
+O terceiro caso confere as pastas contra o **código do app** quando ele está na
+máquina, e **declara que não pode provar** quando não está (R10) — melhor que um
+`PASS` que não verificou nada.

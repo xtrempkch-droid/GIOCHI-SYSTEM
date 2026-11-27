@@ -76,4 +76,5 @@ import "./release-e-gz.test.mjs";
 import "./portmaster.test.mjs";
 import "./ppsspp.test.mjs";
 import "./regras-equipes.test.mjs";
+import "./pastas-do-usuario.test.mjs";
 import "./portmaster-runtime.test.mjs";

@@ -325,6 +325,50 @@ mkdir -p "$TARGET_DIR/user"
 ln -sfn /user "$TARGET_DIR/roms"
 echo "post-build: /user criado e /roms -> /user (caminho que o PortMaster espera)"
 
+# ── as quatro pastas que o usuário usa à mão ──
+#
+# Quem não usa a loja copia arquivo pelo cartão ou por SSH, e precisa saber onde.
+# Medido nos fontes do `Giochi app` (26/11/2026) — são estes os caminhos que ele
+# varre, e não há outros:
+#
+#   /user/games    jogos    (launcher: "jogos de /opt/giochi/games e /user/games")
+#   /user/apps     apps     (launcher: "apps de /opt/giochi/apps e /user/apps")
+#   /user/ports    ports    (giochi-ports: PORTS_DIR=/user/ports)
+#   /user/musica   música   (app/musica: NO_APARELHO = "/user/musica")
+#
+# **Nenhum dos dois lados criava estas pastas** — nem o build, nem o launcher,
+# nem o app de música (conferido: não há um `create_dir_all` para elas). O
+# resultado seria o pior tipo de defeito: a pasta não existe, copiar um arquivo
+# para dentro falha, e o app diz "a pasta /user/musica não existe" como se fosse
+# problema do usuário. Criar vazias custa 4 inodes e faz o caminho existir antes
+# de alguém precisar dele.
+#
+# O LEIA-ME é o que resolve a pergunta "onde eu ponho meus arquivos?" **no
+# aparelho**, sem SSH e sem documentação: quem copia arquivo à mão vê esta pasta.
+for pasta in games apps musica ports; do
+  mkdir -p "$TARGET_DIR/user/$pasta"
+done
+cat > "$TARGET_DIR/user/LEIA-ME.txt" <<'LEIAME'
+Giochi — pastas do usuário
+==========================
+
+Você pode copiar arquivos para cá por SSH (root@10.55.0.2) ou tirando o cartão.
+Não precisa da loja para nada do que está abaixo.
+
+  games/    jogos. O launcher mostra o que estiver aqui.
+  apps/     aplicativos avulsos (um diretório por app).
+  musica/   músicas. O app de música lê esta pasta.
+  ports/    ports do PortMaster. Ele instala em ports/PortMaster.
+
+/roms aponta para cá: é o nome que o PortMaster espera.
+
+ATENÇÃO — isto NÃO é uma partição separada:
+  estas pastas vivem dentro do sistema, que ocupa o cartão inteiro quando a
+  imagem é gravada com --grow. Regravar a imagem APAGA o conteúdo daqui.
+  Faça backup do que não quiser perder.
+LEIAME
+echo "post-build: /user/{games,apps,musica,ports} criados com LEIA-ME"
+
 # ── script de init sem +x é serviço que não sobe, em silêncio ──
 #
 # `rcS` e `rcK` chamam cada `/etc/init.d/S??*` como `$i start` / `$i stop`.
