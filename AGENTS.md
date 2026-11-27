@@ -8205,7 +8205,14 @@ montá-lo ali confundiria "meu save" com "o cartão do fulano". Aparece em
    é quase todo zero; sem ele, 704 MiB de zeros viram 704 MiB densos no disco do
    CI e no `.gz` do release (que também não comprime o que já é zero). Medido:
    `.img` de 2,0 GiB aparentes, **1,3 GiB em disco**.
-2. **O `mount` falso do teste lia `ext4` como origem.** `mount -t ext4 <src>
+2. **"loop: falhou no segundo device" pode ser loop PRESO, não bug.** A primeira
+   geração da `.img` com a p3 caiu no modo sem loop ("falhou no segundo device"),
+   e a segunda, idêntica, usou `/dev/loop26` e `/dev/loop46` normalmente. Não é
+   regressão do `--sizelimit` novo: reproduzi os dois `losetup` isolados na
+   imagem `giochi-builder:2` e ambos devolveram device. Se aparecer, rode de
+   novo antes de investigar — e note que o **modo sem loop gera a mesma imagem**
+   (verificado com `sfdisk -d` nos dois), o que é o desenho do plano B do §13-A.
+3. **O `mount` falso do teste lia `ext4` como origem.** `mount -t ext4 <src>
    <dst>`: o parser tratava o argumento de `-t` como caminho, "montava" um
    inexistente, apagava o destino e não copiava nada. O teste falhava pelo motivo
    errado — e passou a passar quando corrigi o mock, não o script. É o §12.37 de
