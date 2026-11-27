@@ -1,0 +1,58 @@
+#!/bin/sh
+# giochi-system:help:begin
+# S09bootpart — monta a partição de boot em /boot, todo boot.
+#
+# Roda ANTES do S10bootlog de propósito: aquele já sabe reaproveitar um vfat
+# montado com `extlinux.conf`/`boot.scr` (está no `mount_boot` dele), então
+# passamos a montar uma vez só, aqui, e o log aproveita.
+#
+# ## Por que isto existe
+#
+# A p1 (`GIOCHI_BOOT`) não estava no `fstab` nem montada em lugar nenhum. Quem
+# precisava dela montava por conta própria — o `giochi-bootlog` montava em
+# `/mnt/bootlog`, e o `Giochi app` montava a dele. Resultado: três caminhos, e
+# nenhum fixo. A equipe do app registrou isso como pendência (`cartao-sd.md`,
+# item 2: "se eles montarem num caminho fixo, o app para de montar").
+#
+# O caminho fixo é **/boot**, e é o convencional.
+#
+# ## O que isto NÃO resolve, e é medido
+#
+# **Mídia removível inserida depois do boot não é montada** — nem aqui nem em
+# lugar nenhum desta imagem. Motivo: `CONFIG_UEVENT_HELPER` está DESLIGADO no
+# kernel (`# CONFIG_UEVENT_HELPER is not set`, medido no `.config` do 6.12 dos
+# três aparelhos), então o kernel não chama `/sbin/mdev` quando um device
+# aparece. Com devtmpfs, os nodes nascem sozinhos, mas ninguém é notificado.
+#
+# Automount exigiria uma de três coisas, e nenhuma é barata:
+#   1. `CONFIG_UEVENT_HELPER=y` — rebuild de kernel, em todos os aparelhos;
+#   2. um daemon com poll em `/sys/class/block` — processo residente em 1 GB;
+#   3. netlink uevent — precisa de biblioteca, não tem no busybox.
+#
+# A p1 é diferente: ela já existe quando o boot chega aqui. Montar no boot é
+# barato e determinístico; montar na inserção é que não é.
+# giochi-system:help:end
+
+set -u
+
+[ -r /usr/lib/giochi/discos.sh ] || exit 0
+. /usr/lib/giochi/discos.sh
+
+# Já montado por alguém? Não mexe.
+if mountpoint -q /boot 2>/dev/null || grep -q " /boot " /proc/mounts 2>/dev/null; then
+    echo "S09bootpart: /boot já está montado"
+    exit 0
+fi
+
+if PONTO="$(giochi_montar_boot /boot)"; then
+    echo "S09bootpart: partição de boot montada em $PONTO"
+    # Informação útil para quem depura pela serial, e barata.
+    [ -f "$PONTO/giochi-boot.log" ] && \
+        echo "S09bootpart:   giochi-boot.log presente ($(wc -l < "$PONTO/giochi-boot.log" 2>/dev/null || echo 0) linhas)"
+else
+    # Não é erro: um aparelho sem o cartão de boot reconhecível continua
+    # bootando, porque o kernel já carregou. Só não há /boot para ler.
+    echo "S09bootpart: sem partição de boot reconhecível — /boot fica vazio"
+fi
+
+exit 0

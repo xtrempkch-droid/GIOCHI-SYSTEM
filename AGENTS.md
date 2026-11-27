@@ -151,7 +151,7 @@ o que foi medido, e deixar a decisão com quem responde pelo código.
 
 | Verificação | Resultado |
 | --- | --- |
-| `node tests/run-all.mjs` | **690/690 + 1 skip**, 74 arquivos (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, panel-diag 17, gamepad-virtual 12, selftest-contract 21, issues-vizinhos 6, portmaster 7, …) |
+| `node tests/run-all.mjs` | **696/696 + 1 skip**, 75 arquivos (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, panel-diag 17, gamepad-virtual 12, selftest-contract 21, issues-vizinhos 6, portmaster 7, …) |
 | `node scripts/validate-devices.mjs` | OK — 7 devices, 1 habilitado |
 | `node scripts/list-devices.mjs --github-matrix` | matriz com `qemu-aarch64` |
 | matriz com `--device powkiddy-x55 --allow-draft` | devolve **só** o X55 |
@@ -566,7 +566,7 @@ absoluto** do host — §12.40).
 
 ## 10. Testes
 
-`node tests/run-all.mjs` → **690/690 + 1 skip**, em **74 arquivos**. A tabela abaixo é uma
+`node tests/run-all.mjs` → **696/696 + 1 skip**, em **75 arquivos**. A tabela abaixo é uma
 seleção dos que prendem contratos de projeto; a lista completa é `ls tests/` e
 `tests/runner-coverage.test.mjs` **falha** se algum arquivo existir sem estar
 importado no `run-all.mjs` — foi assim que dois testes desta revisão quase
@@ -8260,3 +8260,82 @@ se a p3 precisar nascer maior.
    inexistente, apagava o destino e não copiava nada. O teste falhava pelo motivo
    errado — e passou a passar quando corrigi o mock, não o script. É o §12.37 de
    novo: a ferramenta respondeu, e a resposta não foi lida com desconfiança.
+
+## 45. Os dois itens que a issue do app deixou em aberto: um é nosso, o outro não tem como ser (26/11/2026)
+
+Depois de avisar a equipe do app sobre a partição de dados (issue `#8`), ficaram
+dois itens da tabela deles em aberto. A pergunta era "quem resolve", e a resposta
+mudou de dono conforme a medição.
+
+### Item 2 — montar `GIOCHI_BOOT` no boot: **era nosso, e está feito**
+
+A p1 não estava no `fstab` nem montada em lugar nenhum. Quem precisava dela
+montava por conta própria, e cada um num caminho:
+
+| Quem | Onde montava |
+| --- | --- |
+| `giochi-bootlog` | `/mnt/bootlog` |
+| o `Giochi app` | `/mnt/cartao<N>` |
+
+Três caminhos, nenhum fixo. Agora existe **`/boot`**, montado pelo
+`S09bootpart` — que roda **antes** do `S10bootlog` de propósito, para que aquele
+reaproveite (o `mount_boot` dele já reconhece um vfat montado pelo marcador de
+conteúdo; não foi preciso mudar uma linha dele).
+
+A técnica virou uma **função compartilhada**, `usr/lib/giochi/discos.sh`, porque
+estava em espírito duplicada nos dois scripts — e duas cópias divergem na
+primeira correção (§12.49).
+
+Quatro detalhes que o teste prende, e três deles só apareceram no teste:
+
+1. **A partição preferida é a do CARTÃO QUE BOOTOU**, não a `mmcblk1p1`. Medido
+   no X35H: a eMMC interna pode ter um `extlinux/` de **outra** instalação.
+2. **O `mountinfo` tem DOIS campos `/`** (root e mount point), e o `awk` casa com
+   o **segundo** — `$5`, não `$4`. Meu primeiro arquivo de teste tinha só um, e
+   o script caía na lista genérica.
+3. **Validar por conteúdo, e descartar a que não serve.** A primeira versão da
+   mutação "monta o primeiro que der certo" **passou** no teste: com a
+   preferência funcionando, o primeiro era sempre o certo. Faltava o caso em que
+   a preferida **não tem** o marcador (eMMC sem sistema, p1 recém-formatada) — e
+   é justamente aí que `/boot` ficaria vazio com a partição certa ao lado.
+4. **`replaceAll`, não `replace`**: o `S09` cita o caminho do lib **duas** vezes
+   (`[ -r ... ]` e `. ...`), e trocar só a primeira faz o script falhar em
+   `.: cannot open`.
+
+### Item 3 — automount de mídia removível: **não é nosso, e não há como sem rebuild**
+
+Medido no `.config` do kernel 6.12 dos três aparelhos:
+
+```text
+CONFIG_DEVTMPFS=y
+CONFIG_DEVTMPFS_MOUNT=y
+# CONFIG_UEVENT_HELPER is not set      ← este
+```
+
+Sem `UEVENT_HELPER`, o kernel **não chama** `/sbin/mdev` quando um device
+aparece. O devtmpfs cria os nodes sozinho — e ninguém é notificado da inserção.
+`/etc/mdev.conf` não existe, e criá-lo não mudaria nada: não há quem o leia.
+
+As três saídas, e nenhuma é barata num aparelho de 1 GB:
+
+| Saída | Custo |
+| --- | --- |
+| `CONFIG_UEVENT_HELPER=y` | rebuild de kernel nos três aparelhos |
+| daemon com poll em `/sys/class/block` | processo residente, e o poll acorda a CPU |
+| netlink uevent | precisa de biblioteca; o busybox não tem |
+
+**Conclusão, e é o que a issue diz:** automount de mídia removível continua
+sendo do **app**, com o `mdev`-free `/mnt/cartao<N>` que ele já faz. O que o
+sistema garante é o `/boot` (no boot, determinístico) e o `/user` (por rótulo,
+idempotente). Montar na **inserção** é que não é possível.
+
+O que faz disso um §12 é o formato do defeito evitado: sem esta medição, a
+resposta natural seria "vou implementar o automount" — e três horas depois
+descobriria que o kernel não chama ninguém. A regra R5 do
+[`docs/regras-para-outras-equipes.md`](docs/regras-para-outras-equipes.md) na
+letra: "não existe" e "existe desligado" dão o mesmo sintoma, e a diferença muda
+a correção de uma linha para um rebuild.
+
+`tests/bootpart-fixa.test.mjs` (6 casos) prende as duas metades: o `/boot` monta
+e escolhe certo, e o `UEVENT_HELPER` continua desligado — se alguém o ligar, o
+teste avisa que a issue do app precisa ser atualizada.

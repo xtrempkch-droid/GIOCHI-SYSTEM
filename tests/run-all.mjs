@@ -78,4 +78,5 @@ import "./ppsspp.test.mjs";
 import "./regras-equipes.test.mjs";
 import "./pastas-do-usuario.test.mjs";
 import "./userdata-particao.test.mjs";
+import "./bootpart-fixa.test.mjs";
 import "./portmaster-runtime.test.mjs";
