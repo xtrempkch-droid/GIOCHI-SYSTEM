@@ -88,6 +88,31 @@ E o custo dessa escolha, dito na frente: **em exFAT todo arquivo é 0777**. Num
 aparelho onde todo processo roda como root isso não abre nada que já não
 estivesse aberto; quem quiser permissão de verdade usa `--user-fs ext4`.
 
+### Um aviso sobre Windows: nem toda versão mostra todas as partições
+
+**Não medido aqui** (não há Windows nesta máquina) — mas é a primeira coisa a
+conferir se a pasta não aparecer no Explorer: **o Windows nem sempre atribui
+letra a todas as partições de uma mídia removível**. Ele mostra a primeira; o
+resto pode ficar invisível sem nenhuma mensagem.
+
+A p1 (`GIOCHI_BOOT`, FAT32, 256 MiB) é a primeira e sempre aparece. Se a p3 não
+aparecer, confira em **Gerenciamento de Disco** (`diskmgmt.msc`) — se ela estiver
+lá com o rótulo `GIOCHI_USER`, o cartão está certo e o problema é só de letra de
+unidade; "Alterar letra da unidade" resolve.
+
+Se nenhuma versão do Windows mostrar, os dois caminhos que funcionam sempre:
+
+```bash
+# pelo cabo, sem tirar o cartão (o mesmo cabo que carrega)
+scp -r MeuJogo/   root@10.55.0.2:/user/games/
+scp   musica.mp3  root@10.55.0.2:/user/musica/
+```
+
+```bash
+# ou pelo Linux, montando a p3
+sudo mount /dev/sdX3 /mnt
+```
+
 ### O segundo cartão
 
 Um cartão de dados no **segundo slot** também é montado em `/user`, e o critério
