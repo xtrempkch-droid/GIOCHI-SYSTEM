@@ -151,7 +151,7 @@ o que foi medido, e deixar a decisão com quem responde pelo código.
 
 | Verificação | Resultado |
 | --- | --- |
-| `node tests/run-all.mjs` | **668/668 + 1 skip**, 72 arquivos (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, panel-diag 17, gamepad-virtual 12, selftest-contract 21, issues-vizinhos 5, portmaster 7, …) |
+| `node tests/run-all.mjs` | **673/673 + 1 skip**, 72 arquivos (host-compat 6, dongle 7, buttons-map, cmdline, bootlog, base-system, boot-layer, launcher-deps, panel-diag 17, gamepad-virtual 12, selftest-contract 21, issues-vizinhos 5, portmaster 7, …) |
 | `node scripts/validate-devices.mjs` | OK — 7 devices, 1 habilitado |
 | `node scripts/list-devices.mjs --github-matrix` | matriz com `qemu-aarch64` |
 | matriz com `--device powkiddy-x55 --allow-draft` | devolve **só** o X55 |
@@ -566,7 +566,7 @@ absoluto** do host — §12.40).
 
 ## 10. Testes
 
-`node tests/run-all.mjs` → **668/668 + 1 skip**, em **72 arquivos**. A tabela abaixo é uma
+`node tests/run-all.mjs` → **673/673 + 1 skip**, em **72 arquivos**. A tabela abaixo é uma
 seleção dos que prendem contratos de projeto; a lista completa é `ls tests/` e
 `tests/runner-coverage.test.mjs` **falha** se algum arquivo existir sem estar
 importado no `run-all.mjs` — foi assim que dois testes desta revisão quase
@@ -7897,3 +7897,91 @@ Duas lições de construção do teste, as duas medidas:
 
 Verificado por mutação: apagando os dois `ASSERT_FRAGMENTS+=` dá **20 pass / 1
 fail** com os nomes e a consequência; com eles, **21/21**.
+
+## 41. PPSSPP: não existe suporte, e o bloqueio é licença antes de ser hardware (26/11/2026)
+
+Pergunta do dono do projeto. A resposta honesta é **não existe**, em nenhum
+sentido, e a medição mostra **três buracos independentes**:
+
+```console
+$ grep -rin "ppsspp\|psp" --include="*.md" --include="*.sh" ... .
+(nada)
+$ ls -d $BR2/package/ppsspp $BR2/package/libretro-ppsspp
+(nenhum dos dois)
+$ gh api /repos/PortsMaster/PortMaster-New/contents/ports --jq length   -> 1000
+$ ... | grep -i psp                                                     -> nenhum
+```
+
+Não há linha de configuração, não há pacote no Buildroot 2025.02, e **não é um
+"port"**: entre os 1000 do PortMaster não existe PSP. Ou seja, não adianta
+habilitar símbolo no `defconfig` — não há símbolo. Quem quiser PPSSPP tem de
+**trazer o pacote**.
+
+### O bloqueio é GPL, e vem antes da pergunta técnica
+
+`LICENSE.TXT` do repositório oficial, linhas 328-329:
+
+```text
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 2 of the License, or
+    (at your option) any later version.
+```
+
+E a receita do ROCKNIX confirma de forma independente:
+`PKG_LICENSE="GPL-2.0-or-later"`.
+
+Pela regra do §15 — GPL/AGPL/LGPL fora da imagem assinada — **PPSSPP não entra na
+imagem**, exatamente como o `gptokeyb2` do PortMaster (§32) e o `libmali` (§15).
+As três perguntas separadas, de novo:
+
+| Pergunta | Resposta |
+| --- | --- |
+| dá para **embarcar**? | **não** (GPL-2.0-or-later) |
+| dá para **instalar** em `/user`? | **sim** — é app de loja |
+| dá para **rodar** neste hardware? | **não medido** |
+
+### O que a árvore já tem, medido
+
+O AppImage oficial aarch64 existe (`v1.20.4`, 46,3 MB), e as bibliotecas estão no
+`target/` do R35S: `libSDL2-2.0.so.0`, `libEGL.so`, `libGLESv2.so`,
+`libpng16.so`, `libfreetype.so`. Faltam `libzip` e `zlib` ligados (os pacotes
+existem no Buildroot).
+
+E o backend gráfico fecha: o `Common/GPU/OpenGL/GLFeatures.cpp` do PPSSPP trata
+`GLES3` e escolhe GLSL por versão de **3.0 a 3.3**; o panfrost entrega **GLES 3.1
++ GLSL ES 3.10** (medido no R35S em 06/11). Compatível, e **sem geometry shader** —
+que o PPSSPP não usa.
+
+### O defeito latente que a pergunta revelou
+
+`CONFIG_FUSE_FS` é **`=m`** nos três aparelhos, e **nenhum tem autoload**: o
+`S15modules` não está no overlay comum e o R35S não declara um. Consequência que
+vale além do PPSSPP: **nenhum AppImage roda em aparelho nenhum desta árvore**, e
+o sintoma (`fusermount: fuse device not found`) não aponta para o kernel. É o
+§12.43/§12.51 na terceira roupa — módulo no disco, ninguém o carrega.
+
+Não apliquei `CONFIG_FUSE_FS=y` ainda: seria decidir o caminho A (AppImage) por
+tabela. O caminho B (compilar do fonte, como o ROCKNIX faz com
+`libzip SDL2 zlib` e `-DUSING_GLES2=ON`) **não precisa de FUSE**. A escolha vem
+antes da correção, e ela depende da medição de fps.
+
+### O que ninguém mediu, e é o que decide
+
+| Aparelho | CPU | GPU | RAM |
+| --- | --- | --- | --- |
+| **R35S** | RK3326, 4× Cortex-**A35** @1,3 GHz | Mali-G31 MP2 | 981 MiB |
+| X55 / X35H | RK3566, 4× Cortex-**A55** | Mali-G52 MP2 | ~2 GB |
+
+O R35S é o pior caso. O benchmark de 08/11 (§12.63) mediu o G31 a **192 Mpix/s**
+de fill contra **260** do G52, e a CPU A35 é bem mais fraca que a A55. A
+comunidade relata 10-30 fps em jogos leves num A35 — **mas isso não é medido
+aqui**, e o documento diz isso na primeira linha em vez de prometer número.
+
+`docs/evaluacao-ppsspp.md` registra tudo, e `tests/ppsspp.test.mjs` (5 casos)
+prende os fatos: nenhuma configuração cita PPSSPP (GPL na imagem), o doc declara
+a licença **com a fonte** (`LICENSE.TXT` + `PKG_LICENSE` do ROCKNIX, não "é GPL"
+de memória), marca explicitamente o que não foi medido, e mantém o FUSE
+registrado como pendência com o sintoma.
+
+Verificado por mutação: um `BR2_PACKAGE_PPSSPP=y` num fragmento dá 4 pass / 1
+fail nomeando a regra; apagar a declaração de "não medido" do doc também.
